@@ -1,4 +1,4 @@
-from pathlib import Path
+﻿from pathlib import Path
 
 from docx import Document
 from docx.enum.section import WD_SECTION
@@ -12,8 +12,8 @@ from docx.shared import Cm, Pt, RGBColor
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "deliverables"
 
-PROJECT = "湖大智行 CampusMind"
-ORG = "湖大智行项目组"
+PROJECT = "智行 CampusMind"
+ORG = "智行项目组"
 DATE = "2026年5月"
 
 
@@ -175,7 +175,7 @@ def save_doc(doc, filename):
 def target_scope_doc():
     doc = Document()
     style_doc(doc, "系统目标与范围说明书")
-    add_cover(doc, "系统目标与范围说明书", "湖大智行 CampusMind")
+    add_cover(doc, "系统目标与范围说明书", "智行 CampusMind")
     add_toc(doc, ["1. 项目名称", "2. 开发背景", "3. 项目目标", "4. 项目范围", "4.1 范围内功能", "4.2 范围外功能", "5. 初步设想"])
 
     doc.add_heading("1. 项目名称", 1)
@@ -218,13 +218,13 @@ def target_scope_doc():
     doc.add_heading("5. 初步设想", 1)
     add_para(doc, "系统采用前后端分离架构。前端使用 Vue 3 + Vite 构建地图、建筑详情、聊天、课程表和后台页面；后端使用 FastAPI 提供 REST API 与 WebSocket 服务；数据库首期采用 SQLite，后续预留 MySQL 迁移空间。")
     add_para(doc, "第一阶段重点完成“登录 -> 校园地图 -> 建筑详情 -> 建筑聊天室 -> 定位发言 -> 课程表 -> 出发建议”的闭环。后续可扩展食堂排队信息、图书馆座位状态、校园活动聚合、统一身份认证、真实地图服务和更精细化提醒。")
-    return save_doc(doc, "01_湖大智行_系统目标与范围说明书.docx")
+    return save_doc(doc, "01_智行_系统目标与范围说明书.docx")
 
 
 def feasibility_doc():
     doc = Document()
     style_doc(doc, "可行性研究报告")
-    add_cover(doc, "可行性研究报告", "湖大智行 CampusMind")
+    add_cover(doc, "可行性研究报告", "智行 CampusMind")
     add_toc(doc, [
         "1．引言", "1.1 编写目的", "1.2 项目背景", "1.3 定义", "1.4 参考资料",
         "2．可行性研究的前提", "3．对现有系统的分析", "4．所建议技术可行性分析",
@@ -233,7 +233,7 @@ def feasibility_doc():
 
     doc.add_heading("1．引言", 1)
     doc.add_heading("1.1 编写目的", 2)
-    add_para(doc, "本文用于分析湖大智行 CampusMind 的建设必要性、技术可行性、经济可行性、社会可行性和实施风险，为课程设计立项、开发范围确认和后续迭代提供依据。")
+    add_para(doc, "本文用于分析智行 CampusMind 的建设必要性、技术可行性、经济可行性、社会可行性和实施风险，为课程设计立项、开发范围确认和后续迭代提供依据。")
     doc.add_heading("1.2 项目背景", 2)
     add_para(doc, "校园学习生活具有强空间属性，学生经常需要在多个建筑之间切换，并依赖即时信息判断出发时间、地点状态和课程安排。传统信息渠道分散，不能围绕建筑和时间形成统一服务入口。")
     doc.add_heading("1.3 定义", 2)
@@ -245,10 +245,10 @@ def feasibility_doc():
     ], [3.2, 10.8])
     doc.add_heading("1.4 参考资料", 2)
     add_numbers(doc, [
-        "《湖大智行 CampusMind 项目概述》",
-        "《湖大智行 CampusMind 需求分析说明书》",
-        "《湖大智行 CampusMind 系统架构设计》",
-        "《湖大智行 CampusMind 数据库设计》",
+        "《智行 CampusMind 项目概述》",
+        "《智行 CampusMind 需求分析说明书》",
+        "《智行 CampusMind 系统架构设计》",
+        "《智行 CampusMind 数据库设计》",
         "课程提供的软件工程可行性研究报告模板与案例资料"
     ])
 
@@ -355,19 +355,19 @@ def feasibility_doc():
     doc.add_heading("7．其他可供选择的方案", 1)
     add_para(doc, "可选方案包括直接使用商业地图平台、开发原生 App 或仅做课程表工具。相比之下，本项目的 Web + 卡通地图方案开发成本更低、演示更直观，也更适合课程周期。")
     doc.add_heading("8．结论意见", 1)
-    add_para(doc, "综合业务需求、技术成熟度、经济投入、社会影响和实施风险，湖大智行 CampusMind 具备开发可行性。建议按 MVP 范围推进，优先完成核心闭环，再逐步扩展实时聊天、举报处理、统一身份认证和更多校园服务。")
-    return save_doc(doc, "02_湖大智行_可行性研究报告.docx")
+    add_para(doc, "综合业务需求、技术成熟度、经济投入、社会影响和实施风险，智行 CampusMind 具备开发可行性。建议按 MVP 范围推进，优先完成核心闭环，再逐步扩展实时聊天、举报处理、统一身份认证和更多校园服务。")
+    return save_doc(doc, "02_智行_可行性研究报告.docx")
 
 
 def requirements_doc():
     doc = Document()
     style_doc(doc, "软件需求规格说明书")
-    add_cover(doc, "软件需求规格说明书", "湖大智行 CampusMind")
+    add_cover(doc, "软件需求规格说明书", "智行 CampusMind")
     add_toc(doc, ["1. 引言", "2. 总体描述", "3. 功能需求", "4. 非功能需求", "5. 数据需求", "6. 接口需求", "7. 验收标准"])
 
     doc.add_heading("1. 引言", 1)
     doc.add_heading("1.1 编写目的", 2)
-    add_para(doc, "本文档用于明确湖大智行 CampusMind 的功能需求、非功能需求、数据需求、接口需求和验收约束，为后续设计、编码、测试和验收提供依据。")
+    add_para(doc, "本文档用于明确智行 CampusMind 的功能需求、非功能需求、数据需求、接口需求和验收约束，为后续设计、编码、测试和验收提供依据。")
     doc.add_heading("1.2 项目范围", 2)
     add_para(doc, "系统首期范围为校园地图、建筑信息、建筑聊天室、定位验证、课程表、日程规划和基础管理后台。")
     doc.add_heading("1.3 用户角色", 2)
@@ -476,13 +476,13 @@ def requirements_doc():
         "管理员可以维护建筑信息并处理聊天内容。",
         "系统可在本地环境完整运行，README 和部署说明清晰。"
     ])
-    return save_doc(doc, "03_湖大智行_软件需求规格说明书.docx")
+    return save_doc(doc, "03_智行_软件需求规格说明书.docx")
 
 
 def use_case_doc():
     doc = Document()
     style_doc(doc, "功能结构与用例分析说明书")
-    add_cover(doc, "功能结构与用例分析说明书", "湖大智行 CampusMind")
+    add_cover(doc, "功能结构与用例分析说明书", "智行 CampusMind")
     add_toc(doc, ["1 文档说明", "2 系统总体结构设计", "3 分模块用例分析", "4 总体 UML 用例汇总表", "5 结语"])
 
     doc.add_heading("1 文档说明", 1)
@@ -505,7 +505,7 @@ def use_case_doc():
         ("后台管理与内容治理", "建筑维护、消息审核、举报处理、管理员权限控制。"),
     ], [4.0, 10.0])
     doc.add_heading("2.2 系统功能结构树", 2)
-    add_para(doc, "湖大智行 CampusMind")
+    add_para(doc, "智行 CampusMind")
     add_bullets(doc, [
         "用户与权限管理：注册、登录、JWT 鉴权、角色识别。",
         "校园地图与建筑信息：地图展示、建筑点位、建筑详情、建筑维护。",
@@ -571,7 +571,7 @@ def use_case_doc():
     ], [2.0, 3.5, 4.0, 4.5])
     doc.add_heading("5 结语", 1)
     add_para(doc, "本说明书将系统能力划分为地图、建筑、聊天、定位、课程、日程和后台治理等模块，覆盖学生日常使用与管理员维护场景。后续开发可按用例优先级推进，并将关键用例转化为接口任务、页面任务和测试用例。")
-    return save_doc(doc, "04_湖大智行_功能结构与用例分析说明书.docx")
+    return save_doc(doc, "04_智行_功能结构与用例分析说明书.docx")
 
 
 def main():
