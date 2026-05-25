@@ -15,6 +15,7 @@ OUT = ROOT / "deliverables"
 PROJECT = "智行 CampusMind"
 ORG = "智行项目组"
 DATE = "2026年5月"
+SAFE_TABLE_WIDTH_CM = 14.2
 
 
 def set_cell_shading(cell, fill):
@@ -40,11 +41,55 @@ def set_cell_margins(table, top=80, start=120, bottom=80, end=120):
 
 
 def set_table_width(table, widths):
+    total = sum(widths)
+    if total > SAFE_TABLE_WIDTH_CM:
+        scale = SAFE_TABLE_WIDTH_CM / total
+        widths = [round(width * scale, 2) for width in widths]
+
     table.autofit = False
+    tbl_pr = table._tbl.tblPr
+
+    tbl_layout = tbl_pr.first_child_found_in("w:tblLayout")
+    if tbl_layout is None:
+        tbl_layout = OxmlElement("w:tblLayout")
+        tbl_pr.append(tbl_layout)
+    tbl_layout.set(qn("w:type"), "fixed")
+
+    tbl_w = tbl_pr.first_child_found_in("w:tblW")
+    if tbl_w is None:
+        tbl_w = OxmlElement("w:tblW")
+        tbl_pr.append(tbl_w)
+    tbl_w.set(qn("w:type"), "dxa")
+    tbl_w.set(qn("w:w"), str(int(sum(widths) * 567)))
+
+    tbl_ind = tbl_pr.first_child_found_in("w:tblInd")
+    if tbl_ind is None:
+        tbl_ind = OxmlElement("w:tblInd")
+        tbl_pr.append(tbl_ind)
+    tbl_ind.set(qn("w:type"), "dxa")
+    tbl_ind.set(qn("w:w"), "0")
+
+    old_grid = table._tbl.tblGrid
+    if old_grid is not None:
+        table._tbl.remove(old_grid)
+    grid = OxmlElement("w:tblGrid")
+    for width in widths:
+        col = OxmlElement("w:gridCol")
+        col.set(qn("w:w"), str(int(width * 567)))
+        grid.append(col)
+    table._tbl.insert(1, grid)
+
     for row in table.rows:
         for idx, width in enumerate(widths):
             if idx < len(row.cells):
                 row.cells[idx].width = Cm(width)
+                tc_pr = row.cells[idx]._tc.get_or_add_tcPr()
+                tc_w = tc_pr.first_child_found_in("w:tcW")
+                if tc_w is None:
+                    tc_w = OxmlElement("w:tcW")
+                    tc_pr.append(tc_w)
+                tc_w.set(qn("w:type"), "dxa")
+                tc_w.set(qn("w:w"), str(int(width * 567)))
     set_cell_margins(table)
 
 
