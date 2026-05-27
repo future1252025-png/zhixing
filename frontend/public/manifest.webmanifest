@@ -1,0 +1,8 @@
+{
+  "name": "智行 CampusMind",
+  "short_name": "智行",
+  "start_url": "/home",
+  "display": "standalone",
+  "background_color": "#f6f7fb",
+  "theme_color": "#1677ff"
+}
