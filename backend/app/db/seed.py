@@ -270,8 +270,11 @@ def initialize_database(database_url: str = settings.database_url) -> dict[str, 
     engine = create_sqlite_engine(database_url)
     init_db(engine)
     SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
-    with SessionLocal() as session:
-        return seed_demo_data(session)
+    try:
+        with SessionLocal() as session:
+            return seed_demo_data(session)
+    finally:
+        engine.dispose()
 
 
 if __name__ == "__main__":
