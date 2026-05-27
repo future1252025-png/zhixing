@@ -6,6 +6,8 @@ import {
   CellGroup,
   ConfigProvider,
   Empty,
+  Field,
+  Form,
   NavBar,
   Tabbar,
   TabbarItem
@@ -26,6 +28,8 @@ app.use(Cell)
 app.use(CellGroup)
 app.use(ConfigProvider)
 app.use(Empty)
+app.use(Field)
+app.use(Form)
 app.use(NavBar)
 app.use(Tabbar)
 app.use(TabbarItem)
