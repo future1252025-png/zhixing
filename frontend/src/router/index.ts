@@ -2,6 +2,7 @@ import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
 
 import BuildingDetailPage from '@/pages/BuildingDetailPage.vue'
 import BuildingMessagesPage from '@/pages/BuildingMessagesPage.vue'
+import CourseFormPage from '@/pages/CourseFormPage.vue'
 import CoursesPage from '@/pages/CoursesPage.vue'
 import HomePage from '@/pages/HomePage.vue'
 import LoginPage from '@/pages/LoginPage.vue'
@@ -68,6 +69,18 @@ const routes: RouteRecordRaw[] = [
     path: '/courses',
     name: 'courses',
     component: CoursesPage,
+    meta: { requiresAuth: true }
+  },
+  {
+    path: '/courses/new',
+    name: 'course-new',
+    component: CourseFormPage,
+    meta: { requiresAuth: true }
+  },
+  {
+    path: '/courses/:id/edit',
+    name: 'course-edit',
+    component: CourseFormPage,
     meta: { requiresAuth: true }
   },
   {

@@ -58,4 +58,14 @@ describe('auth route guard decisions', () => {
     expect(match.name).toBe('building-messages')
     expect(match.meta.requiresAuth).toBe(true)
   })
+
+  it('registers course form routes as protected routes', () => {
+    const newMatch = router.resolve('/courses/new')
+    const editMatch = router.resolve('/courses/1/edit')
+
+    expect(newMatch.name).toBe('course-new')
+    expect(newMatch.meta.requiresAuth).toBe(true)
+    expect(editMatch.name).toBe('course-edit')
+    expect(editMatch.meta.requiresAuth).toBe(true)
+  })
 })
