@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
 
+import BuildingDetailPage from '@/pages/BuildingDetailPage.vue'
 import CoursesPage from '@/pages/CoursesPage.vue'
 import HomePage from '@/pages/HomePage.vue'
 import LoginPage from '@/pages/LoginPage.vue'
@@ -50,6 +51,12 @@ const routes: RouteRecordRaw[] = [
     meta: { publicOnly: true }
   },
   { path: '/home', name: 'home', component: HomePage, meta: { requiresAuth: true } },
+  {
+    path: '/buildings/:id',
+    name: 'building-detail',
+    component: BuildingDetailPage,
+    meta: { requiresAuth: true }
+  },
   {
     path: '/courses',
     name: 'courses',

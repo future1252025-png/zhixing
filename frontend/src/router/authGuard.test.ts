@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { resolveAuthRedirect } from './index'
+import router, { resolveAuthRedirect } from './index'
 
 describe('auth route guard decisions', () => {
   it('redirects anonymous users away from protected pages', () => {
@@ -43,5 +43,12 @@ describe('auth route guard decisions', () => {
     )
 
     expect(redirect).toBeNull()
+  })
+
+  it('registers building detail as a protected route', () => {
+    const match = router.resolve('/buildings/1')
+
+    expect(match.name).toBe('building-detail')
+    expect(match.meta.requiresAuth).toBe(true)
   })
 })
