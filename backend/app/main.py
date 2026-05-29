@@ -2,6 +2,7 @@ from fastapi import FastAPI
 
 from app.api.auth import router as auth_router
 from app.api.buildings import router as buildings_router
+from app.api.courses import router as courses_router
 from app.api.health import router as health_router
 from app.api.messages import router as messages_router
 from app.core.config import settings
@@ -13,3 +14,4 @@ app.include_router(health_router)
 app.include_router(auth_router)
 app.include_router(buildings_router)
 app.include_router(messages_router)
+app.include_router(courses_router)
