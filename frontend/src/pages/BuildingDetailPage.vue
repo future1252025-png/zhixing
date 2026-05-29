@@ -30,6 +30,10 @@ async function loadBuilding() {
   }
 }
 
+function openMessages() {
+  router.push(`/buildings/${buildingId.value}/messages`)
+}
+
 onMounted(loadBuilding)
 </script>
 
@@ -64,7 +68,7 @@ onMounted(loadBuilding)
         </van-cell-group>
 
         <div class="page-actions">
-          <van-button disabled block>留言区将在后续阶段实现</van-button>
+          <van-button type="primary" block @click="openMessages">进入留言区</van-button>
         </div>
       </template>
     </div>

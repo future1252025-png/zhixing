@@ -51,4 +51,11 @@ describe('auth route guard decisions', () => {
     expect(match.name).toBe('building-detail')
     expect(match.meta.requiresAuth).toBe(true)
   })
+
+  it('registers building messages as a protected route', () => {
+    const match = router.resolve('/buildings/1/messages')
+
+    expect(match.name).toBe('building-messages')
+    expect(match.meta.requiresAuth).toBe(true)
+  })
 })
