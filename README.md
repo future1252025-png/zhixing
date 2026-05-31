@@ -111,7 +111,7 @@ npm run build
 最近一次 MVP 验证结果：
 
 ```text
-后端：47 passed
+后端：48 passed
 前端：9 passed / 33 tests
 前端构建：通过
 ```

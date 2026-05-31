@@ -1,6 +1,6 @@
 # 测试报告
 
-测试日期：2026-05-30
+测试日期：2026-05-31
 
 ## 后端测试
 
@@ -14,7 +14,7 @@ python -m pytest
 结果：
 
 ```text
-47 passed
+48 passed
 ```
 
 覆盖范围包括：
@@ -59,6 +59,24 @@ npm run build
 ```
 
 结果：通过。
+
+## 依赖检查
+
+后端：
+
+```powershell
+python -m pip check
+```
+
+结果：无依赖冲突。
+
+前端：
+
+```powershell
+npm audit
+```
+
+结果：0 个漏洞。
 
 ## 主流程验证
 
