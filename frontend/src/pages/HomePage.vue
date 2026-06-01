@@ -8,6 +8,7 @@ import {
   type Building,
   type LocationPreset
 } from '@/api/buildings'
+import RealCampusMap from '@/components/RealCampusMap.vue'
 
 const router = useRouter()
 const buildings = ref<Building[]>([])
@@ -62,6 +63,15 @@ onMounted(loadHomeData)
           </div>
         </div>
       </section>
+
+      <RealCampusMap
+        v-if="!loading && buildings.length > 0"
+        title="湖北大学真实地图"
+        subtitle="点击地图上的建筑点位，可直接进入建筑详情"
+        :buildings="buildings"
+        height="300px"
+        @building-click="openBuilding"
+      />
 
       <section class="section-block">
         <div class="section-heading">

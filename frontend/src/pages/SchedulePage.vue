@@ -10,14 +10,15 @@ import {
   type Building,
   type LocationPreset
 } from '@/api/buildings'
+import RealCampusMap from '@/components/RealCampusMap.vue'
 import { getCourses } from '@/api/courses'
 import { getScheduleSuggestion } from '@/api/schedule'
 import { useLocationStore } from '@/stores/location'
 import type { Course } from '@/types/course'
+import type { CampusMapPoint } from '@/types/map'
 import type { ScheduleSuggestion } from '@/types/schedule'
 import {
   formatDistance,
-  getRouteVisualPoints,
   getStatusMeta
 } from '@/utils/schedule'
 
@@ -36,14 +37,26 @@ const hasCourses = computed(() => courses.value.length > 0)
 const statusMeta = computed(() =>
   suggestion.value ? getStatusMeta(suggestion.value.status) : null
 )
-const routeVisual = computed(() => {
+const routeFromPoint = computed<CampusMapPoint | null>(() => {
   if (!suggestion.value) {
     return null
   }
-  return getRouteVisualPoints(
-    suggestion.value.from_location,
-    suggestion.value.target_building
-  )
+  return {
+    name: suggestion.value.from_location.name,
+    latitude: suggestion.value.from_location.latitude,
+    longitude: suggestion.value.from_location.longitude
+  }
+})
+const routeToPoint = computed<CampusMapPoint | null>(() => {
+  if (!suggestion.value) {
+    return null
+  }
+  return {
+    id: suggestion.value.target_building.id,
+    name: suggestion.value.target_building.name,
+    latitude: suggestion.value.target_building.latitude,
+    longitude: suggestion.value.target_building.longitude
+  }
 })
 
 function getErrorMessage(error: unknown): string {
@@ -250,29 +263,13 @@ onMounted(loadScheduleData)
           <p v-if="suggestion.next_course.weeks">周次：{{ suggestion.next_course.weeks }}</p>
         </div>
 
-        <div v-if="routeVisual" class="route-visual">
-          <div
-            class="route-line"
-            :style="{
-              left: `${routeVisual.from.left}%`,
-              top: `${routeVisual.from.top}%`,
-              width: `${routeVisual.lineWidth}%`,
-              transform: `rotate(${routeVisual.lineAngle}deg)`
-            }"
-          />
-          <div
-            class="route-point from"
-            :style="{ left: `${routeVisual.from.left}%`, top: `${routeVisual.from.top}%` }"
-          >
-            起
-          </div>
-          <div
-            class="route-point to"
-            :style="{ left: `${routeVisual.to.left}%`, top: `${routeVisual.to.top}%` }"
-          >
-            到
-          </div>
-        </div>
+        <RealCampusMap
+          title="真实地图路径建议"
+          subtitle="用高德地图展示当前位置、目标建筑和直线方向"
+          :from-point="routeFromPoint"
+          :to-point="routeToPoint"
+          height="260px"
+        />
 
         <div class="route-cards">
           <article>
@@ -419,50 +416,6 @@ onMounted(loadScheduleData)
   color: var(--cm-text);
   font-size: 14px;
   line-height: 1.5;
-}
-
-.route-visual {
-  position: relative;
-  height: 180px;
-  overflow: hidden;
-  border: 1px solid var(--cm-line);
-  border-radius: 8px;
-  background:
-    linear-gradient(90deg, rgb(228 231 236 / 70%) 1px, transparent 1px),
-    linear-gradient(rgb(228 231 236 / 70%) 1px, transparent 1px),
-    #f8fafc;
-  background-size: 36px 36px;
-}
-
-.route-line {
-  position: absolute;
-  height: 3px;
-  transform-origin: left center;
-  border-radius: 999px;
-  background: var(--cm-primary);
-}
-
-.route-point {
-  position: absolute;
-  display: grid;
-  width: 34px;
-  height: 34px;
-  transform: translate(-50%, -50%);
-  place-items: center;
-  border: 3px solid #ffffff;
-  border-radius: 50%;
-  box-shadow: 0 2px 8px rgb(15 23 42 / 18%);
-  color: #ffffff;
-  font-size: 13px;
-  font-weight: 700;
-}
-
-.route-point.from {
-  background: var(--cm-green);
-}
-
-.route-point.to {
-  background: var(--cm-primary);
 }
 
 .route-cards,

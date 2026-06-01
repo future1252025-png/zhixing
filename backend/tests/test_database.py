@@ -40,7 +40,10 @@ def test_seed_demo_data_writes_core_records(tmp_path: Path) -> None:
         assert counts["courses"] >= 3
         assert counts["messages"] >= 4
         assert counts["location_presets"] >= 4
-        assert session.scalar(select(Building).where(Building.name == "图书馆")) is not None
+        assert (
+            session.scalar(select(Building).where(Building.name == "湖北大学图书馆"))
+            is not None
+        )
 
 
 def test_seed_demo_data_is_idempotent(tmp_path: Path) -> None:

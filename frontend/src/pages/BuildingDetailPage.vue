@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import { getBuildingDetail, type Building } from '@/api/buildings'
+import RealCampusMap from '@/components/RealCampusMap.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -72,6 +73,14 @@ onMounted(loadBuilding)
             </article>
           </div>
         </section>
+
+        <RealCampusMap
+          title="建筑所在位置"
+          subtitle="真实地图定位当前建筑，便于演示校园空间关系"
+          :buildings="[building]"
+          :active-building-id="building.id"
+          height="260px"
+        />
 
         <div class="page-actions">
           <van-button type="primary" block icon="chat-o" @click="openMessages">
