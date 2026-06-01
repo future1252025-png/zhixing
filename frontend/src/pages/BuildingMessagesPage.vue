@@ -99,6 +99,11 @@ onMounted(loadMessages)
   <section class="page message-page">
     <van-nav-bar title="建筑留言" left-arrow @click-left="router.push(`/buildings/${buildingId}`)" />
     <div class="message-content">
+      <section class="chat-intro">
+        <span class="pill">匿名留言区</span>
+        <h1>建筑里的实时经验</h1>
+        <p>第一版使用 HTTP 留言，统一显示为“匿名同学”。</p>
+      </section>
       <p v-if="loading" class="muted-text">正在加载留言...</p>
       <van-empty v-else-if="errorMessage" image="error" :description="errorMessage">
         <van-button type="primary" size="small" @click="loadMessages">重试</van-button>
@@ -147,12 +152,34 @@ onMounted(loadMessages)
   width: min(100%, 480px);
   flex: 1;
   margin: 0 auto;
-  padding: 14px 14px 104px;
+  padding: 8px 14px 112px;
+}
+
+.chat-intro {
+  margin-bottom: 14px;
+  border: 1px solid var(--cm-line);
+  border-radius: var(--cm-radius);
+  background: rgb(255 255 255 / 88%);
+  box-shadow: 0 8px 20px rgb(16 24 40 / 6%);
+  padding: 14px;
+}
+
+.chat-intro h1 {
+  margin: 9px 0 4px;
+  color: var(--cm-ink);
+  font-size: 21px;
+}
+
+.chat-intro p {
+  margin: 0;
+  color: var(--cm-muted);
+  font-size: 13px;
+  line-height: 1.6;
 }
 
 .message-list {
   display: grid;
-  max-height: calc(100vh - 190px);
+  max-height: calc(100vh - 276px);
   gap: 12px;
   overflow-y: auto;
   padding-right: 2px;
@@ -167,20 +194,21 @@ onMounted(loadMessages)
 .message-meta {
   display: flex;
   gap: 8px;
-  color: #6b7280;
+  color: var(--cm-muted);
   font-size: 12px;
 }
 
 .message-bubble {
   max-width: min(82%, 360px);
   margin: 0;
-  border-radius: 8px;
+  border: 1px solid var(--cm-line);
+  border-radius: 8px 8px 8px 2px;
   background: #ffffff;
-  box-shadow: 0 1px 5px rgb(15 23 42 / 8%);
-  color: #1f2937;
+  box-shadow: 0 6px 18px rgb(16 24 40 / 7%);
+  color: var(--cm-ink);
   line-height: 1.6;
   overflow-wrap: anywhere;
-  padding: 10px 12px;
+  padding: 11px 13px;
 }
 
 .message-composer {
@@ -190,9 +218,12 @@ onMounted(loadMessages)
   left: 0;
   width: min(100%, 480px);
   margin: 0 auto;
-  border-top: 1px solid #e5e7eb;
-  background: #ffffff;
-  padding: 8px 10px calc(8px + env(safe-area-inset-bottom));
+  border: 1px solid var(--cm-line);
+  border-bottom: 0;
+  border-radius: 8px 8px 0 0;
+  background: rgb(255 255 255 / 96%);
+  box-shadow: 0 -10px 26px rgb(16 24 40 / 10%);
+  padding: 9px 10px calc(9px + env(safe-area-inset-bottom));
 }
 
 .composer-actions {
@@ -204,7 +235,7 @@ onMounted(loadMessages)
 
 .count-text,
 .muted-text {
-  color: #6b7280;
+  color: var(--cm-muted);
   font-size: 13px;
 }
 </style>

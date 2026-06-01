@@ -46,10 +46,20 @@ async function handleSubmit() {
 </script>
 
 <template>
-  <section class="page">
+  <section class="page auth-page">
     <van-nav-bar title="注册" left-arrow @click-left="$router.push('/login')" />
-    <div class="page-content">
-      <van-form @submit="handleSubmit">
+    <div class="page-content auth-content">
+      <section class="hero-panel auth-hero">
+        <span class="hero-eyebrow">新同学入口</span>
+        <h1 class="hero-title">创建账号，开始规划校园日程</h1>
+        <p class="hero-copy">第一版使用模拟账号登录，适合课程设计演示和本地体验。</p>
+      </section>
+
+      <van-form class="auth-form surface-panel" @submit="handleSubmit">
+        <div class="form-heading">
+          <h2>账号信息</h2>
+          <p>用户名、昵称和密码用于演示登录</p>
+        </div>
         <van-cell-group inset>
           <van-field
             v-model="form.username"
@@ -91,3 +101,43 @@ async function handleSubmit() {
     </div>
   </section>
 </template>
+
+<style scoped>
+.auth-content {
+  display: grid;
+  gap: 14px;
+  padding-top: 10px;
+}
+
+.auth-hero {
+  min-height: 168px;
+}
+
+.auth-form {
+  padding: 14px 0 16px;
+}
+
+.form-heading {
+  padding: 0 16px 12px;
+}
+
+.form-heading h2 {
+  margin: 0;
+  color: var(--cm-ink);
+  font-size: 20px;
+}
+
+.form-heading p {
+  margin: 5px 0 0;
+  color: var(--cm-muted);
+  font-size: 13px;
+}
+
+.auth-form :deep(.van-cell-group--inset) {
+  box-shadow: none;
+}
+
+.auth-form .page-actions {
+  padding: 0 16px;
+}
+</style>

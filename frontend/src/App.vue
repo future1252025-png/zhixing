@@ -9,9 +9,16 @@ const tabbarRoutes = ['/home', '/courses', '/schedule', '/profile']
 const showTabbar = computed(() => tabbarRoutes.includes(route.path))
 
 const themeVars = {
-  primaryColor: '#1677ff',
+  primaryColor: '#1f6feb',
+  buttonPrimaryBackground: '#1f6feb',
+  buttonPrimaryBorderColor: '#1f6feb',
+  cellTextColor: '#182230',
+  cellLabelColor: '#667085',
+  fieldLabelColor: '#344054',
   navBarTitleFontSize: '17px',
-  tabbarItemActiveColor: '#1677ff'
+  navBarIconColor: '#1f6feb',
+  tabbarItemActiveColor: '#1f6feb',
+  tabbarBackground: 'rgba(255, 255, 255, 0.96)'
 }
 </script>
 

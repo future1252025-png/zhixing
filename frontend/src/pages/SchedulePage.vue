@@ -147,11 +147,17 @@ onMounted(loadScheduleData)
   <section class="page">
     <van-nav-bar title="出发建议" />
     <div class="page-content">
-      <section class="panel">
+      <section class="hero-panel schedule-hero">
+        <span class="hero-eyebrow">下一站建议</span>
+        <h1 class="hero-title">从当前位置到下一节课</h1>
+        <p class="hero-copy">基于课程表、建筑坐标和 10 分钟缓冲时间，生成可演示的出发建议。</p>
+      </section>
+
+      <section class="surface-panel panel">
         <div class="panel-heading">
           <div>
-            <h1>下一节课怎么走</h1>
-            <p>选择当前位置，生成出发时间和步行建议</p>
+            <h2>当前位置</h2>
+            <p>选择预设位置或校园建筑作为起点</p>
           </div>
           <van-button size="small" plain @click="loadScheduleData">刷新</van-button>
         </div>
@@ -228,7 +234,7 @@ onMounted(loadScheduleData)
         </template>
       </section>
 
-      <section v-if="suggestion && statusMeta" class="panel suggestion-panel">
+      <section v-if="suggestion && statusMeta" class="surface-panel panel suggestion-panel">
         <div class="suggestion-header" :class="statusMeta.className">
           <span>{{ statusMeta.label }}</span>
           <strong>{{ suggestion.suggest_departure_time }} 出发</strong>
@@ -303,10 +309,11 @@ onMounted(loadScheduleData)
 
 <style scoped>
 .panel {
-  border-radius: 8px;
-  background: #ffffff;
-  box-shadow: 0 1px 5px rgb(15 23 42 / 8%);
   padding: 14px;
+}
+
+.schedule-hero {
+  margin-bottom: 14px;
 }
 
 .panel + .panel {
@@ -321,23 +328,24 @@ onMounted(loadScheduleData)
   margin-bottom: 14px;
 }
 
-.panel-heading h1 {
+.panel-heading h2 {
   margin: 0;
-  font-size: 21px;
+  color: var(--cm-ink);
+  font-size: 19px;
   line-height: 1.25;
 }
 
 .panel-heading p,
 .muted-text {
   margin: 4px 0 0;
-  color: #6b7280;
+  color: var(--cm-muted);
   font-size: 14px;
 }
 
 .field-label {
   display: block;
   margin-bottom: 8px;
-  color: #374151;
+  color: var(--cm-text);
   font-size: 14px;
   font-weight: 700;
 }
@@ -345,10 +353,10 @@ onMounted(loadScheduleData)
 .location-select {
   width: 100%;
   min-height: 42px;
-  border: 1px solid #d1d5db;
+  border: 1px solid var(--cm-line);
   border-radius: 8px;
   background: #ffffff;
-  color: #1f2937;
+  color: var(--cm-ink);
   font: inherit;
   padding: 0 10px;
 }
@@ -357,13 +365,14 @@ onMounted(loadScheduleData)
   display: grid;
   gap: 4px;
   margin-top: 10px;
+  border: 1px solid var(--cm-line);
   border-radius: 8px;
-  background: #f6f7fb;
+  background: #f8fbff;
   padding: 10px;
 }
 
 .selected-location span {
-  color: #6b7280;
+  color: var(--cm-muted);
   font-size: 13px;
 }
 
@@ -381,18 +390,18 @@ onMounted(loadScheduleData)
 }
 
 .status-normal {
-  background: #e8f7ef;
-  color: #047857;
+  background: var(--cm-green-soft);
+  color: var(--cm-green);
 }
 
 .status-tight {
-  background: #fff7ed;
-  color: #c2410c;
+  background: var(--cm-amber-soft);
+  color: #b45309;
 }
 
 .status-late {
-  background: #fef2f2;
-  color: #b91c1c;
+  background: var(--cm-red-soft);
+  color: var(--cm-red);
 }
 
 .course-summary {
@@ -401,12 +410,13 @@ onMounted(loadScheduleData)
 
 .course-summary h2 {
   margin: 0 0 6px;
+  color: var(--cm-ink);
   font-size: 19px;
 }
 
 .course-summary p {
   margin: 4px 0 0;
-  color: #4b5563;
+  color: var(--cm-text);
   font-size: 14px;
   line-height: 1.5;
 }
@@ -415,11 +425,11 @@ onMounted(loadScheduleData)
   position: relative;
   height: 180px;
   overflow: hidden;
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--cm-line);
   border-radius: 8px;
   background:
-    linear-gradient(90deg, rgb(229 231 235 / 65%) 1px, transparent 1px),
-    linear-gradient(rgb(229 231 235 / 65%) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(228 231 236 / 70%) 1px, transparent 1px),
+    linear-gradient(rgb(228 231 236 / 70%) 1px, transparent 1px),
     #f8fafc;
   background-size: 36px 36px;
 }
@@ -429,7 +439,7 @@ onMounted(loadScheduleData)
   height: 3px;
   transform-origin: left center;
   border-radius: 999px;
-  background: #1677ff;
+  background: var(--cm-primary);
 }
 
 .route-point {
@@ -448,11 +458,11 @@ onMounted(loadScheduleData)
 }
 
 .route-point.from {
-  background: #16a34a;
+  background: var(--cm-green);
 }
 
 .route-point.to {
-  background: #1677ff;
+  background: var(--cm-primary);
 }
 
 .route-cards,
@@ -472,14 +482,15 @@ onMounted(loadScheduleData)
   display: grid;
   gap: 4px;
   min-width: 0;
+  border: 1px solid var(--cm-line);
   border-radius: 8px;
-  background: #f6f7fb;
+  background: #f8fbff;
   padding: 10px;
 }
 
 .route-cards span,
 .metrics-grid span {
-  color: #6b7280;
+  color: var(--cm-muted);
   font-size: 12px;
 }
 
@@ -491,15 +502,15 @@ onMounted(loadScheduleData)
 
 .suggestion-text {
   margin: 14px 0 0;
-  color: #1f2937;
+  color: var(--cm-ink);
   line-height: 1.6;
 }
 
 .warning-text {
   margin: 10px 0 0;
   border-radius: 8px;
-  background: #fff7ed;
-  color: #c2410c;
+  background: var(--cm-amber-soft);
+  color: #b45309;
   font-size: 13px;
   line-height: 1.5;
   padding: 8px 10px;

@@ -49,26 +49,34 @@ onMounted(loadBuilding)
         </div>
       </van-empty>
       <template v-else-if="building">
-        <section class="detail-header">
-          <p class="building-type">{{ building.type }}</p>
-          <h1>{{ building.name }}</h1>
-          <p>{{ building.description }}</p>
+        <section class="hero-panel detail-header">
+          <span class="hero-eyebrow">{{ building.type }}</span>
+          <h1 class="hero-title">{{ building.name }}</h1>
+          <p class="hero-copy">{{ building.description }}</p>
         </section>
 
-        <van-cell-group inset>
-          <van-cell title="步行提示" :label="building.walk_hint || '暂无步行提示'" />
-          <van-cell
-            title="经纬度"
-            :label="`${building.latitude.toFixed(4)}, ${building.longitude.toFixed(4)}`"
-          />
-          <van-cell
-            title="静态地图坐标"
-            :label="`X ${building.map_x.toFixed(1)} / Y ${building.map_y.toFixed(1)}`"
-          />
-        </van-cell-group>
+        <section class="surface-panel detail-panel">
+          <h2>建筑信息</h2>
+          <div class="info-list">
+            <article>
+              <span>步行提示</span>
+              <strong>{{ building.walk_hint || '暂无步行提示' }}</strong>
+            </article>
+            <article>
+              <span>经纬度</span>
+              <strong>{{ building.latitude.toFixed(4) }}, {{ building.longitude.toFixed(4) }}</strong>
+            </article>
+            <article>
+              <span>静态地图坐标</span>
+              <strong>X {{ building.map_x.toFixed(1) }} / Y {{ building.map_y.toFixed(1) }}</strong>
+            </article>
+          </div>
+        </section>
 
         <div class="page-actions">
-          <van-button type="primary" block @click="openMessages">进入留言区</van-button>
+          <van-button type="primary" block icon="chat-o" @click="openMessages">
+            进入建筑留言区
+          </van-button>
         </div>
       </template>
     </div>
@@ -78,33 +86,43 @@ onMounted(loadBuilding)
 <style scoped>
 .detail-header {
   margin-bottom: 16px;
-  padding: 0 4px;
 }
 
-.detail-header h1 {
-  margin: 4px 0 8px;
-  font-size: 24px;
-  line-height: 1.25;
+.detail-panel {
+  padding: 14px;
 }
 
-.detail-header p {
-  margin: 0;
-  color: #4b5563;
-  line-height: 1.6;
+.detail-panel h2 {
+  margin: 0 0 12px;
+  color: var(--cm-ink);
+  font-size: 17px;
 }
 
-.building-type {
-  width: fit-content;
-  border-radius: 4px;
-  background: #eef5ff;
-  color: #1677ff;
-  padding: 2px 8px;
-  font-size: 13px;
+.info-list {
+  display: grid;
+  gap: 10px;
 }
 
-.muted-text {
-  margin: 12px 0;
-  color: #6b7280;
+.info-list article {
+  display: grid;
+  gap: 4px;
+  border-bottom: 1px solid var(--cm-line);
+  padding-bottom: 10px;
+}
+
+.info-list article:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.info-list span {
+  color: var(--cm-muted);
+  font-size: 12px;
+}
+
+.info-list strong {
+  color: var(--cm-text);
   font-size: 14px;
+  line-height: 1.5;
 }
 </style>

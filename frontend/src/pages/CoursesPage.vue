@@ -73,12 +73,13 @@ onMounted(loadCourses)
   <section class="page">
     <van-nav-bar title="课程表" />
     <div class="page-content">
-      <div class="page-toolbar">
+      <div class="hero-panel course-hero">
         <div>
-          <h1>我的课程</h1>
-          <p>按星期查看课程安排</p>
+          <span class="hero-eyebrow">课程驱动出发建议</span>
+          <h1 class="hero-title">我的课程</h1>
+          <p class="hero-copy">按星期查看课程安排，出发建议会自动寻找未来最近一节课。</p>
         </div>
-        <van-button type="primary" size="small" @click="openCreatePage">
+        <van-button type="primary" size="small" icon="plus" @click="openCreatePage">
           新增课程
         </van-button>
       </div>
@@ -139,6 +140,14 @@ onMounted(loadCourses)
   margin-bottom: 16px;
 }
 
+.course-hero {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
 .page-toolbar h1 {
   margin: 0;
   font-size: 22px;
@@ -158,6 +167,7 @@ onMounted(loadCourses)
 
 .weekday-section h2 {
   margin: 0 0 10px;
+  color: var(--cm-ink);
   font-size: 16px;
 }
 
@@ -165,10 +175,11 @@ onMounted(loadCourses)
   display: grid;
   grid-template-columns: 1fr auto;
   gap: 12px;
-  border: 1px solid #e5e7eb;
-  border-radius: 8px;
+  border: 1px solid var(--cm-line);
+  border-radius: var(--cm-radius);
   background: #ffffff;
-  padding: 12px;
+  box-shadow: 0 8px 20px rgb(16 24 40 / 6%);
+  padding: 13px;
 }
 
 .course-card + .course-card {
@@ -181,6 +192,7 @@ onMounted(loadCourses)
 
 .course-main h3 {
   margin: 8px 0 6px;
+  color: var(--cm-ink);
   font-size: 17px;
   line-height: 1.35;
   overflow-wrap: anywhere;
@@ -188,7 +200,7 @@ onMounted(loadCourses)
 
 .course-main p {
   margin: 4px 0 0;
-  color: #4b5563;
+  color: var(--cm-text);
   font-size: 13px;
   line-height: 1.5;
 }
@@ -204,23 +216,24 @@ onMounted(loadCourses)
 .weekday-chip {
   display: inline-flex;
   width: fit-content;
-  border-radius: 4px;
-  background: #eef5ff;
-  color: #1677ff;
-  padding: 2px 6px;
+  border-radius: 999px;
+  background: var(--cm-primary-soft);
+  color: var(--cm-primary-dark);
+  padding: 3px 8px;
   font-size: 12px;
+  font-weight: 700;
   line-height: 1.4;
 }
 
 .weekday-chip {
-  background: #f3f4f6;
-  color: #374151;
+  background: var(--cm-green-soft);
+  color: var(--cm-green);
 }
 
 .text-button {
   border: 0;
   background: transparent;
-  color: #1677ff;
+  color: var(--cm-primary);
   cursor: pointer;
   font: inherit;
   font-size: 13px;
@@ -228,11 +241,11 @@ onMounted(loadCourses)
 }
 
 .text-button:disabled {
-  color: #9ca3af;
+  color: #98a2b3;
   cursor: not-allowed;
 }
 
 .danger {
-  color: #dc2626;
+  color: var(--cm-red);
 }
 </style>

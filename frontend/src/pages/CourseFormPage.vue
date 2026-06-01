@@ -109,6 +109,12 @@ onMounted(loadFormData)
   <section class="page">
     <van-nav-bar :title="pageTitle" left-arrow @click-left="router.push('/courses')" />
     <div class="page-content">
+      <section class="hero-panel form-hero">
+        <span class="hero-eyebrow">{{ isEdit ? '编辑安排' : '新增安排' }}</span>
+        <h1 class="hero-title">{{ pageTitle }}</h1>
+        <p class="hero-copy">课程时间、教学楼和教室会用于后续出发建议计算。</p>
+      </section>
+
       <p v-if="loading" class="muted-text">正在加载课程表单...</p>
       <van-empty v-else-if="errorMessage" image="error" :description="errorMessage">
         <div class="page-actions">
@@ -118,7 +124,7 @@ onMounted(loadFormData)
           </van-button>
         </div>
       </van-empty>
-      <van-form v-else class="course-form" @submit="submitCourse">
+      <van-form v-else class="course-form surface-panel" @submit="submitCourse">
         <van-cell-group inset>
           <van-field
             v-model="form.course_name"
@@ -203,13 +209,26 @@ onMounted(loadFormData)
 <style scoped>
 .muted-text {
   margin: 12px 0;
-  color: #6b7280;
+  color: var(--cm-muted);
   font-size: 14px;
+}
+
+.form-hero {
+  margin-bottom: 14px;
 }
 
 .course-form {
   display: grid;
   gap: 14px;
+  padding: 12px 0 16px;
+}
+
+.course-form :deep(.van-cell-group--inset) {
+  box-shadow: none;
+}
+
+.course-form .page-actions {
+  padding: 0 16px;
 }
 
 .form-select {
@@ -217,7 +236,7 @@ onMounted(loadFormData)
   min-height: 24px;
   border: 0;
   background: transparent;
-  color: #1f2937;
+  color: var(--cm-ink);
   font: inherit;
   outline: none;
 }
