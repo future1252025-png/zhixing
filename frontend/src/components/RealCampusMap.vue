@@ -50,6 +50,15 @@ function pointToLngLat(point: Pick<CampusMapPoint, 'longitude' | 'latitude'>): [
   return wgs84ToGcj02(point.latitude, point.longitude)
 }
 
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;')
+}
+
 function getMapCenter(): [number, number] {
   const activeBuilding = markerBuildings.value.find(
     (building) => building.id === props.activeBuildingId
@@ -107,7 +116,7 @@ function labelContent(name: string, active = false): string {
       font-weight:${active ? 800 : 700};
       padding:3px 7px;
       white-space:nowrap;
-    ">${name}</div>
+    ">${escapeHtml(name)}</div>
   `
 }
 

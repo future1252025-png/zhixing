@@ -3,6 +3,10 @@ const AXIS = 6378245.0
 const OFFSET = 0.00669342162296594323
 
 export type LngLat = [number, number]
+export type LatLngPoint = {
+  latitude: number
+  longitude: number
+}
 
 function outOfChina(latitude: number, longitude: number): boolean {
   return longitude < 72.004 || longitude > 137.8347 || latitude < 0.8293 || latitude > 55.8271
@@ -41,4 +45,41 @@ export function wgs84ToGcj02(latitude: number, longitude: number): LngLat {
   deltaLng = (deltaLng * 180.0) / ((AXIS / sqrtMagic) * Math.cos(radLat) * PI)
 
   return [longitude + deltaLng, latitude + deltaLat]
+}
+
+export function gcj02ToWgs84(latitude: number, longitude: number): LngLat {
+  if (outOfChina(latitude, longitude)) {
+    return [longitude, latitude]
+  }
+
+  const [convertedLongitude, convertedLatitude] = wgs84ToGcj02(latitude, longitude)
+  return [
+    longitude * 2 - convertedLongitude,
+    latitude * 2 - convertedLatitude
+  ]
+}
+
+export function isPointInPolygon(point: LatLngPoint, polygon: LatLngPoint[]): boolean {
+  if (polygon.length < 3) {
+    return false
+  }
+
+  let inside = false
+  for (let current = 0, previous = polygon.length - 1; current < polygon.length; previous = current++) {
+    const currentPoint = polygon[current]
+    const previousPoint = polygon[previous]
+    const intersects = ((currentPoint.latitude > point.latitude) !== (previousPoint.latitude > point.latitude))
+      && (
+        point.longitude < ((previousPoint.longitude - currentPoint.longitude)
+          * (point.latitude - currentPoint.latitude))
+          / (previousPoint.latitude - currentPoint.latitude)
+          + currentPoint.longitude
+      )
+
+    if (intersects) {
+      inside = !inside
+    }
+  }
+
+  return inside
 }

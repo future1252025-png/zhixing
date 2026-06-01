@@ -6,6 +6,7 @@ import CourseFormPage from '@/pages/CourseFormPage.vue'
 import CoursesPage from '@/pages/CoursesPage.vue'
 import HomePage from '@/pages/HomePage.vue'
 import LoginPage from '@/pages/LoginPage.vue'
+import MapCollectorPage from '@/pages/MapCollectorPage.vue'
 import ProfilePage from '@/pages/ProfilePage.vue'
 import RegisterPage from '@/pages/RegisterPage.vue'
 import SchedulePage from '@/pages/SchedulePage.vue'
@@ -53,6 +54,11 @@ const routes: RouteRecordRaw[] = [
     meta: { publicOnly: true }
   },
   { path: '/home', name: 'home', component: HomePage, meta: { requiresAuth: true } },
+  {
+    path: '/map-collector',
+    name: 'map-collector',
+    component: MapCollectorPage
+  },
   {
     path: '/buildings/:id',
     name: 'building-detail',

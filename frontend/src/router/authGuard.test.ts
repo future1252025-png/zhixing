@@ -68,4 +68,11 @@ describe('auth route guard decisions', () => {
     expect(editMatch.name).toBe('course-edit')
     expect(editMatch.meta.requiresAuth).toBe(true)
   })
+
+  it('registers map collector as a public utility route', () => {
+    const match = router.resolve('/map-collector')
+
+    expect(match.name).toBe('map-collector')
+    expect(match.meta.requiresAuth).toBeUndefined()
+  })
 })
