@@ -4,7 +4,13 @@ from sqlalchemy import inspect, select
 from sqlalchemy.orm import sessionmaker
 
 from app.db.database import Base, create_sqlite_engine, init_db
-from app.db.seed import initialize_database, seed_demo_data
+from app.db.seed import (
+    DEMO_BUILDINGS,
+    MAP_POINTS_SEED_FILE,
+    initialize_database,
+    load_map_points_seed,
+    seed_demo_data,
+)
 from app.models import Building, Course, LocationPreset, Message, User
 
 
@@ -27,6 +33,17 @@ def test_database_tables_can_be_created(tmp_path: Path) -> None:
     }.issubset(table_names)
 
 
+def test_map_points_seed_file_loads_common_campus_points() -> None:
+    points = load_map_points_seed()
+
+    assert MAP_POINTS_SEED_FILE.exists()
+    assert len(points) >= 60
+    assert len({point["name"] for point in points}) == len(points)
+    assert len(DEMO_BUILDINGS) == len(points)
+    assert "湖北大学武昌校区图书馆" in {point["name"] for point in points}
+    assert "湖北大学武昌校区计算机学院" in {point["name"] for point in points}
+
+
 def test_seed_demo_data_writes_core_records(tmp_path: Path) -> None:
     engine = create_sqlite_engine(make_test_database_url(tmp_path / "seed.db"))
     init_db(engine)
@@ -36,12 +53,14 @@ def test_seed_demo_data_writes_core_records(tmp_path: Path) -> None:
         counts = seed_demo_data(session)
 
         assert counts["users"] >= 1
-        assert counts["buildings"] >= 8
+        assert counts["buildings"] >= len(DEMO_BUILDINGS)
         assert counts["courses"] >= 3
         assert counts["messages"] >= 4
         assert counts["location_presets"] >= 4
         assert (
-            session.scalar(select(Building).where(Building.name == "湖北大学图书馆"))
+            session.scalar(
+                select(Building).where(Building.name == "湖北大学武昌校区图书馆")
+            )
             is not None
         )
 
@@ -64,7 +83,7 @@ def test_initialize_database_creates_sqlite_file(tmp_path: Path) -> None:
     counts = initialize_database(make_test_database_url(database_path))
 
     assert database_path.exists()
-    assert counts["buildings"] >= 8
+    assert counts["buildings"] >= len(DEMO_BUILDINGS)
     assert counts["location_presets"] >= 4
 
 

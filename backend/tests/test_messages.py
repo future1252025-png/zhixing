@@ -48,6 +48,24 @@ def get_first_building_id(client: TestClient) -> int:
     return buildings[0]["id"]
 
 
+def get_building_id_by_name(client: TestClient, name: str) -> int:
+    buildings = client.get("/api/buildings").json()
+    return next(building["id"] for building in buildings if building["name"] == name)
+
+
+def get_first_building(client: TestClient) -> dict:
+    buildings = client.get("/api/buildings").json()
+    return buildings[0]
+
+
+def message_location_payload(building: dict) -> dict:
+    return {
+        "latitude": building["latitude"],
+        "longitude": building["longitude"],
+        "location_source": "manual",
+    }
+
+
 def auth_headers(client: TestClient, username: str = "alice") -> dict[str, str]:
     client.post(
         "/api/auth/register",
@@ -80,7 +98,7 @@ def test_get_messages_with_token_returns_seed_messages(
     client_and_session: tuple[TestClient, sessionmaker],
 ) -> None:
     client, _ = client_and_session
-    building_id = get_first_building_id(client)
+    building_id = get_building_id_by_name(client, "湖北大学武昌校区图书馆")
 
     response = client.get(
         f"/api/buildings/{building_id}/messages",
@@ -172,21 +190,64 @@ def test_create_message_with_token_returns_anonymous_message(
     client_and_session: tuple[TestClient, sessionmaker],
 ) -> None:
     client, _ = client_and_session
-    building_id = get_first_building_id(client)
+    building = get_first_building(client)
 
     response = client.post(
-        f"/api/buildings/{building_id}/messages",
-        json={"content": "  今天这里很安静  "},
+        f"/api/buildings/{building['id']}/messages",
+        json={
+            "content": "  今天这里很安静  ",
+            **message_location_payload(building),
+        },
         headers=auth_headers(client),
     )
 
     assert response.status_code == 201
     data = response.json()
-    assert data["building_id"] == building_id
+    assert data["building_id"] == building["id"]
     assert data["content"] == "今天这里很安静"
     assert data["display_name"] == "匿名同学"
+    assert data["latitude"] == building["latitude"]
+    assert data["longitude"] == building["longitude"]
+    assert data["location_source"] == "manual"
+    assert data["distance_to_building_meters"] == 0
     assert "password_hash" not in data
     assert "user" not in data
+
+
+def test_create_message_requires_location(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    client, _ = client_and_session
+    building_id = get_first_building_id(client)
+
+    response = client.post(
+        f"/api/buildings/{building_id}/messages",
+        json={"content": "hello"},
+        headers=auth_headers(client),
+    )
+
+    assert response.status_code == 422
+
+
+def test_create_message_too_far_from_building_fails(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    client, _ = client_and_session
+    building = get_first_building(client)
+
+    response = client.post(
+        f"/api/buildings/{building['id']}/messages",
+        json={
+            "content": "hello",
+            "latitude": building["latitude"] + 0.02,
+            "longitude": building["longitude"] + 0.02,
+            "location_source": "browser",
+        },
+        headers=auth_headers(client),
+    )
+
+    assert response.status_code == 400
+    assert "too far" in response.json()["detail"].lower()
 
 
 def test_create_empty_message_fails(
@@ -223,10 +284,14 @@ def test_create_message_for_missing_building_returns_404(
     client_and_session: tuple[TestClient, sessionmaker],
 ) -> None:
     client, _ = client_and_session
+    building = get_first_building(client)
 
     response = client.post(
         "/api/buildings/999999/messages",
-        json={"content": "hello"},
+        json={
+            "content": "hello",
+            **message_location_payload(building),
+        },
         headers=auth_headers(client),
     )
 

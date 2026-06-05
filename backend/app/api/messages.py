@@ -6,6 +6,7 @@ from app.db.database import get_session
 from app.models import User
 from app.schemas.message import MessageCreate, MessageRead
 from app.services.message_service import (
+    MessageLocationTooFarError,
     create_building_message,
     get_building,
     list_building_messages,
@@ -43,4 +44,10 @@ def create_message(
     current_user: User = Depends(get_current_user),
 ) -> MessageRead:
     require_building(session, building_id)
-    return create_building_message(session, building_id, current_user, payload)
+    try:
+        return create_building_message(session, building_id, current_user, payload)
+    except MessageLocationTooFarError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc

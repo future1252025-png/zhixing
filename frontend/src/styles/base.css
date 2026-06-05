@@ -195,7 +195,11 @@ a {
 }
 
 .van-nav-bar {
-  background: transparent;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: rgb(245 248 251 / 88%);
+  backdrop-filter: blur(14px);
 }
 
 .van-nav-bar::after {

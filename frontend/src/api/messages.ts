@@ -6,6 +6,19 @@ export type BuildingMessage = {
   content: string
   display_name: string
   created_at: string
+  latitude: number | null
+  longitude: number | null
+  location_source: 'browser' | 'manual' | null
+  distance_to_building_meters: number | null
+}
+
+export type MessageLocationSource = 'browser' | 'manual'
+
+export type CreateBuildingMessagePayload = {
+  content: string
+  latitude: number
+  longitude: number
+  location_source: MessageLocationSource
 }
 
 export function validateMessageContent(content: string): string | null {
@@ -28,11 +41,14 @@ export async function getBuildingMessages(buildingId: number): Promise<BuildingM
 
 export async function createBuildingMessage(
   buildingId: number,
-  content: string
+  payload: CreateBuildingMessagePayload
 ): Promise<BuildingMessage> {
   const response = await request.post<BuildingMessage>(
     `/api/buildings/${buildingId}/messages`,
-    { content: content.trim() }
+    {
+      ...payload,
+      content: payload.content.trim()
+    }
   )
   return response.data
 }

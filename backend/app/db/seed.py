@@ -1,3 +1,5 @@
+import json
+from collections import Counter
 from pathlib import Path
 
 from sqlalchemy import select
@@ -16,114 +18,90 @@ DEMO_USER = {
     "role": "student",
 }
 
-DEMO_BUILDINGS = [
+
+MAP_POINTS_SEED_FILE = Path(__file__).with_name("map_points_seed.json")
+MAP_POINT_REQUIRED_FIELDS = {
+    "name",
+    "type",
+    "description",
+    "latitude",
+    "longitude",
+    "map_x",
+    "map_y",
+    "walk_hint",
+}
+
+
+def load_map_points_seed(
+    path: Path = MAP_POINTS_SEED_FILE,
+) -> list[dict[str, str | float | None]]:
+    raw_points = json.loads(path.read_text(encoding="utf-8-sig"))
+    if not isinstance(raw_points, list):
+        raise ValueError("Map points seed file must contain a JSON array")
+
+    name_totals = Counter(
+        str(item.get("name", "")).strip()
+        for item in raw_points
+        if isinstance(item, dict)
+    )
+    name_seen: Counter[str] = Counter()
+    points: list[dict[str, str | float | None]] = []
+
+    for index, item in enumerate(raw_points, start=1):
+        if not isinstance(item, dict):
+            raise ValueError(f"Map point #{index} must be a JSON object")
+
+        missing_fields = MAP_POINT_REQUIRED_FIELDS - item.keys()
+        if missing_fields:
+            fields = ", ".join(sorted(missing_fields))
+            raise ValueError(f"Map point #{index} missing fields: {fields}")
+
+        name = str(item["name"]).strip()
+        if not name:
+            raise ValueError(f"Map point #{index} has empty name")
+        name_seen[name] += 1
+        if name_totals[name] > 1:
+            name = f"{name}（{name_seen[name]}）"
+
+        points.append(
+            {
+                "name": name,
+                "type": str(item["type"]).strip() or "校园地点",
+                "description": str(item["description"]).strip(),
+                "latitude": float(item["latitude"]),
+                "longitude": float(item["longitude"]),
+                "map_x": float(item["map_x"]),
+                "map_y": float(item["map_y"]),
+                "walk_hint": str(item["walk_hint"]).strip() or None,
+            }
+        )
+
+    return points
+
+
+DEMO_BUILDINGS = load_map_points_seed()
+
+DEMO_LOCATION_PRESETS = [
     {
-        "name": "湖北大学图书馆",
-        "type": "图书馆",
-        "description": "武昌主校区图书馆，位于友谊大道校区核心区域，是自习、借阅和校园定位演示的主要点位。",
-        "latitude": 30.58122,
-        "longitude": 114.32917,
-        "map_x": 54.0,
-        "map_y": 42.0,
-        "walk_hint": "靠近校史馆、求索广场和学生宿舍区，适合作为常用出发点。",
+        "name": "一期学生公寓",
+        "building": "湖北大学武昌校区一期学生公寓",
+        "description": "演示从学生公寓去上课",
     },
     {
-        "name": "思睿厅",
-        "type": "教学与活动空间",
-        "description": "图书馆与求索广场附近的校园建筑，地图上可直接识别，适合演示建筑详情和留言。",
-        "latitude": 30.58069,
-        "longitude": 114.32911,
-        "map_x": 53.0,
-        "map_y": 49.0,
-        "walk_hint": "距离图书馆很近，步行约 1 到 2 分钟。",
-    },
-    {
-        "name": "湖北大学国际教育学院",
-        "type": "学院楼",
-        "description": "武昌主校区西南侧学院建筑，靠近月亮广场和马克思主义学院。",
-        "latitude": 30.58019,
-        "longitude": 114.32701,
-        "map_x": 31.0,
-        "map_y": 55.0,
-        "walk_hint": "从图书馆步行约 4 到 6 分钟。",
+        "name": "图书馆",
+        "building": "湖北大学武昌校区图书馆",
+        "description": "演示从图书馆去教学楼",
     },
     {
         "name": "求索广场",
-        "type": "广场",
-        "description": "图书馆西南侧的校园广场，是武昌主校区地图上的重要识别点。",
-        "latitude": 30.58051,
-        "longitude": 114.32831,
-        "map_x": 43.0,
-        "map_y": 51.0,
-        "walk_hint": "靠近图书馆和思睿厅，适合作为集合点。",
+        "building": "求索广场",
+        "description": "演示从校园广场去下一节课",
     },
     {
-        "name": "太阳广场",
-        "type": "广场",
-        "description": "图书馆西侧广场点位，适合展示校园公共空间和位置预设。",
-        "latitude": 30.58122,
-        "longitude": 114.32739,
-        "map_x": 34.0,
-        "map_y": 42.0,
-        "walk_hint": "从图书馆向西步行约 2 到 3 分钟。",
+        "name": "风华园食堂",
+        "building": "风华园食堂",
+        "description": "演示从食堂出发",
     },
-    {
-        "name": "二号场",
-        "type": "体育设施",
-        "description": "武昌主校区东侧体育场地，靠近二号体育馆和保龄球馆。",
-        "latitude": 30.58265,
-        "longitude": 114.33104,
-        "map_x": 74.0,
-        "map_y": 24.0,
-        "walk_hint": "距离图书馆较近，运动课程建议提前到达。",
-    },
-    {
-        "name": "二号体育馆",
-        "type": "体育设施",
-        "description": "二号场附近的体育馆点位，适合展示较近距离的出发建议。",
-        "latitude": 30.58265,
-        "longitude": 114.32968,
-        "map_x": 59.0,
-        "map_y": 24.0,
-        "walk_hint": "位于图书馆东北侧，步行约 2 到 4 分钟。",
-    },
-    {
-        "name": "一期菜鸟驿站",
-        "type": "生活服务",
-        "description": "图书馆和宿舍区附近的快递服务点，适合展示校园生活留言。",
-        "latitude": 30.58135,
-        "longitude": 114.32973,
-        "map_x": 60.0,
-        "map_y": 40.0,
-        "walk_hint": "取件高峰期人流较多。",
-    },
-    {
-        "name": "普通宿舍10栋",
-        "type": "宿舍",
-        "description": "图书馆西北侧普通宿舍楼，用于演示从生活区到教学区的出发建议。",
-        "latitude": 30.58139,
-        "longitude": 114.32830,
-        "map_x": 43.0,
-        "map_y": 39.0,
-        "walk_hint": "从宿舍出发去图书馆和学院楼较近。",
-    },
-    {
-        "name": "普通宿舍7栋",
-        "type": "宿舍",
-        "description": "思睿厅东侧普通宿舍楼，适合作为手动当前位置预设。",
-        "latitude": 30.58069,
-        "longitude": 114.33026,
-        "map_x": 66.0,
-        "map_y": 49.0,
-        "walk_hint": "去图书馆和二号体育馆都比较方便。",
-    },
-]
-
-DEMO_LOCATION_PRESETS = [
-    {"name": "普通宿舍10栋", "building": "普通宿舍10栋", "description": "演示从宿舍去上课"},
-    {"name": "湖北大学图书馆", "building": "湖北大学图书馆", "description": "演示从图书馆去教学楼"},
-    {"name": "求索广场", "building": "求索广场", "description": "演示从校园广场去下一节课"},
-    {"name": "二号场", "building": "二号场", "description": "演示从体育区域出发"},
 ]
 
 DEMO_COURSES = [
@@ -132,7 +110,7 @@ DEMO_COURSES = [
         "weekday": 1,
         "start_time": "10:10",
         "end_time": "11:50",
-        "building": "湖北大学国际教育学院",
+        "building": "湖北大学武昌校区国际教育学院",
         "room_name": "302",
         "teacher": "张老师",
         "weeks": "1-16",
@@ -142,7 +120,7 @@ DEMO_COURSES = [
         "weekday": 1,
         "start_time": "14:00",
         "end_time": "15:40",
-        "building": "思睿厅",
+        "building": "湖北大学武昌校区计算机学院",
         "room_name": "204",
         "teacher": "李老师",
         "weeks": "1-16",
@@ -152,7 +130,7 @@ DEMO_COURSES = [
         "weekday": 3,
         "start_time": "08:00",
         "end_time": "09:40",
-        "building": "二号体育馆",
+        "building": "湖北大学武昌校区1号体育馆",
         "room_name": "机房 A",
         "teacher": "王老师",
         "weeks": "1-16",
@@ -160,12 +138,11 @@ DEMO_COURSES = [
 ]
 
 DEMO_MESSAGES = [
-    {"building": "湖北大学图书馆", "content": "三楼靠窗还有空位"},
-    {"building": "湖北大学图书馆", "content": "今天二楼比较安静"},
-    {"building": "一期菜鸟驿站", "content": "下午取件人比较多"},
-    {"building": "思睿厅", "content": "晚上附近比较安静，适合自习"},
+    {"building": "湖北大学武昌校区图书馆", "content": "三楼靠窗还有空位"},
+    {"building": "湖北大学武昌校区图书馆", "content": "今天二楼比较安静"},
+    {"building": "湖北大学快递服务中心快递柜服务区-东区", "content": "下午取件人比较多"},
+    {"building": "求索广场", "content": "晚上附近比较安静，适合自习"},
 ]
-
 
 def _get_or_create_demo_user(session: Session) -> User:
     user = session.scalar(select(User).where(User.username == DEMO_USER["username"]))

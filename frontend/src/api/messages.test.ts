@@ -36,13 +36,21 @@ describe('message api', () => {
     expect(result[0].display_name).toBe('匿名同学')
   })
 
-  it('creates a building message', async () => {
+  it('creates a building message with location payload', async () => {
     vi.mocked(request.post).mockResolvedValue({ data: message })
 
-    const result = await createBuildingMessage(1, '今天这里很安静')
+    const result = await createBuildingMessage(1, {
+      content: '今天这里很安静',
+      latitude: 30.581,
+      longitude: 114.329,
+      location_source: 'browser'
+    })
 
     expect(request.post).toHaveBeenCalledWith('/api/buildings/1/messages', {
-      content: '今天这里很安静'
+      content: '今天这里很安静',
+      latitude: 30.581,
+      longitude: 114.329,
+      location_source: 'browser'
     })
     expect(result.content).toBe('今天这里很安静')
   })

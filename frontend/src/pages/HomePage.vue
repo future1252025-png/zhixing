@@ -67,42 +67,16 @@ onMounted(loadHomeData)
       <RealCampusMap
         v-if="!loading && buildings.length > 0"
         title="湖北大学真实地图"
-        subtitle="点击地图上的建筑点位，可直接进入建筑详情"
+        subtitle="在搜索栏查找地点，或直接点击地图上的建筑标识进入详情"
         :buildings="buildings"
-        height="300px"
+        height="420px"
         @building-click="openBuilding"
       />
-
-      <section class="section-block">
-        <div class="section-heading">
-          <div>
-            <h2 class="section-title">校园建筑</h2>
-            <p class="section-subtitle">点击建筑查看详情和匿名留言</p>
-          </div>
-        </div>
-        <p v-if="loading" class="muted-text">正在加载建筑数据...</p>
-        <van-empty v-else-if="errorMessage" image="error" :description="errorMessage">
-          <van-button type="primary" size="small" @click="loadHomeData">重试</van-button>
-        </van-empty>
-        <van-empty v-else-if="buildings.length === 0" description="暂无建筑数据" />
-        <div v-else class="building-list">
-          <button
-            v-for="building in buildings"
-            :key="building.id"
-            type="button"
-            class="building-card"
-            @click="openBuilding(building.id)"
-          >
-            <div class="building-card-head">
-              <span class="tag-text">{{ building.type }}</span>
-              <span class="arrow-text">查看</span>
-            </div>
-            <h3>{{ building.name }}</h3>
-            <p>{{ building.description }}</p>
-            <small v-if="building.walk_hint">{{ building.walk_hint }}</small>
-          </button>
-        </div>
-      </section>
+      <p v-if="loading" class="muted-text map-loading">正在加载校园地图...</p>
+      <van-empty v-else-if="errorMessage" image="error" :description="errorMessage">
+        <van-button type="primary" size="small" @click="loadHomeData">重试</van-button>
+      </van-empty>
+      <van-empty v-else-if="buildings.length === 0" description="暂无建筑数据" />
 
       <section class="section-block">
         <div class="section-heading">
@@ -132,74 +106,9 @@ onMounted(loadHomeData)
   min-height: 188px;
 }
 
-.building-list {
-  display: grid;
-  gap: 10px;
-}
-
-.building-card {
-  width: 100%;
-  cursor: pointer;
-  border: 1px solid var(--cm-line);
-  border-radius: var(--cm-radius);
-  background: var(--cm-card);
-  box-shadow: 0 8px 20px rgb(16 24 40 / 6%);
-  color: inherit;
-  font: inherit;
-  padding: 13px;
-  text-align: left;
-  transition:
-    transform 0.16s ease,
-    box-shadow 0.16s ease;
-}
-
-.building-card:active {
-  transform: scale(0.99);
-}
-
-.building-card-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-.building-card h3 {
-  margin: 10px 0 6px;
-  color: var(--cm-ink);
-  font-size: 18px;
-  line-height: 1.35;
-}
-
-.building-card p {
-  margin: 0;
-  color: var(--cm-text);
-  font-size: 13px;
-  line-height: 1.5;
-}
-
-.building-card small {
-  display: block;
-  margin-top: 8px;
-  color: var(--cm-green);
-  font-size: 12px;
-  line-height: 1.5;
-}
-
-.tag-text {
-  width: fit-content;
-  border-radius: 999px;
-  background: var(--cm-primary-soft);
-  color: var(--cm-primary-dark);
-  padding: 3px 8px;
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.arrow-text {
-  color: var(--cm-primary);
-  font-size: 12px;
-  font-weight: 700;
+.map-loading {
+  margin-top: 16px;
+  text-align: center;
 }
 
 .preset-list {

@@ -1,10 +1,16 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, shallowRef, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 
 import type { Building } from '@/api/buildings'
 import type { CampusMapPoint } from '@/types/map'
 import { isAMapConfigured, loadAMapSdk } from '@/utils/amap'
 import { wgs84ToGcj02 } from '@/utils/geo'
+import {
+  getBuildingHitZoneSize,
+  getMapInteractionLevel,
+  shouldShowBuildingHighlight
+} from '@/utils/mapInteraction'
+import { filterMapBuildings } from '@/utils/mapSearch'
 
 const props = withDefaults(defineProps<{
   title?: string
@@ -38,6 +44,9 @@ const amap = shallowRef<any>(null)
 const overlays = shallowRef<any[]>([])
 const loading = shallowRef(false)
 const errorMessage = shallowRef('')
+const searchQuery = ref('')
+const selectedSearchBuildingId = ref<number | null>(null)
+const currentZoom = ref(props.zoom)
 
 const hasConfig = computed(() => isAMapConfigured())
 const markerBuildings = computed(() =>
@@ -45,18 +54,14 @@ const markerBuildings = computed(() =>
     Number.isFinite(building.latitude) && Number.isFinite(building.longitude)
   )
 )
+const searchResults = computed(() => filterMapBuildings(markerBuildings.value, searchQuery.value, 6))
+const selectedBuilding = computed(() =>
+  markerBuildings.value.find((building) => building.id === selectedSearchBuildingId.value) ?? null
+)
+const interactionLevel = computed(() => getMapInteractionLevel(currentZoom.value))
 
 function pointToLngLat(point: Pick<CampusMapPoint, 'longitude' | 'latitude'>): [number, number] {
   return wgs84ToGcj02(point.latitude, point.longitude)
-}
-
-function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;')
 }
 
 function getMapCenter(): [number, number] {
@@ -78,18 +83,48 @@ function getMapCenter(): [number, number] {
   return [114.3235, 30.5828]
 }
 
-function markerContent(kind: 'building' | 'from' | 'to', active = false): string {
+function buildingHitZoneContent(active = false): string {
+  const size = getBuildingHitZoneSize(currentZoom.value, active)
+  const showHighlight = shouldShowBuildingHighlight(active)
+  return `
+    <div style="
+      position:relative;
+      width:${size}px;
+      height:${size}px;
+      border-radius:999px;
+      background:transparent;
+      cursor:pointer;
+      transform:translateZ(0);
+    ">
+      ${
+        showHighlight
+          ? `<span style="
+              position:absolute;
+              inset:50%;
+              width:18px;
+              height:18px;
+              border:2px solid #1f6feb;
+              border-radius:999px;
+              background:rgba(31,111,235,.16);
+              box-shadow:0 0 0 8px rgba(31,111,235,.14);
+              transform:translate(-50%,-50%);
+            "></span>`
+          : ''
+      }
+    </div>
+  `
+}
+
+function routeMarkerContent(kind: 'from' | 'to'): string {
   const palette = {
-    building: active ? '#1f6feb' : '#10b981',
     from: '#10b981',
     to: '#1f6feb'
   }
-  const text = kind === 'from' ? '起' : kind === 'to' ? '到' : ''
   return `
     <div style="
       display:grid;
-      width:${active ? 22 : 18}px;
-      height:${active ? 22 : 18}px;
+      width:16px;
+      height:16px;
       place-items:center;
       border:3px solid #fff;
       border-radius:999px;
@@ -99,24 +134,7 @@ function markerContent(kind: 'building' | 'from' | 'to', active = false): string
       font-size:11px;
       font-weight:800;
       line-height:1;
-    ">${text}</div>
-  `
-}
-
-function labelContent(name: string, active = false): string {
-  return `
-    <div style="
-      transform:translateY(-4px);
-      border:1px solid ${active ? '#1f6feb' : '#d0d5dd'};
-      border-radius:8px;
-      background:rgba(255,255,255,.94);
-      box-shadow:0 4px 12px rgba(15,23,42,.14);
-      color:#101828;
-      font-size:12px;
-      font-weight:${active ? 800 : 700};
-      padding:3px 7px;
-      white-space:nowrap;
-    ">${escapeHtml(name)}</div>
+    "></div>
   `
 }
 
@@ -127,7 +145,7 @@ function clearOverlays() {
   overlays.value = []
 }
 
-function renderMapContent() {
+function renderMapContent(adjustView = false) {
   if (!map.value || !amap.value) {
     return
   }
@@ -136,33 +154,27 @@ function renderMapContent() {
   const nextOverlays: any[] = []
 
   markerBuildings.value.forEach((building) => {
-    const active = building.id === props.activeBuildingId
+    const active = building.id === props.activeBuildingId ||
+      building.id === selectedSearchBuildingId.value
     const marker = new amap.value.Marker({
       position: pointToLngLat(building),
-      content: markerContent('building', active),
+      content: buildingHitZoneContent(active),
       anchor: 'center',
       zIndex: active ? 120 : 100
     })
-    marker.setLabel({
-      direction: 'top',
-      offset: new amap.value.Pixel(0, -8),
-      content: labelContent(building.name, active)
+    marker.on('click', () => {
+      selectedSearchBuildingId.value = building.id
+      emit('buildingClick', building.id)
     })
-    marker.on('click', () => emit('buildingClick', building.id))
     nextOverlays.push(marker)
   })
 
   if (props.fromPoint) {
     const marker = new amap.value.Marker({
       position: pointToLngLat(props.fromPoint),
-      content: markerContent('from'),
+      content: routeMarkerContent('from'),
       anchor: 'center',
       zIndex: 140
-    })
-    marker.setLabel({
-      direction: 'top',
-      offset: new amap.value.Pixel(0, -8),
-      content: labelContent(props.fromPoint.name, true)
     })
     nextOverlays.push(marker)
   }
@@ -170,14 +182,9 @@ function renderMapContent() {
   if (props.toPoint) {
     const marker = new amap.value.Marker({
       position: pointToLngLat(props.toPoint),
-      content: markerContent('to'),
+      content: routeMarkerContent('to'),
       anchor: 'center',
       zIndex: 150
-    })
-    marker.setLabel({
-      direction: 'top',
-      offset: new amap.value.Pixel(0, -8),
-      content: labelContent(props.toPoint.name, true)
     })
     nextOverlays.push(marker)
   }
@@ -200,10 +207,27 @@ function renderMapContent() {
   }
   overlays.value = nextOverlays
 
-  if (props.fitView && nextOverlays.length > 0) {
-    map.value.setFitView(nextOverlays, false, [42, 24, 42, 24], 17)
-  } else {
-    map.value.setCenter(getMapCenter())
+  if (adjustView) {
+    if (props.fitView && nextOverlays.length > 0) {
+      map.value.setFitView(nextOverlays, false, [42, 24, 42, 24], 17)
+    } else {
+      map.value.setCenter(getMapCenter())
+    }
+  }
+}
+
+function focusSearchResult(building: Building) {
+  selectedSearchBuildingId.value = building.id
+  renderMapContent()
+  if (map.value) {
+    const position = pointToLngLat(building)
+    map.value.setZoomAndCenter(Math.max(props.zoom, 18), position)
+  }
+}
+
+function openSelectedBuilding() {
+  if (selectedBuilding.value) {
+    emit('buildingClick', selectedBuilding.value.id)
   }
 }
 
@@ -226,7 +250,12 @@ async function initMap() {
     })
     map.value.addControl(new amap.value.Scale())
     map.value.addControl(new amap.value.ToolBar({ position: 'RB' }))
-    renderMapContent()
+    map.value.on('zoomend', () => {
+      currentZoom.value = map.value.getZoom()
+      renderMapContent()
+    })
+    currentZoom.value = map.value.getZoom()
+    renderMapContent(true)
   } catch {
     errorMessage.value = '真实地图加载失败，请检查高德 Key、域名白名单和网络连接'
   } finally {
@@ -243,7 +272,7 @@ watch(
     props.fromPoint,
     props.toPoint
   ],
-  () => renderMapContent(),
+  () => renderMapContent(true),
   { deep: true }
 )
 
@@ -265,9 +294,31 @@ onBeforeUnmount(() => {
       <span class="map-badge">AMap</span>
     </div>
 
+    <div v-if="markerBuildings.length > 0" class="map-search">
+      <van-search
+        v-model="searchQuery"
+        shape="round"
+        placeholder="搜索地点、学院、食堂、公寓"
+      />
+      <div v-if="searchResults.length > 0" class="map-search-results">
+        <button
+          v-for="building in searchResults"
+          :key="building.id"
+          type="button"
+          :class="{ active: building.id === selectedSearchBuildingId }"
+          @click="focusSearchResult(building)"
+        >
+          <strong>{{ building.name }}</strong>
+          <span>{{ building.type }}</span>
+        </button>
+      </div>
+      <p v-else-if="searchQuery.trim()" class="map-search-empty">没有找到匹配地点</p>
+    </div>
+
     <div
       v-if="hasConfig"
       class="real-map-shell"
+      :class="`level-${interactionLevel}`"
       :style="{ height }"
     >
       <div ref="mapContainer" class="real-map-container" />
@@ -278,6 +329,13 @@ onBeforeUnmount(() => {
       <strong>未配置高德地图 Key</strong>
       <span>请在 frontend/.env.local 中配置 VITE_AMAP_KEY 和 VITE_AMAP_SECURITY_CODE</span>
     </div>
+    <article v-if="hasConfig && selectedBuilding" class="map-selected-card">
+      <div>
+        <strong>{{ selectedBuilding.name }}</strong>
+        <span>{{ selectedBuilding.type }}</span>
+      </div>
+      <button type="button" @click="openSelectedBuilding">查看详情</button>
+    </article>
   </section>
 </template>
 
@@ -319,6 +377,57 @@ onBeforeUnmount(() => {
   padding: 4px 8px;
 }
 
+.map-search {
+  margin-bottom: 10px;
+}
+
+.map-search :deep(.van-search) {
+  padding: 0;
+  background: transparent;
+}
+
+.map-search-results {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 8px 0 2px;
+}
+
+.map-search-results button {
+  display: grid;
+  min-width: 138px;
+  border: 1px solid var(--cm-line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--cm-ink);
+  cursor: pointer;
+  gap: 3px;
+  padding: 8px 10px;
+  text-align: left;
+}
+
+.map-search-results button.active {
+  border-color: var(--cm-primary);
+  background: var(--cm-primary-soft);
+}
+
+.map-search-results strong {
+  overflow: hidden;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.map-search-results span,
+.map-search-empty {
+  color: var(--cm-muted);
+  font-size: 12px;
+}
+
+.map-search-empty {
+  margin: 8px 0 2px;
+}
+
 .real-map-shell {
   position: relative;
   overflow: hidden;
@@ -330,6 +439,50 @@ onBeforeUnmount(() => {
 .real-map-container {
   width: 100%;
   height: 100%;
+}
+
+.map-selected-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 10px;
+  border: 1px solid var(--cm-primary);
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: 0 8px 20px rgb(16 24 40 / 8%);
+  padding: 10px 12px;
+}
+
+.map-selected-card div {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.map-selected-card strong {
+  overflow: hidden;
+  color: var(--cm-ink);
+  font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.map-selected-card span {
+  color: var(--cm-muted);
+  font-size: 12px;
+}
+
+.map-selected-card button {
+  flex: 0 0 auto;
+  border: 0;
+  border-radius: 8px;
+  background: var(--cm-primary);
+  color: #fff;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 800;
+  padding: 7px 10px;
 }
 
 .map-state,

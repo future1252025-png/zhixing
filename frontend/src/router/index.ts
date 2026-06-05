@@ -44,6 +44,14 @@ export function resolveAuthRedirect(
   return null
 }
 
+export function shouldLoadCurrentUser(
+  to: AuthRouteTarget,
+  hasToken: boolean,
+  hasCurrentUser: boolean
+): boolean {
+  return Boolean(to.meta.requiresAuth && hasToken && !hasCurrentUser)
+}
+
 const routes: RouteRecordRaw[] = [
   { path: '/', redirect: '/home' },
   { path: '/login', name: 'login', component: LoginPage, meta: { publicOnly: true } },
@@ -108,14 +116,27 @@ const router = createRouter({
   routes
 })
 
-router.beforeEach((to) => {
+router.beforeEach(async (to) => {
   const authStore = useAuthStore()
+  const target = {
+    path: to.path,
+    fullPath: to.fullPath,
+    meta: to.meta
+  }
+
+  if (shouldLoadCurrentUser(target, Boolean(authStore.token), Boolean(authStore.currentUser))) {
+    try {
+      await authStore.loadCurrentUser()
+    } catch {
+      return {
+        path: '/login',
+        query: { redirect: to.fullPath }
+      }
+    }
+  }
+
   const redirect = resolveAuthRedirect(
-    {
-      path: to.path,
-      fullPath: to.fullPath,
-      meta: to.meta
-    },
+    target,
     authStore.isAuthenticated
   )
   return redirect ?? true

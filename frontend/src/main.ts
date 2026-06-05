@@ -9,6 +9,7 @@ import {
   Field,
   Form,
   NavBar,
+  Search,
   Tabbar,
   TabbarItem
 } from 'vant'
@@ -31,6 +32,7 @@ app.use(Empty)
 app.use(Field)
 app.use(Form)
 app.use(NavBar)
+app.use(Search)
 app.use(Tabbar)
 app.use(TabbarItem)
 

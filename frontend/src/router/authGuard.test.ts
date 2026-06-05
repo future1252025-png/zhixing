@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import router, { resolveAuthRedirect } from './index'
+import router, { resolveAuthRedirect, shouldLoadCurrentUser } from './index'
 
 describe('auth route guard decisions', () => {
   it('redirects anonymous users away from protected pages', () => {
@@ -43,6 +43,34 @@ describe('auth route guard decisions', () => {
     )
 
     expect(redirect).toBeNull()
+  })
+
+  it('loads current user before opening protected pages with a saved token', () => {
+    const shouldLoad = shouldLoadCurrentUser(
+      {
+        path: '/home',
+        fullPath: '/home',
+        meta: { requiresAuth: true }
+      },
+      true,
+      false
+    )
+
+    expect(shouldLoad).toBe(true)
+  })
+
+  it('does not load current user for public pages', () => {
+    const shouldLoad = shouldLoadCurrentUser(
+      {
+        path: '/login',
+        fullPath: '/login',
+        meta: { publicOnly: true }
+      },
+      true,
+      false
+    )
+
+    expect(shouldLoad).toBe(false)
   })
 
   it('registers building detail as a protected route', () => {
