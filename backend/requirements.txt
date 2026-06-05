@@ -5,3 +5,5 @@ httpx
 sqlalchemy
 PyJWT
 bcrypt
+python-multipart
+openpyxl

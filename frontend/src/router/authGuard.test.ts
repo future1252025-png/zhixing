@@ -90,9 +90,12 @@ describe('auth route guard decisions', () => {
   it('registers course form routes as protected routes', () => {
     const newMatch = router.resolve('/courses/new')
     const editMatch = router.resolve('/courses/1/edit')
+    const importMatch = router.resolve('/courses/import')
 
     expect(newMatch.name).toBe('course-new')
     expect(newMatch.meta.requiresAuth).toBe(true)
+    expect(importMatch.name).toBe('course-import')
+    expect(importMatch.meta.requiresAuth).toBe(true)
     expect(editMatch.name).toBe('course-edit')
     expect(editMatch.meta.requiresAuth).toBe(true)
   })

@@ -1,10 +1,11 @@
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile, status
 from sqlalchemy.orm import Session
 
 from app.core.security import get_current_user
 from app.db.database import get_session
 from app.models import User
 from app.schemas.course import CourseCreate, CourseRead, CourseUpdate
+from app.schemas.course_import import CourseImportPreviewResponse
 from app.services.course_service import (
     building_exists,
     create_course,
@@ -13,6 +14,7 @@ from app.services.course_service import (
     list_courses,
     update_course,
 )
+from app.services.course_import_service import build_course_import_preview
 
 router = APIRouter(prefix="/api/courses", tags=["courses"])
 
@@ -51,6 +53,23 @@ def create_current_user_course(
 ) -> CourseRead:
     require_building(session, payload.building_id)
     return create_course(session, current_user.id, payload)
+
+
+@router.post("/import/preview", response_model=CourseImportPreviewResponse)
+async def preview_course_import(
+    file: UploadFile = File(...),
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_user),
+) -> CourseImportPreviewResponse:
+    _ = current_user
+    content = await file.read()
+    try:
+        return build_course_import_preview(session, file.filename or "", content)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
 
 
 @router.put("/{course_id}", response_model=CourseRead)

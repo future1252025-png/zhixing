@@ -1,5 +1,10 @@
 import request from './request'
-import type { Course, CoursePayload, CourseUpdatePayload } from '@/types/course'
+import type {
+  Course,
+  CourseImportPreviewResponse,
+  CoursePayload,
+  CourseUpdatePayload
+} from '@/types/course'
 
 export async function getCourses(): Promise<Course[]> {
   const response = await request.get<Course[]>('/api/courses')
@@ -21,4 +26,19 @@ export async function updateCourse(
 
 export async function deleteCourse(courseId: number): Promise<void> {
   await request.delete(`/api/courses/${courseId}`)
+}
+
+export async function previewCourseImport(
+  file: File
+): Promise<CourseImportPreviewResponse> {
+  const formData = new FormData()
+  formData.append('file', file)
+  const response = await request.post<CourseImportPreviewResponse>(
+    '/api/courses/import/preview',
+    formData,
+    {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    }
+  )
+  return response.data
 }

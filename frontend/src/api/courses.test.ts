@@ -5,6 +5,7 @@ import {
   createCourse,
   deleteCourse,
   getCourses,
+  previewCourseImport,
   updateCourse
 } from './courses'
 
@@ -84,5 +85,28 @@ describe('courses api', () => {
     await deleteCourse(1)
 
     expect(request.delete).toHaveBeenCalledWith('/api/courses/1')
+  })
+
+  it('uploads an HTML or Excel course table for preview', async () => {
+    const file = new File(['<table></table>'], 'schedule.html', { type: 'text/html' })
+    vi.mocked(request.post).mockResolvedValue({
+      data: {
+        total: 0,
+        matched_count: 0,
+        needs_review_count: 0,
+        items: []
+      }
+    })
+
+    const result = await previewCourseImport(file)
+
+    expect(request.post).toHaveBeenCalledWith(
+      '/api/courses/import/preview',
+      expect.any(FormData),
+      expect.objectContaining({
+        headers: { 'Content-Type': 'multipart/form-data' }
+      })
+    )
+    expect(result.total).toBe(0)
   })
 })

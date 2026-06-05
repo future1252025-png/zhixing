@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest'
 
 import {
   buildEmptyCourseForm,
+  filterCoursesByWeek,
   findCourseTimeOverlap,
   groupCoursesByWeekday,
+  isCourseActiveInWeek,
   validateCourseForm
 } from './course'
 import type { Course } from '@/types/course'
@@ -84,6 +86,39 @@ describe('course helpers', () => {
     expect(grouped[0].weekday).toBe(1)
     expect(grouped[0].courses.map((course) => course.id)).toEqual([1, 3])
     expect(grouped[1].weekday).toBe(2)
+  })
+
+  it('can include Saturday and Sunday even when a week has no courses on those days', () => {
+    const grouped = groupCoursesByWeekday([baseCourse], { includeEmpty: true })
+
+    expect(grouped).toHaveLength(7)
+    expect(grouped.map((group) => group.weekday)).toEqual([1, 2, 3, 4, 5, 6, 7])
+    expect(grouped.find((group) => group.weekday === 6)?.courses).toEqual([])
+    expect(grouped.find((group) => group.weekday === 7)?.courses).toEqual([])
+  })
+
+  it('detects active courses for plain, comma, odd, and even week expressions', () => {
+    expect(isCourseActiveInWeek('1-16', 9)).toBe(true)
+    expect(isCourseActiveInWeek('1-16(周)[01-02节]', 17)).toBe(false)
+    expect(isCourseActiveInWeek('2,4,6,8,10,12,14,16', 10)).toBe(true)
+    expect(isCourseActiveInWeek('2,4,6,8,10,12,14,16', 11)).toBe(false)
+    expect(isCourseActiveInWeek('1-16(单)', 5)).toBe(true)
+    expect(isCourseActiveInWeek('1-16(单)', 6)).toBe(false)
+    expect(isCourseActiveInWeek('1-16(双)', 6)).toBe(true)
+    expect(isCourseActiveInWeek('', 20)).toBe(true)
+  })
+
+  it('filters courses by selected teaching week', () => {
+    const filtered = filterCoursesByWeek(
+      [
+        baseCourse,
+        { ...baseCourse, id: 2, weeks: '2,4,6' },
+        { ...baseCourse, id: 3, weeks: '9-16' }
+      ],
+      6
+    )
+
+    expect(filtered.map((course) => course.id)).toEqual([1, 2])
   })
 
   it('finds same-day time overlaps without blocking save', () => {

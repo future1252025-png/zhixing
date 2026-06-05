@@ -16,6 +16,10 @@ export type WeekdayCourseGroup = {
   courses: Course[]
 }
 
+export type GroupCoursesOptions = {
+  includeEmpty?: boolean
+}
+
 export function buildEmptyCourseForm(): CourseForm {
   return {
     course_name: '',
@@ -115,8 +119,80 @@ export function getWeekdayLabel(weekday: number): string {
   return WEEKDAYS.find((item) => item.value === weekday)?.label ?? `星期${weekday}`
 }
 
-export function groupCoursesByWeekday(courses: Course[]): WeekdayCourseGroup[] {
-  return WEEKDAYS.map((weekday) => ({
+function normalizeWeeksExpression(weeks: string | null | undefined): string {
+  return (weeks ?? '')
+    .replace(/\[[^\]]+节\]/g, '')
+    .replace(/\(周\)/g, '')
+    .replace(/周/g, '')
+    .trim()
+}
+
+function parseWeekNumbers(weeks: string): Set<number> {
+  const values = new Set<number>()
+  for (const part of weeks.split(',')) {
+    const text = part.trim()
+    if (!text) {
+      continue
+    }
+    const range = text.match(/^(\d{1,2})-(\d{1,2})$/)
+    if (range) {
+      const start = Number(range[1])
+      const end = Number(range[2])
+      for (let week = start; week <= end; week += 1) {
+        values.add(week)
+      }
+      continue
+    }
+    const single = Number(text)
+    if (Number.isInteger(single)) {
+      values.add(single)
+    }
+  }
+  return values
+}
+
+export function isCourseActiveInWeek(
+  weeks: string | null | undefined,
+  selectedWeek: number
+): boolean {
+  const week = Number(selectedWeek)
+  if (!Number.isInteger(week) || week <= 0) {
+    return false
+  }
+
+  const normalized = normalizeWeeksExpression(weeks)
+  if (!normalized) {
+    return true
+  }
+
+  const oddOnly = normalized.includes('(单)')
+  const evenOnly = normalized.includes('(双)')
+  const weekText = normalized.replace(/\((单|双)\)/g, '')
+  const weekNumbers = parseWeekNumbers(weekText)
+  if (weekNumbers.size === 0) {
+    return true
+  }
+  if (!weekNumbers.has(week)) {
+    return false
+  }
+  if (oddOnly && week % 2 === 0) {
+    return false
+  }
+  if (evenOnly && week % 2 !== 0) {
+    return false
+  }
+  return true
+}
+
+export function filterCoursesByWeek(courses: Course[], selectedWeek: number): Course[] {
+  return courses.filter((course) => isCourseActiveInWeek(course.weeks, selectedWeek))
+}
+
+export function groupCoursesByWeekday(
+  courses: Course[],
+  options: GroupCoursesOptions = {}
+): WeekdayCourseGroup[] {
+  const groups = WEEKDAYS.map((weekday) => ({
     weekday: weekday.value,
     label: weekday.label,
     courses: courses
@@ -127,7 +203,12 @@ export function groupCoursesByWeekday(courses: Course[]): WeekdayCourseGroup[] {
         }
         return left.start_time.localeCompare(right.start_time)
       })
-  })).filter((group) => group.courses.length > 0)
+  }))
+
+  if (options.includeEmpty) {
+    return groups
+  }
+  return groups.filter((group) => group.courses.length > 0)
 }
 
 export function findCourseTimeOverlap(
