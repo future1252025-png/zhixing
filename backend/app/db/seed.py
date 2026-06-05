@@ -84,7 +84,7 @@ DEMO_BUILDINGS = load_map_points_seed()
 DEMO_LOCATION_PRESETS = [
     {
         "name": "一期学生公寓",
-        "building": "湖北大学武昌校区一期学生公寓",
+        "building": "湖北大学团结学生公寓",
         "description": "演示从学生公寓去上课",
     },
     {
@@ -140,7 +140,7 @@ DEMO_COURSES = [
 DEMO_MESSAGES = [
     {"building": "湖北大学武昌校区图书馆", "content": "三楼靠窗还有空位"},
     {"building": "湖北大学武昌校区图书馆", "content": "今天二楼比较安静"},
-    {"building": "湖北大学快递服务中心快递柜服务区-东区", "content": "下午取件人比较多"},
+    {"building": "诚信公寓菜鸟驿站(七星路店)", "content": "下午取件人比较多"},
     {"building": "求索广场", "content": "晚上附近比较安静，适合自习"},
 ]
 

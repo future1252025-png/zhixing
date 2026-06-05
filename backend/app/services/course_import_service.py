@@ -223,13 +223,32 @@ def _parse_rows(rows: list[list[str]]) -> list[ParsedCourseBlock]:
     return blocks
 
 
+def _building_aliases(building: Building) -> set[str]:
+    name = building.name.replace(" ", "")
+    aliases = {name}
+    aliases.update(re.findall(r"教\d+", name))
+
+    teaching_number = re.search(r"(\d+)号教学楼", name)
+    if teaching_number:
+        aliases.add(f"教{teaching_number.group(1)}")
+        aliases.add(f"{teaching_number.group(1)}号教学楼")
+
+    description = (building.description or "").replace(" ", "")
+    aliases.update(re.findall(r"教\d+", description))
+    if "实训大楼" in name or "综合实训大楼" in name or "实训大楼" in description:
+        aliases.update({"实训大楼", "综合实训大楼"})
+    if "双创大楼" in name or "双创大楼" in description:
+        aliases.add("双创大楼")
+    return {alias for alias in aliases if alias}
+
+
 def _match_building(buildings: list[Building], location: str | None) -> Building | None:
     if not location:
         return None
     normalized = location.replace(" ", "")
     for building in buildings:
-        name = building.name.replace(" ", "")
-        if name and (name in normalized or normalized in name):
+        aliases = _building_aliases(building)
+        if any(alias in normalized or normalized in alias for alias in aliases):
             return building
     return None
 

@@ -9,18 +9,21 @@ import {
   type LatLngPoint,
   wgs84ToGcj02
 } from '@/utils/geo'
+import {
+  buildCampusSearchKeywords,
+  clearCollectorDraft,
+  readCollectorDraft,
+  writeCollectorDraft,
+  type CollectorPoint
+} from '@/utils/mapCollector'
 
-type CollectedPoint = {
-  id: string
-  name: string
-  type: string
-  address: string
-  latitude: number
-  longitude: number
+type CollectedPoint = CollectorPoint
+
+type PendingManualPoint = {
   gcjLatitude: number
   gcjLongitude: number
-  source: 'search' | 'click'
-  selected: boolean
+  latitude: number
+  longitude: number
 }
 
 type PoiResult = {
@@ -49,19 +52,7 @@ const campusCenterWgs = {
   latitude: 30.58122,
   longitude: 114.32917
 }
-const defaultKeywords = [
-  '湖北大学',
-  '湖北大学 图书馆',
-  '湖北大学 学院',
-  '湖北大学 体育馆',
-  '湖北大学 食堂',
-  '湖北大学 宿舍',
-  '湖北大学 广场',
-  '湖北大学 快递',
-  '湖北大学 菜鸟',
-  '湖北大学 校史馆',
-  '湖北大学 教学楼'
-]
+const allCampusKeywords = buildCampusSearchKeywords()
 
 const mapContainer = shallowRef<HTMLDivElement | null>(null)
 const map = shallowRef<any>(null)
@@ -72,8 +63,13 @@ const campusPolygonWgs = ref<LatLngPoint[]>([...defaultCampusPolygon])
 const keyword = ref('湖北大学')
 const loading = ref(false)
 const drawingBoundary = ref(false)
+const manualPointMode = ref(false)
 const boundaryMode = ref<'默认范围' | '高德范围' | '手绘范围'>('默认范围')
 const errorMessage = ref('')
+const pendingManualPoint = ref<PendingManualPoint | null>(null)
+const manualPointName = ref('')
+const manualPointType = ref('教学楼')
+const manualPointAddress = ref('')
 
 const selectedPoints = computed(() => points.value.filter((point) => point.selected))
 const seedPreview = computed(() => buildSeedData(selectedPoints.value))
@@ -138,10 +134,11 @@ function createPoint(
   gcjLatitude: number,
   gcjLongitude: number,
   source: CollectedPoint['source'],
-  sourceId = ''
+  sourceId = '',
+  allowOutsideCampus = false
 ): CollectedPoint | null {
   const [longitude, latitude] = gcj02ToWgs84(gcjLatitude, gcjLongitude)
-  if (!isInsideCampus(latitude, longitude)) {
+  if (!allowOutsideCampus && !isInsideCampus(latitude, longitude)) {
     return null
   }
 
@@ -182,7 +179,28 @@ function addPoints(nextPoints: CollectedPoint[]) {
     }
   })
   points.value = merged
+  persistCollectorDraft()
   renderMapOverlays()
+}
+
+function persistCollectorDraft() {
+  writeCollectorDraft(window.localStorage, {
+    points: points.value,
+    campusPolygonWgs: campusPolygonWgs.value,
+    boundaryMode: boundaryMode.value
+  })
+}
+
+function restoreCollectorDraft() {
+  const draft = readCollectorDraft(window.localStorage)
+  if (!draft) {
+    return
+  }
+  points.value = draft.points
+  if (draft.campusPolygonWgs.length >= 3) {
+    campusPolygonWgs.value = draft.campusPolygonWgs
+    boundaryMode.value = draft.boundaryMode
+  }
 }
 
 function createMarker(point: CollectedPoint): any {
@@ -212,6 +230,16 @@ function createBoundaryVertex(point: LatLngPoint, index: number): any {
     content: `<div class="boundary-vertex">${index + 1}</div>`,
     zIndex: 150
   })
+}
+
+function createPendingManualMarker(point: PendingManualPoint): any {
+  const marker = new amap.value.Marker({
+    position: [point.gcjLongitude, point.gcjLatitude],
+    anchor: 'center',
+    content: '<div class="collector-pending-marker">待保存</div>',
+    zIndex: 180
+  })
+  return marker
 }
 
 function renderCampusBoundary() {
@@ -261,6 +289,12 @@ function renderMapOverlays() {
   if (markers.length > 0) {
     map.value.add(markers)
     overlays.value.push(...markers)
+  }
+
+  if (pendingManualPoint.value) {
+    const pendingMarker = createPendingManualMarker(pendingManualPoint.value)
+    map.value.add(pendingMarker)
+    overlays.value.push(pendingMarker)
   }
 
   if (overlays.value.length > 0) {
@@ -349,6 +383,7 @@ async function tryUseAmapCampusBoundary() {
     campusPolygonWgs.value = boundary
     boundaryMode.value = '高德范围'
     drawingBoundary.value = false
+    persistCollectorDraft()
     renderMapOverlays()
     showSuccessToast('已使用高德返回的校园边界')
   } finally {
@@ -379,12 +414,12 @@ async function autoCollectCampusPois() {
   errorMessage.value = ''
   try {
     let count = 0
-    for (const item of defaultKeywords) {
+    for (const item of allCampusKeywords) {
       const result = await searchKeyword(item)
       count += result.length
       addPoints(result)
     }
-    showSuccessToast(`自动采集完成，命中 ${count} 条候选`)
+    showSuccessToast(`全量搜索完成，命中 ${count} 条候选`)
   } finally {
     loading.value = false
   }
@@ -395,6 +430,7 @@ function startDrawingBoundary() {
   points.value = []
   drawingBoundary.value = true
   boundaryMode.value = '手绘范围'
+  persistCollectorDraft()
   renderMapOverlays()
   showToast('请沿地图上的湖北大学边界依次点击')
 }
@@ -405,6 +441,7 @@ function finishDrawingBoundary() {
     return
   }
   drawingBoundary.value = false
+  persistCollectorDraft()
   renderMapOverlays()
   showSuccessToast('校园范围已更新')
 }
@@ -414,6 +451,7 @@ function resetDefaultBoundary() {
   boundaryMode.value = '默认范围'
   drawingBoundary.value = false
   points.value = []
+  clearCollectorDraft(window.localStorage)
   renderMapOverlays()
 }
 
@@ -426,32 +464,101 @@ function handleMapClick(event: any) {
       latitude: Number(latitude.toFixed(6)),
       longitude: Number(longitude.toFixed(6))
     })
+    persistCollectorDraft()
     renderMapOverlays()
     return
   }
 
+  if (!manualPointMode.value) {
+    showToast('如需自定义地点，请先打开手动标点模式')
+    return
+  }
+
+  setPendingManualPoint(lnglat.getLat(), lnglat.getLng())
+}
+
+function setPendingManualPoint(gcjLatitude: number, gcjLongitude: number) {
+  const [longitude, latitude] = gcj02ToWgs84(gcjLatitude, gcjLongitude)
+  pendingManualPoint.value = {
+    gcjLatitude: Number(gcjLatitude.toFixed(6)),
+    gcjLongitude: Number(gcjLongitude.toFixed(6)),
+    latitude: Number(latitude.toFixed(6)),
+    longitude: Number(longitude.toFixed(6))
+  }
+  manualPointName.value = ''
+  manualPointType.value = '教学楼'
+  manualPointAddress.value = ''
+  renderMapOverlays()
+  showToast('已选中坐标，请填写地点名称')
+}
+
+function toggleManualPointMode() {
+  manualPointMode.value = !manualPointMode.value
+  if (manualPointMode.value) {
+    drawingBoundary.value = false
+    showToast('手动标点已开启，请点击地图或使用地图中心')
+  }
+}
+
+function useMapCenterAsManualPoint() {
+  if (!map.value) {
+    showFailToast('地图还没有加载完成')
+    return
+  }
+  manualPointMode.value = true
+  const center = map.value.getCenter()
+  setPendingManualPoint(center.getLat(), center.getLng())
+}
+
+function saveManualPoint() {
+  if (!pendingManualPoint.value) {
+    showFailToast('请先在地图上点击一个位置')
+    return
+  }
+  const name = manualPointName.value.trim()
+  if (!name) {
+    showFailToast('请输入地点名称，例如 3号教学楼')
+    return
+  }
   const point = createPoint(
-    `手动采点 ${points.value.length + 1}`,
-    '手动采点',
-    '地图点击采集',
-    lnglat.getLat(),
-    lnglat.getLng(),
-    'click'
+    name,
+    manualPointType.value.trim() || '校园地点',
+    manualPointAddress.value.trim() || '手动标点',
+    pendingManualPoint.value.gcjLatitude,
+    pendingManualPoint.value.gcjLongitude,
+    'click',
+    '',
+    true
   )
   if (!point) {
     showFailToast('该点不在当前校园多边形范围内')
     return
   }
   addPoints([point])
+  pendingManualPoint.value = null
+  manualPointName.value = ''
+  manualPointAddress.value = ''
+  manualPointMode.value = false
+  renderMapOverlays()
+  showSuccessToast(`已添加 ${name}`)
+}
+
+function cancelManualPoint() {
+  pendingManualPoint.value = null
+  manualPointName.value = ''
+  manualPointAddress.value = ''
+  renderMapOverlays()
 }
 
 function togglePoint(point: CollectedPoint) {
   point.selected = !point.selected
+  persistCollectorDraft()
   renderMapOverlays()
 }
 
 function clearPoints() {
   points.value = []
+  clearCollectorDraft(window.localStorage)
   renderMapOverlays()
 }
 
@@ -512,6 +619,7 @@ async function initMap() {
   try {
     amap.value = await loadAMapSdk()
     await nextTick()
+    restoreCollectorDraft()
     map.value = new amap.value.Map(mapContainer.value, {
       center: centerGcj.value,
       zoom: 17,
@@ -551,6 +659,9 @@ onBeforeUnmount(() => {
           <span>{{ selectedPoints.length }} 个已选</span>
         </div>
         <div ref="mapContainer" class="collector-map">
+          <div class="map-mode-tip" :class="{ active: manualPointMode }">
+            {{ manualPointMode ? '手动标点模式：点击地图选择位置' : '需要自定义地点时，先打开右侧手动标点模式' }}
+          </div>
           <div v-if="loading" class="collector-state">正在处理地图数据...</div>
           <div v-if="errorMessage" class="collector-state error">{{ errorMessage }}</div>
         </div>
@@ -576,9 +687,62 @@ onBeforeUnmount(() => {
             搜索
           </van-button>
         </div>
+        <div class="manual-point-card">
+          <strong>手动标点</strong>
+          <p>搜索不到“教3、教4、实训大楼”等内部地点时，打开模式后点击地图，或把地图移动到目标位置后使用地图中心。</p>
+          <div class="manual-actions">
+            <van-button
+              :type="manualPointMode ? 'primary' : 'default'"
+              size="small"
+              @click="toggleManualPointMode"
+            >
+              {{ manualPointMode ? '关闭手动标点' : '打开手动标点' }}
+            </van-button>
+            <van-button plain size="small" @click="useMapCenterAsManualPoint">
+              使用地图中心
+            </van-button>
+          </div>
+          <p v-if="!pendingManualPoint" class="manual-empty">
+            还没有选中坐标。请先打开手动标点后点击地图，或点击“使用地图中心”。
+          </p>
+          <template v-if="pendingManualPoint">
+            <small>
+              已选坐标：{{ pendingManualPoint.latitude }}, {{ pendingManualPoint.longitude }}
+            </small>
+            <label class="manual-label">地点名称</label>
+            <input
+              v-model="manualPointName"
+              class="collector-input"
+              placeholder="地点名称，例如 3号教学楼"
+            />
+            <label class="manual-label">地点类型</label>
+            <select v-model="manualPointType" class="collector-input">
+              <option value="教学楼">教学楼</option>
+              <option value="实验楼">实验楼</option>
+              <option value="宿舍">宿舍</option>
+              <option value="食堂">食堂</option>
+              <option value="体育设施">体育设施</option>
+              <option value="校园地点">校园地点</option>
+            </select>
+            <label class="manual-label">地址信息 / 别名</label>
+            <input
+              v-model="manualPointAddress"
+              class="collector-input"
+              placeholder="说明/别名，可填 教3、教4、实训大楼"
+            />
+            <div class="manual-actions">
+              <van-button type="primary" size="small" @click="saveManualPoint">
+                保存地点
+              </van-button>
+              <van-button plain size="small" @click="cancelManualPoint">
+                取消
+              </van-button>
+            </div>
+          </template>
+        </div>
         <div class="collector-actions">
           <van-button block plain :loading="loading" @click="autoCollectCampusPois">
-            自动搜索常见校园地点
+            自动搜索全部地点
           </van-button>
           <van-button block plain @click="clearPoints">清空候选</van-button>
           <van-button block type="primary" :disabled="selectedPoints.length === 0" @click="copySeedData">
@@ -678,6 +842,26 @@ onBeforeUnmount(() => {
   background: #eef4ff;
 }
 
+.map-mode-tip {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 2;
+  max-width: calc(100% - 20px);
+  border: 1px solid rgb(255 255 255 / 70%);
+  border-radius: 999px;
+  background: rgb(16 24 40 / 72%);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 800;
+  padding: 7px 10px;
+  pointer-events: none;
+}
+
+.map-mode-tip.active {
+  background: rgb(245 158 11 / 92%);
+}
+
 .collector-state {
   position: absolute;
   inset: 0;
@@ -719,6 +903,47 @@ onBeforeUnmount(() => {
 
 .collector-actions {
   margin-top: 10px;
+}
+
+.manual-point-card {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+  border: 1px solid var(--cm-line);
+  border-radius: 8px;
+  background: #f8fbff;
+  padding: 10px;
+}
+
+.manual-point-card strong {
+  color: var(--cm-ink);
+  font-size: 14px;
+}
+
+.manual-point-card p,
+.manual-point-card small {
+  margin: 0;
+  color: var(--cm-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.manual-empty {
+  border: 1px dashed var(--cm-line);
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 8px;
+}
+
+.manual-label {
+  color: var(--cm-ink);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.manual-actions {
+  display: flex;
+  gap: 8px;
 }
 
 .collector-list {
@@ -796,6 +1021,21 @@ onBeforeUnmount(() => {
   color: #ffffff;
   font-size: 10px;
   font-weight: 800;
+}
+
+:global(.collector-pending-marker) {
+  display: grid;
+  min-width: 54px;
+  height: 28px;
+  place-items: center;
+  border: 2px solid #ffffff;
+  border-radius: 999px;
+  background: #f59e0b;
+  box-shadow: 0 8px 18px rgb(15 23 42 / 24%);
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 800;
+  padding: 0 10px;
 }
 
 :global(.collector-label) {
