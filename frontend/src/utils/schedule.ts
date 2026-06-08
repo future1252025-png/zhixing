@@ -21,6 +21,14 @@ export type RouteVisualPoints = {
   lineAngle: number
 }
 
+export type SearchableScheduleLocation = {
+  id: number
+  name: string
+  type?: string | null
+  latitude: number
+  longitude: number
+}
+
 export function formatDistance(distanceMeters: number): string {
   if (distanceMeters < 1000) {
     return `${Math.round(distanceMeters)} 米`
@@ -79,4 +87,31 @@ export function getRouteVisualPoints(
     lineWidth: Math.sqrt(deltaX ** 2 + deltaY ** 2),
     lineAngle: (Math.atan2(deltaY, deltaX) * 180) / Math.PI
   }
+}
+
+function normalizeSearchText(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '')
+    .replace(/(\d+)号教学楼/g, '教$1')
+    .replace(/第(\d+)教学楼/g, '教$1')
+}
+
+export function filterScheduleLocations<T extends SearchableScheduleLocation>(
+  locations: T[],
+  query: string,
+  limit = 8
+): T[] {
+  const text = normalizeSearchText(query)
+  if (!text) {
+    return locations.slice(0, limit)
+  }
+  return locations
+    .filter((location) => {
+      const name = normalizeSearchText(location.name)
+      const type = normalizeSearchText(location.type ?? '')
+      return name.includes(text) || type.includes(text) || text.includes(name)
+    })
+    .slice(0, limit)
 }

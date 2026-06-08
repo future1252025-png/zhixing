@@ -32,6 +32,25 @@ const courseId = computed(() => {
 const isEdit = computed(() => courseId.value !== null)
 const pageTitle = computed(() => (isEdit.value ? '编辑课程' : '新增课程'))
 
+function applyCreateDefaultsFromQuery() {
+  if (isEdit.value) {
+    return
+  }
+
+  const weekday = Number(route.query.weekday)
+  const startTime = typeof route.query.start_time === 'string' ? route.query.start_time : ''
+  const endTime = typeof route.query.end_time === 'string' ? route.query.end_time : ''
+  if (Number.isInteger(weekday) && weekday >= 1 && weekday <= 7) {
+    form.weekday = weekday
+  }
+  if (/^\d{2}:\d{2}$/.test(startTime)) {
+    form.start_time = startTime
+  }
+  if (/^\d{2}:\d{2}$/.test(endTime)) {
+    form.end_time = endTime
+  }
+}
+
 function getErrorMessage(error: unknown): string {
   if (isAxiosError(error)) {
     const detail = error.response?.data?.detail
@@ -60,6 +79,8 @@ async function loadFormData() {
         return
       }
       Object.assign(form, courseToForm(course))
+    } else {
+      applyCreateDefaultsFromQuery()
     }
   } catch (error) {
     errorMessage.value = getErrorMessage(error)

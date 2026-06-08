@@ -4,15 +4,12 @@ import { useRouter } from 'vue-router'
 
 import {
   getBuildings,
-  getLocationPresets,
-  type Building,
-  type LocationPreset
+  type Building
 } from '@/api/buildings'
 import RealCampusMap from '@/components/RealCampusMap.vue'
 
 const router = useRouter()
 const buildings = ref<Building[]>([])
-const locationPresets = ref<LocationPreset[]>([])
 const loading = ref(true)
 const errorMessage = ref('')
 
@@ -20,12 +17,7 @@ async function loadHomeData() {
   loading.value = true
   errorMessage.value = ''
   try {
-    const [buildingResult, presetResult] = await Promise.all([
-      getBuildings(),
-      getLocationPresets()
-    ])
-    buildings.value = buildingResult
-    locationPresets.value = presetResult
+    buildings.value = await getBuildings()
   } catch {
     errorMessage.value = '校园建筑加载失败，请稍后重试'
   } finally {
@@ -54,8 +46,8 @@ onMounted(loadHomeData)
             <strong>{{ buildings.length || '-' }}</strong>
           </div>
           <div class="metric-item">
-            <span>位置预设</span>
-            <strong>{{ locationPresets.length || '-' }}</strong>
+            <span>入口</span>
+            <strong>地图</strong>
           </div>
           <div class="metric-item">
             <span>模式</span>
@@ -77,26 +69,6 @@ onMounted(loadHomeData)
         <van-button type="primary" size="small" @click="loadHomeData">重试</van-button>
       </van-empty>
       <van-empty v-else-if="buildings.length === 0" description="暂无建筑数据" />
-
-      <section class="section-block">
-        <div class="section-heading">
-          <div>
-            <h2 class="section-title">演示当前位置预设</h2>
-            <p class="section-subtitle">用于出发建议的手动当前位置</p>
-          </div>
-        </div>
-        <div v-if="locationPresets.length > 0" class="preset-list">
-          <article
-            v-for="preset in locationPresets"
-            :key="preset.id"
-            class="preset-item"
-          >
-            <strong>{{ preset.name }}</strong>
-            <span>{{ preset.description || preset.building_name || '演示位置' }}</span>
-          </article>
-        </div>
-        <p v-else-if="!loading && !errorMessage" class="muted-text">暂无位置预设</p>
-      </section>
     </div>
   </section>
 </template>
@@ -111,28 +83,4 @@ onMounted(loadHomeData)
   text-align: center;
 }
 
-.preset-list {
-  display: grid;
-  gap: 8px;
-}
-
-.preset-item {
-  display: grid;
-  gap: 4px;
-  border: 1px solid var(--cm-line);
-  border-radius: var(--cm-radius);
-  background: rgb(255 255 255 / 86%);
-  padding: 12px;
-}
-
-.preset-item strong {
-  color: var(--cm-ink);
-  font-size: 15px;
-}
-
-.preset-item span {
-  color: var(--cm-muted);
-  font-size: 13px;
-  line-height: 1.5;
-}
 </style>

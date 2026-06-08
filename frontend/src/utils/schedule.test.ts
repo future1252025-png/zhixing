@@ -3,7 +3,8 @@ import { describe, expect, it } from 'vitest'
 import {
   formatDistance,
   getStatusMeta,
-  getRouteVisualPoints
+  getRouteVisualPoints,
+  filterScheduleLocations
 } from './schedule'
 
 describe('schedule helpers', () => {
@@ -37,5 +38,15 @@ describe('schedule helpers', () => {
     expect(points.from.top).toBeGreaterThan(points.to.top)
     expect(points.lineWidth).toBeGreaterThan(0)
     expect(points.lineAngle).toBeLessThan(0)
+  })
+
+  it('filters schedule locations by name and type', () => {
+    const locations = [
+      { id: 1, name: '3号教学楼', type: '教学楼', latitude: 30, longitude: 114 },
+      { id: 2, name: '风华园食堂', type: '食堂', latitude: 30, longitude: 114 }
+    ]
+
+    expect(filterScheduleLocations(locations, '教3')[0].name).toBe('3号教学楼')
+    expect(filterScheduleLocations(locations, '食堂')[0].name).toBe('风华园食堂')
   })
 })

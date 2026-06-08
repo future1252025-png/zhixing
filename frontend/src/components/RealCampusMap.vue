@@ -22,6 +22,7 @@ const props = withDefaults(defineProps<{
   height?: string
   zoom?: number
   fitView?: boolean
+  walkingRoute?: boolean
 }>(), {
   title: '校园真实地图',
   subtitle: '基于高德地图展示湖北大学建筑位置',
@@ -31,7 +32,8 @@ const props = withDefaults(defineProps<{
   toPoint: null,
   height: '260px',
   zoom: 16,
-  fitView: true
+  fitView: true,
+  walkingRoute: false
 })
 
 const emit = defineEmits<{
@@ -42,6 +44,7 @@ const mapContainer = shallowRef<HTMLDivElement | null>(null)
 const map = shallowRef<any>(null)
 const amap = shallowRef<any>(null)
 const overlays = shallowRef<any[]>([])
+const routePlanner = shallowRef<any>(null)
 const loading = shallowRef(false)
 const errorMessage = shallowRef('')
 const searchQuery = ref('')
@@ -145,11 +148,36 @@ function clearOverlays() {
   overlays.value = []
 }
 
+function clearWalkingRoute() {
+  if (routePlanner.value) {
+    routePlanner.value.clear?.()
+  }
+  routePlanner.value = null
+}
+
+function renderWalkingRoute() {
+  if (!props.walkingRoute || !map.value || !amap.value || !props.fromPoint || !props.toPoint) {
+    return
+  }
+
+  clearWalkingRoute()
+  routePlanner.value = new amap.value.Walking({
+    map: map.value,
+    hideMarkers: true
+  })
+  routePlanner.value.search(
+    pointToLngLat(props.fromPoint),
+    pointToLngLat(props.toPoint),
+    () => {}
+  )
+}
+
 function renderMapContent(adjustView = false) {
   if (!map.value || !amap.value) {
     return
   }
 
+  clearWalkingRoute()
   clearOverlays()
   const nextOverlays: any[] = []
 
@@ -206,6 +234,7 @@ function renderMapContent(adjustView = false) {
     map.value.add(nextOverlays)
   }
   overlays.value = nextOverlays
+  renderWalkingRoute()
 
   if (adjustView) {
     if (props.fitView && nextOverlays.length > 0) {
@@ -252,7 +281,6 @@ async function initMap() {
     map.value.addControl(new amap.value.ToolBar({ position: 'RB' }))
     map.value.on('zoomend', () => {
       currentZoom.value = map.value.getZoom()
-      renderMapContent()
     })
     currentZoom.value = map.value.getZoom()
     renderMapContent(true)
@@ -277,6 +305,7 @@ watch(
 )
 
 onBeforeUnmount(() => {
+  clearWalkingRoute()
   clearOverlays()
   if (map.value) {
     map.value.destroy()

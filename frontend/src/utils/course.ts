@@ -20,6 +20,48 @@ export type GroupCoursesOptions = {
   includeEmpty?: boolean
 }
 
+export type CourseTimeSlot = {
+  label: string
+  section: string
+  start_time: string
+  end_time: string
+}
+
+type StorageLike = {
+  getItem(key: string): string | null
+  setItem(key: string, value: string): void
+}
+
+export const SELECTED_WEEK_STORAGE_KEY = 'campusmind-selected-week'
+
+const COURSE_TIME_SLOTS: CourseTimeSlot[] = [
+  { label: '第一二节', section: '1-2', start_time: '08:00', end_time: '09:40' },
+  { label: '第三四节', section: '3-4', start_time: '09:55', end_time: '11:35' },
+  { label: '第五六节', section: '5-6', start_time: '14:00', end_time: '15:40' },
+  { label: '第七八节', section: '7-8', start_time: '15:55', end_time: '17:35' },
+  { label: '第九十一节', section: '9-11', start_time: '19:00', end_time: '21:35' }
+]
+
+export function getCourseTimeSlots(): CourseTimeSlot[] {
+  return [...COURSE_TIME_SLOTS]
+}
+
+export function readSelectedWeek(storage: StorageLike): number {
+  const value = Number(storage.getItem(SELECTED_WEEK_STORAGE_KEY))
+  if (Number.isInteger(value) && value >= 1 && value <= 20) {
+    return value
+  }
+  return 1
+}
+
+export function writeSelectedWeek(storage: StorageLike, week: number): void {
+  if (Number.isInteger(week) && week >= 1 && week <= 20) {
+    storage.setItem(SELECTED_WEEK_STORAGE_KEY, String(week))
+  } else {
+    storage.setItem(SELECTED_WEEK_STORAGE_KEY, '1')
+  }
+}
+
 export function buildEmptyCourseForm(): CourseForm {
   return {
     course_name: '',

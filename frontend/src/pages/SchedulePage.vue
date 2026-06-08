@@ -6,9 +6,7 @@ import { useRouter } from 'vue-router'
 
 import {
   getBuildings,
-  getLocationPresets,
-  type Building,
-  type LocationPreset
+  type Building
 } from '@/api/buildings'
 import RealCampusMap from '@/components/RealCampusMap.vue'
 import { getCourses } from '@/api/courses'
@@ -19,35 +17,75 @@ import type { CampusMapPoint } from '@/types/map'
 import type { ScheduleSuggestion } from '@/types/schedule'
 import {
   formatDistance,
-  getStatusMeta
+  filterScheduleLocations,
+  getStatusMeta,
+  type SearchableScheduleLocation
 } from '@/utils/schedule'
+
+type ScheduleLocationOption = SearchableScheduleLocation & {
+  source: 'building'
+  building_id: number | null
+  description?: string | null
+}
 
 const router = useRouter()
 const locationStore = useLocationStore()
-const presets = ref<LocationPreset[]>([])
 const buildings = ref<Building[]>([])
 const courses = ref<Course[]>([])
 const selectedOption = ref('')
+const startQuery = ref('')
+const destinationQuery = ref('')
+const selectedDestination = ref<Building | null>(null)
 const suggestion = ref<ScheduleSuggestion | null>(null)
 const loading = ref(true)
 const generating = ref(false)
 const errorMessage = ref('')
 
 const hasCourses = computed(() => courses.value.length > 0)
+const startLocations = computed<ScheduleLocationOption[]>(() => [
+  ...buildings.value.map((building) => ({
+    id: building.id,
+    source: 'building' as const,
+    name: building.name,
+    type: building.type,
+    building_id: building.id,
+    latitude: building.latitude,
+    longitude: building.longitude,
+    description: building.walk_hint
+  }))
+])
+const startSearchResults = computed(() =>
+  filterScheduleLocations(startLocations.value, startQuery.value, 10)
+)
+const destinationSearchResults = computed(() =>
+  filterScheduleLocations(buildings.value, destinationQuery.value, 10)
+)
 const statusMeta = computed(() =>
   suggestion.value ? getStatusMeta(suggestion.value.status) : null
 )
 const routeFromPoint = computed<CampusMapPoint | null>(() => {
-  if (!suggestion.value) {
+  const location = locationStore.selectedLocation
+  if (!location) {
     return null
   }
   return {
-    name: suggestion.value.from_location.name,
-    latitude: suggestion.value.from_location.latitude,
-    longitude: suggestion.value.from_location.longitude
+    name: location.name,
+    latitude: location.latitude,
+    longitude: location.longitude
   }
 })
-const routeToPoint = computed<CampusMapPoint | null>(() => {
+const customRouteToPoint = computed<CampusMapPoint | null>(() => {
+  if (!selectedDestination.value) {
+    return null
+  }
+  return {
+    id: selectedDestination.value.id,
+    name: selectedDestination.value.name,
+    latitude: selectedDestination.value.latitude,
+    longitude: selectedDestination.value.longitude
+  }
+})
+const suggestionRouteToPoint = computed<CampusMapPoint | null>(() => {
   if (!suggestion.value) {
     return null
   }
@@ -58,6 +96,9 @@ const routeToPoint = computed<CampusMapPoint | null>(() => {
     longitude: suggestion.value.target_building.longitude
   }
 })
+const customRouteVisible = computed(() =>
+  Boolean(routeFromPoint.value && customRouteToPoint.value)
+)
 
 function getErrorMessage(error: unknown): string {
   if (isAxiosError(error)) {
@@ -75,42 +116,48 @@ function getErrorMessage(error: unknown): string {
 function applySelectedOption(value: string) {
   selectedOption.value = value
   suggestion.value = null
-  if (value.startsWith('preset:')) {
-    const id = Number(value.replace('preset:', ''))
-    const preset = presets.value.find((item) => item.id === id)
-    if (preset) {
-      locationStore.selectPreset(preset)
-    }
-    return
-  }
   if (value.startsWith('building:')) {
     const id = Number(value.replace('building:', ''))
     const building = buildings.value.find((item) => item.id === id)
     if (building) {
       locationStore.selectBuilding(building)
+      startQuery.value = building.name
     }
   }
+}
+
+function selectStartLocation(location: ScheduleLocationOption) {
+  applySelectedOption(`${location.source}:${location.id}`)
+}
+
+function selectDestination(building: Building) {
+  selectedDestination.value = building
+  destinationQuery.value = building.name
+}
+
+function clearDestination() {
+  selectedDestination.value = null
+  destinationQuery.value = ''
 }
 
 async function loadScheduleData() {
   loading.value = true
   errorMessage.value = ''
   try {
-    const [presetResult, buildingResult, courseResult] = await Promise.all([
-      getLocationPresets(),
+    const [buildingResult, courseResult] = await Promise.all([
       getBuildings(),
       getCourses()
     ])
-    presets.value = presetResult
     buildings.value = buildingResult
     courses.value = courseResult
 
-    if (!locationStore.selectedLocation) {
-      if (presetResult.length > 0) {
-        applySelectedOption(`preset:${presetResult[0].id}`)
-      } else if (buildingResult.length > 0) {
+    if (!locationStore.selectedLocation || locationStore.selectedLocation.source === 'preset') {
+      if (buildingResult.length > 0) {
         applySelectedOption(`building:${buildingResult[0].id}`)
       }
+    }
+    if (!destinationQuery.value && buildingResult.length > 0) {
+      destinationQuery.value = ''
     }
   } catch (error) {
     errorMessage.value = getErrorMessage(error)
@@ -123,6 +170,7 @@ async function useBrowserLocation() {
   try {
     await locationStore.requestBrowserLocation()
     selectedOption.value = 'browser'
+    startQuery.value = '浏览器定位：当前位置'
     suggestion.value = null
     showToast('已使用浏览器定位')
   } catch {
@@ -170,7 +218,7 @@ onMounted(loadScheduleData)
         <div class="panel-heading">
           <div>
             <h2>当前位置</h2>
-            <p>选择预设位置或校园建筑作为起点</p>
+            <p>搜索校园建筑作为起点，也可以使用浏览器定位</p>
           </div>
           <van-button size="small" plain @click="loadScheduleData">刷新</van-button>
         </div>
@@ -191,39 +239,58 @@ onMounted(loadScheduleData)
         </van-empty>
         <template v-else>
           <label class="field-label" for="locationSelect">当前位置</label>
-          <select
-            id="locationSelect"
-            class="location-select"
-            :value="selectedOption"
-            @change="applySelectedOption(($event.target as HTMLSelectElement).value)"
-          >
-            <option value="">请选择当前位置</option>
-            <optgroup v-if="presets.length > 0" label="位置预设">
-              <option
-                v-for="preset in presets"
-                :key="`preset-${preset.id}`"
-                :value="`preset:${preset.id}`"
+          <div class="location-search-block">
+            <van-search
+              v-model="startQuery"
+              shape="round"
+              placeholder="输入起点，例如图书馆、教3、食堂"
+            />
+            <div class="location-result-list">
+              <button
+                v-for="location in startSearchResults"
+                :key="`${location.source}-${location.id}`"
+                type="button"
+                :class="{ active: selectedOption === `${location.source}:${location.id}` }"
+                @click="selectStartLocation(location)"
               >
-                {{ preset.name }}
-              </option>
-            </optgroup>
-            <optgroup v-if="buildings.length > 0" label="校园建筑">
-              <option
-                v-for="building in buildings"
-                :key="`building-${building.id}`"
-                :value="`building:${building.id}`"
-              >
-                {{ building.name }}
-              </option>
-            </optgroup>
-            <option v-if="locationStore.selectedLocation?.source === 'browser'" value="browser">
-              浏览器定位：当前位置
-            </option>
-          </select>
+                <strong>{{ location.name }}</strong>
+                <span>{{ location.type }}</span>
+              </button>
+            </div>
+          </div>
 
           <div v-if="locationStore.selectedLocation" class="selected-location">
             <strong>{{ locationStore.selectedLocation.name }}</strong>
             <span>{{ locationStore.selectedLocation.description || '已选择当前位置' }}</span>
+          </div>
+
+          <label class="field-label destination-label" for="destinationSearch">路线终点</label>
+          <div class="location-search-block">
+            <van-search
+              id="destinationSearch"
+              v-model="destinationQuery"
+              shape="round"
+              placeholder="输入终点，例如教4、实验楼、食堂；不选则默认下一节课"
+            />
+            <div class="location-result-list">
+              <button
+                v-for="building in destinationSearchResults"
+                :key="building.id"
+                type="button"
+                :class="{ active: selectedDestination?.id === building.id }"
+                @click="selectDestination(building)"
+              >
+                <strong>{{ building.name }}</strong>
+                <span>{{ building.type }}</span>
+              </button>
+            </div>
+          </div>
+          <div v-if="selectedDestination" class="selected-location">
+            <strong>{{ selectedDestination.name }}</strong>
+            <span>已作为地图路线终点</span>
+            <button type="button" class="inline-clear" @click="clearDestination">
+              使用下一节课终点
+            </button>
           </div>
 
           <div class="page-actions">
@@ -247,6 +314,35 @@ onMounted(loadScheduleData)
         </template>
       </section>
 
+      <section v-if="customRouteVisible" class="surface-panel panel suggestion-panel">
+        <div class="panel-heading compact">
+          <div>
+            <h2>自选路线预览</h2>
+            <p>这一路线只用于地图导航预览，不会影响下一节课出发时间。</p>
+          </div>
+        </div>
+
+        <RealCampusMap
+          title="自选路线"
+          subtitle="优先使用高德步行路线规划，失败时显示直线兜底"
+          :from-point="routeFromPoint"
+          :to-point="customRouteToPoint"
+          :walking-route="true"
+          height="260px"
+        />
+
+        <div class="route-cards">
+          <article>
+            <span>起点</span>
+            <strong>{{ routeFromPoint?.name }}</strong>
+          </article>
+          <article>
+            <span>终点</span>
+            <strong>{{ selectedDestination?.name }}</strong>
+          </article>
+        </div>
+      </section>
+
       <section v-if="suggestion && statusMeta" class="surface-panel panel suggestion-panel">
         <div class="suggestion-header" :class="statusMeta.className">
           <span>{{ statusMeta.label }}</span>
@@ -265,9 +361,10 @@ onMounted(loadScheduleData)
 
         <RealCampusMap
           title="真实地图路径建议"
-          subtitle="用高德地图展示当前位置、目标建筑和直线方向"
+          subtitle="优先使用高德步行路线规划，失败时显示直线兜底"
           :from-point="routeFromPoint"
-          :to-point="routeToPoint"
+          :to-point="suggestionRouteToPoint"
+          :walking-route="true"
           height="260px"
         />
 
@@ -347,15 +444,61 @@ onMounted(loadScheduleData)
   font-weight: 700;
 }
 
-.location-select {
-  width: 100%;
-  min-height: 42px;
+.destination-label {
+  margin-top: 14px;
+}
+
+.location-search-block {
+  display: grid;
+  gap: 8px;
+}
+
+.location-search-block :deep(.van-search) {
+  padding: 0;
+  background: transparent;
+}
+
+.location-result-list {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.location-result-list button {
+  display: grid;
+  flex: 0 0 136px;
+  gap: 2px;
+  min-height: 54px;
   border: 1px solid var(--cm-line);
-  border-radius: 8px;
+  border-radius: 10px;
   background: #ffffff;
   color: var(--cm-ink);
+  cursor: pointer;
   font: inherit;
-  padding: 0 10px;
+  padding: 8px 10px;
+  text-align: left;
+}
+
+.location-result-list button.active {
+  border-color: var(--cm-primary);
+  background: var(--cm-primary-soft);
+  color: var(--cm-primary-dark);
+}
+
+.location-result-list strong {
+  overflow: hidden;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.location-result-list span {
+  color: var(--cm-muted);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .selected-location {
@@ -371,6 +514,17 @@ onMounted(loadScheduleData)
 .selected-location span {
   color: var(--cm-muted);
   font-size: 13px;
+}
+
+.inline-clear {
+  width: fit-content;
+  border: 0;
+  background: transparent;
+  color: var(--cm-primary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 13px;
+  padding: 0;
 }
 
 .suggestion-header {
