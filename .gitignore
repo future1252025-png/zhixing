@@ -41,3 +41,6 @@ logs/
 
 # Superpowers visual brainstorming artifacts
 .superpowers/
+
+# Isolated feature worktrees
+.worktrees/
