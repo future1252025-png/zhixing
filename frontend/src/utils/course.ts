@@ -230,6 +230,35 @@ export function filterCoursesByWeek(courses: Course[], selectedWeek: number): Co
   return courses.filter((course) => isCourseActiveInWeek(course.weeks, selectedWeek))
 }
 
+export function findNextCourse(courses: Course[], now = new Date()): Course | null {
+  const currentWeekday = now.getDay() === 0 ? 7 : now.getDay()
+  const currentMinutes = now.getHours() * 60 + now.getMinutes()
+
+  return (
+    courses
+      .map((course) => {
+        const dayOffset = (course.weekday - currentWeekday + 7) % 7
+        const startMinutes = parseTimeValue(course.start_time)
+        return { course, dayOffset, startMinutes }
+      })
+      .filter(({ dayOffset, startMinutes }) => {
+        if (startMinutes === null) {
+          return false
+        }
+        return dayOffset > 0 || startMinutes > currentMinutes
+      })
+      .sort((left, right) => {
+        if (left.dayOffset !== right.dayOffset) {
+          return left.dayOffset - right.dayOffset
+        }
+        if (left.startMinutes !== right.startMinutes) {
+          return (left.startMinutes ?? 0) - (right.startMinutes ?? 0)
+        }
+        return left.course.id - right.course.id
+      })[0]?.course ?? null
+  )
+}
+
 export function groupCoursesByWeekday(
   courses: Course[],
   options: GroupCoursesOptions = {}

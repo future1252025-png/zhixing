@@ -2,22 +2,19 @@
 import { computed, onMounted, ref } from 'vue'
 import { isAxiosError } from 'axios'
 import { showFailToast, showToast } from 'vant'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 
-import {
-  getBuildings,
-  type Building
-} from '@/api/buildings'
-import RealCampusMap from '@/components/RealCampusMap.vue'
+import { getBuildings, type Building } from '@/api/buildings'
 import { getCourses } from '@/api/courses'
 import { getScheduleSuggestion } from '@/api/schedule'
+import RealCampusMap from '@/components/RealCampusMap.vue'
 import { useLocationStore } from '@/stores/location'
 import type { Course } from '@/types/course'
 import type { CampusMapPoint } from '@/types/map'
 import type { ScheduleSuggestion } from '@/types/schedule'
 import {
-  formatDistance,
   filterScheduleLocations,
+  formatDistance,
   getStatusMeta,
   type SearchableScheduleLocation
 } from '@/utils/schedule'
@@ -29,6 +26,7 @@ type ScheduleLocationOption = SearchableScheduleLocation & {
 }
 
 const router = useRouter()
+const route = useRoute()
 const locationStore = useLocationStore()
 const buildings = ref<Building[]>([])
 const courses = ref<Course[]>([])
@@ -42,8 +40,8 @@ const generating = ref(false)
 const errorMessage = ref('')
 
 const hasCourses = computed(() => courses.value.length > 0)
-const startLocations = computed<ScheduleLocationOption[]>(() => [
-  ...buildings.value.map((building) => ({
+const startLocations = computed<ScheduleLocationOption[]>(() =>
+  buildings.value.map((building) => ({
     id: building.id,
     source: 'building' as const,
     name: building.name,
@@ -53,7 +51,7 @@ const startLocations = computed<ScheduleLocationOption[]>(() => [
     longitude: building.longitude,
     description: building.walk_hint
   }))
-])
+)
 const startSearchResults = computed(() =>
   filterScheduleLocations(startLocations.value, startQuery.value, 10)
 )
@@ -74,18 +72,15 @@ const routeFromPoint = computed<CampusMapPoint | null>(() => {
     longitude: location.longitude
   }
 })
-const customRouteToPoint = computed<CampusMapPoint | null>(() => {
-  if (!selectedDestination.value) {
-    return null
-  }
-  return {
-    id: selectedDestination.value.id,
-    name: selectedDestination.value.name,
-    latitude: selectedDestination.value.latitude,
-    longitude: selectedDestination.value.longitude
-  }
-})
 const suggestionRouteToPoint = computed<CampusMapPoint | null>(() => {
+  if (selectedDestination.value) {
+    return {
+      id: selectedDestination.value.id,
+      name: selectedDestination.value.name,
+      latitude: selectedDestination.value.latitude,
+      longitude: selectedDestination.value.longitude
+    }
+  }
   if (!suggestion.value) {
     return null
   }
@@ -96,9 +91,7 @@ const suggestionRouteToPoint = computed<CampusMapPoint | null>(() => {
     longitude: suggestion.value.target_building.longitude
   }
 })
-const customRouteVisible = computed(() =>
-  Boolean(routeFromPoint.value && customRouteToPoint.value)
-)
+const routeReady = computed(() => Boolean(routeFromPoint.value && suggestionRouteToPoint.value))
 
 function getErrorMessage(error: unknown): string {
   if (isAxiosError(error)) {
@@ -151,13 +144,15 @@ async function loadScheduleData() {
     buildings.value = buildingResult
     courses.value = courseResult
 
-    if (!locationStore.selectedLocation || locationStore.selectedLocation.source === 'preset') {
-      if (buildingResult.length > 0) {
-        applySelectedOption(`building:${buildingResult[0].id}`)
-      }
+    if (!locationStore.selectedLocation && buildingResult.length > 0) {
+      applySelectedOption(`building:${buildingResult[0].id}`)
     }
-    if (!destinationQuery.value && buildingResult.length > 0) {
-      destinationQuery.value = ''
+    const destinationId = Number(route.query.destination)
+    if (Number.isFinite(destinationId)) {
+      const destination = buildingResult.find((item) => item.id === destinationId)
+      if (destination) {
+        selectDestination(destination)
+      }
     }
   } catch (error) {
     errorMessage.value = getErrorMessage(error)
@@ -207,18 +202,14 @@ onMounted(loadScheduleData)
 <template>
   <section class="page">
     <van-nav-bar title="出发建议" />
-    <div class="page-content">
-      <section class="hero-panel schedule-hero">
-        <span class="hero-eyebrow">下一站建议</span>
-        <h1 class="hero-title">从当前位置到下一节课</h1>
-        <p class="hero-copy">基于课程表、建筑坐标和 10 分钟缓冲时间，生成可演示的出发建议。</p>
-      </section>
+    <div class="page-content schedule-content">
+      <header class="schedule-heading"><span>校园步行建议</span><h1>从这里，到下一站。</h1><p>选择起点和终点；不选终点时，系统自动使用下一节课地点。</p></header>
 
-      <section class="surface-panel panel">
+      <section class="panel route-control-panel">
         <div class="panel-heading">
           <div>
-            <h2>当前位置</h2>
-            <p>搜索校园建筑作为起点，也可以使用浏览器定位</p>
+            <h2>选择路线</h2>
+            <p>起点和终点都可以搜索，终点不选时默认下一节课地点。</p>
           </div>
           <van-button size="small" plain @click="loadScheduleData">刷新</van-button>
         </div>
@@ -238,9 +229,10 @@ onMounted(loadScheduleData)
           </div>
         </van-empty>
         <template v-else>
-          <label class="field-label" for="locationSelect">当前位置</label>
+          <label class="field-label" for="locationSearch">起点</label>
           <div class="location-search-block">
             <van-search
+              id="locationSearch"
               v-model="startQuery"
               shape="round"
               placeholder="输入起点，例如图书馆、教3、食堂"
@@ -264,13 +256,13 @@ onMounted(loadScheduleData)
             <span>{{ locationStore.selectedLocation.description || '已选择当前位置' }}</span>
           </div>
 
-          <label class="field-label destination-label" for="destinationSearch">路线终点</label>
+          <label class="field-label destination-label" for="destinationSearch">终点</label>
           <div class="location-search-block">
             <van-search
               id="destinationSearch"
               v-model="destinationQuery"
               shape="round"
-              placeholder="输入终点，例如教4、实验楼、食堂；不选则默认下一节课"
+              placeholder="输入终点；不选则使用下一节课地点"
             />
             <div class="location-result-list">
               <button
@@ -289,61 +281,33 @@ onMounted(loadScheduleData)
             <strong>{{ selectedDestination.name }}</strong>
             <span>已作为地图路线终点</span>
             <button type="button" class="inline-clear" @click="clearDestination">
-              使用下一节课终点
+              改用下一节课终点
             </button>
           </div>
 
           <div class="page-actions">
-            <van-button
-              type="primary"
-              block
-              :loading="generating"
-              @click="generateSuggestion"
-            >
+            <van-button type="primary" block :loading="generating" @click="generateSuggestion">
               生成出发建议
             </van-button>
-            <van-button
-              block
-              plain
-              :loading="locationStore.browserLoading"
-              @click="useBrowserLocation"
-            >
+            <van-button block plain :loading="locationStore.browserLoading" @click="useBrowserLocation">
               使用浏览器定位
             </van-button>
           </div>
         </template>
       </section>
 
-      <section v-if="customRouteVisible" class="surface-panel panel suggestion-panel">
-        <div class="panel-heading compact">
-          <div>
-            <h2>自选路线预览</h2>
-            <p>这一路线只用于地图导航预览，不会影响下一节课出发时间。</p>
-          </div>
-        </div>
-
+      <section v-if="routeReady" class="map-panel">
         <RealCampusMap
-          title="自选路线"
-          subtitle="优先使用高德步行路线规划，失败时显示直线兜底"
+          title="路线预览"
+          subtitle="地图路线仅用于校园内步行参考"
           :from-point="routeFromPoint"
-          :to-point="customRouteToPoint"
+          :to-point="suggestionRouteToPoint"
           :walking-route="true"
-          height="260px"
+          height="280px"
         />
-
-        <div class="route-cards">
-          <article>
-            <span>起点</span>
-            <strong>{{ routeFromPoint?.name }}</strong>
-          </article>
-          <article>
-            <span>终点</span>
-            <strong>{{ selectedDestination?.name }}</strong>
-          </article>
-        </div>
       </section>
 
-      <section v-if="suggestion && statusMeta" class="surface-panel panel suggestion-panel">
+      <section v-if="suggestion && statusMeta" class="suggestion-ticket">
         <div class="suggestion-header" :class="statusMeta.className">
           <span>{{ statusMeta.label }}</span>
           <strong>{{ suggestion.suggest_departure_time }} 出发</strong>
@@ -358,15 +322,6 @@ onMounted(loadScheduleData)
           <p v-if="suggestion.next_course.teacher">教师：{{ suggestion.next_course.teacher }}</p>
           <p v-if="suggestion.next_course.weeks">周次：{{ suggestion.next_course.weeks }}</p>
         </div>
-
-        <RealCampusMap
-          title="真实地图路径建议"
-          subtitle="优先使用高德步行路线规划，失败时显示直线兜底"
-          :from-point="routeFromPoint"
-          :to-point="suggestionRouteToPoint"
-          :walking-route="true"
-          height="260px"
-        />
 
         <div class="route-cards">
           <article>
@@ -402,16 +357,21 @@ onMounted(loadScheduleData)
 </template>
 
 <style scoped>
+.schedule-content {
+  display: grid;
+  gap: 18px;
+}
+
+.schedule-heading { padding: 8px 2px 0; }
+.schedule-heading span { color: var(--cm-primary); font-size: 12px; font-weight: 700; }
+.schedule-heading h1 { margin: 6px 0 6px; font-size: 28px; line-height: 1.2; }
+.schedule-heading p { margin: 0; color: var(--cm-muted); font-size: 14px; line-height: 1.65; }
+
 .panel {
-  padding: 14px;
-}
-
-.schedule-hero {
-  margin-bottom: 14px;
-}
-
-.panel + .panel {
-  margin-top: 14px;
+  border-top: 1px solid var(--cm-line);
+  border-bottom: 1px solid var(--cm-line);
+  background: #fff;
+  padding: 15px 14px;
 }
 
 .panel-heading {
@@ -425,7 +385,8 @@ onMounted(loadScheduleData)
 .panel-heading h2 {
   margin: 0;
   color: var(--cm-ink);
-  font-size: 19px;
+  font-size: 20px;
+  font-weight: 760;
   line-height: 1.25;
 }
 
@@ -450,7 +411,7 @@ onMounted(loadScheduleData)
 
 .location-search-block {
   display: grid;
-  gap: 8px;
+  gap: 9px;
 }
 
 .location-search-block :deep(.van-search) {
@@ -462,21 +423,20 @@ onMounted(loadScheduleData)
   display: flex;
   gap: 8px;
   overflow-x: auto;
-  padding-bottom: 2px;
+  padding-bottom: 3px;
 }
 
 .location-result-list button {
   display: grid;
-  flex: 0 0 136px;
+  flex: 0 0 142px;
   gap: 2px;
-  min-height: 54px;
+  min-height: 58px;
   border: 1px solid var(--cm-line);
-  border-radius: 10px;
-  background: #ffffff;
+  border-radius: var(--cm-radius);
+  background: #fff;
   color: var(--cm-ink);
   cursor: pointer;
-  font: inherit;
-  padding: 8px 10px;
+  padding: 9px 11px;
   text-align: left;
 }
 
@@ -506,9 +466,10 @@ onMounted(loadScheduleData)
   gap: 4px;
   margin-top: 10px;
   border: 1px solid var(--cm-line);
-  border-radius: 8px;
-  background: #f8fbff;
-  padding: 10px;
+  border-left: 4px solid var(--cm-primary);
+  border-radius: var(--cm-radius);
+  background: #fff;
+  padding: 11px;
 }
 
 .selected-location span {
@@ -524,50 +485,59 @@ onMounted(loadScheduleData)
   cursor: pointer;
   font: inherit;
   font-size: 13px;
+  font-weight: 700;
   padding: 0;
 }
+
+.map-panel {
+  padding: 0;
+}
+
+.suggestion-ticket { overflow: hidden; border-radius: var(--cm-radius); background: #153a3d; color: #fff; box-shadow: var(--cm-shadow-strong); padding: 16px; }
 
 .suggestion-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  border-radius: 8px;
-  padding: 10px 12px;
+  border-bottom: 1px solid rgba(255,255,255,.18);
+  border-radius: 0;
+  padding: 0 0 12px;
 }
 
 .suggestion-header strong {
-  font-size: 18px;
+  font-size: 19px;
 }
 
 .status-normal {
-  background: var(--cm-green-soft);
-  color: var(--cm-green);
+  background: transparent;
+  color: #8ed7ca;
 }
 
 .status-tight {
-  background: var(--cm-amber-soft);
-  color: #b45309;
+  background: transparent;
+  color: #f2c76d;
 }
 
 .status-late {
-  background: var(--cm-red-soft);
-  color: var(--cm-red);
+  background: transparent;
+  color: #ff9aa4;
 }
 
 .course-summary {
-  margin: 14px 0;
+  margin: 15px 0;
 }
 
 .course-summary h2 {
-  margin: 0 0 6px;
-  color: var(--cm-ink);
-  font-size: 19px;
+  margin: 0 0 7px;
+  color: #fff;
+  font-size: 21px;
+  font-weight: 760;
 }
 
 .course-summary p {
   margin: 4px 0 0;
-  color: var(--cm-text);
+  color: #c7dcd9;
   font-size: 14px;
   line-height: 1.5;
 }
@@ -589,15 +559,15 @@ onMounted(loadScheduleData)
   display: grid;
   gap: 4px;
   min-width: 0;
-  border: 1px solid var(--cm-line);
-  border-radius: 8px;
-  background: #f8fbff;
-  padding: 10px;
+  border: 1px solid rgba(255,255,255,.18);
+  border-radius: var(--cm-radius-sm);
+  background: rgba(255,255,255,.06);
+  padding: 11px;
 }
 
 .route-cards span,
 .metrics-grid span {
-  color: var(--cm-muted);
+  color: #9fbfbb;
   font-size: 12px;
 }
 
@@ -608,18 +578,18 @@ onMounted(loadScheduleData)
 }
 
 .suggestion-text {
-  margin: 14px 0 0;
-  color: var(--cm-ink);
-  line-height: 1.6;
+  margin: 15px 0 0;
+  color: #fff;
+  line-height: 1.65;
 }
 
 .warning-text {
   margin: 10px 0 0;
-  border-radius: 8px;
-  background: var(--cm-amber-soft);
-  color: #b45309;
+  border-radius: var(--cm-radius-sm);
+  background: rgba(242,184,75,.15);
+  color: #f6d28a;
   font-size: 13px;
   line-height: 1.5;
-  padding: 8px 10px;
+  padding: 9px 11px;
 }
 </style>

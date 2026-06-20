@@ -119,22 +119,18 @@ onMounted(loadBuildings)
   <section class="page">
     <van-nav-bar title="导入课表" left-arrow @click-left="router.push('/courses')" />
     <div class="page-content">
-      <section class="hero-panel import-hero">
-        <span class="hero-eyebrow">HTML / Excel</span>
-        <h1 class="hero-title">从课表文件导入</h1>
-        <p class="hero-copy">
-          支持学校课表导出的 HTML 和 .xlsx 文件。导入前会先生成预览，未匹配的上课建筑需要手动确认。
-        </p>
-      </section>
+      <header class="import-heading"><span>HTML / Excel</span><h1>导入课表</h1><p>先解析预览，再一次性写入课程。系统会自动匹配已有校园建筑。</p></header>
 
-      <section class="surface-panel import-panel">
+      <section class="import-panel">
         <label class="file-picker">
           <input
             type="file"
             accept=".html,.htm,.xlsx,text/html,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             @change="handleFileChange"
           />
-          <span>{{ selectedFile?.name ?? '选择 HTML 或 Excel 课表文件' }}</span>
+          <van-icon name="description" />
+          <strong>{{ selectedFile?.name ?? '选择课表文件' }}</strong>
+          <small>支持 .html、.htm、.xlsx</small>
         </label>
         <van-button type="primary" block :loading="loading" @click="previewFile">
           预览课表
@@ -196,32 +192,40 @@ onMounted(loadBuildings)
 </template>
 
 <style scoped>
-.import-hero,
 .import-panel,
 .preview-list {
   margin-bottom: 14px;
 }
 
+.import-heading { margin-bottom: 20px; padding: 8px 2px 0; }
+.import-heading span { color: var(--cm-primary); font-size: 12px; font-weight: 700; }
+.import-heading h1 { margin: 6px 0 6px; font-size: 28px; line-height: 1.2; }
+.import-heading p { margin: 0; color: var(--cm-muted); font-size: 14px; line-height: 1.65; }
+
 .import-panel {
   display: grid;
   gap: 12px;
-  padding: 14px;
 }
 
 .file-picker {
   display: grid;
-  min-height: 44px;
+  min-height: 150px;
   place-items: center;
-  border: 1px dashed var(--cm-primary);
+  align-content: center;
+  gap: 6px;
+  border: 1px dashed var(--cm-line-strong);
   border-radius: var(--cm-radius);
-  background: var(--cm-primary-soft);
-  color: var(--cm-primary-dark);
+  background: #fff;
+  color: var(--cm-ink);
   cursor: pointer;
   font-size: 14px;
-  font-weight: 700;
-  padding: 10px;
+  padding: 18px;
   text-align: center;
 }
+
+.file-picker .van-icon { color: var(--cm-primary); font-size: 30px; }
+.file-picker strong { font-size: 14px; }
+.file-picker small { color: var(--cm-muted); font-size: 11px; }
 
 .file-picker input {
   display: none;
@@ -236,26 +240,25 @@ onMounted(loadBuildings)
 .preview-summary {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
-  gap: 8px;
   margin-bottom: 14px;
+  border: 1px solid var(--cm-line);
+  background: #fff;
 }
 
 .preview-summary span {
-  border-radius: var(--cm-radius);
   background: #fff;
-  box-shadow: 0 8px 18px rgb(16 24 40 / 6%);
   color: var(--cm-text);
   font-size: 12px;
   font-weight: 700;
   padding: 10px 8px;
   text-align: center;
 }
+.preview-summary span + span { border-left: 1px solid var(--cm-line); }
 
 .preview-card {
   border: 1px solid var(--cm-line);
   border-radius: var(--cm-radius);
   background: #fff;
-  box-shadow: 0 8px 20px rgb(16 24 40 / 6%);
   padding: 13px;
 }
 

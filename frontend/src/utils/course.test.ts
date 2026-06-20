@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   buildEmptyCourseForm,
   filterCoursesByWeek,
+  findNextCourse,
   findCourseTimeOverlap,
   getCourseTimeSlots,
   groupCoursesByWeekday,
@@ -14,30 +15,30 @@ import {
 import type { Course } from '@/types/course'
 
 const baseForm = {
-  course_name: 'Mobile App Design',
+  course_name: '移动应用设计',
   weekday: 1,
   start_time: '08:00',
   end_time: '09:40',
   building_id: 1,
   room_name: 'A101',
-  teacher: 'Teacher Li',
+  teacher: '李老师',
   weeks: '1-16'
 }
 
 const baseCourse: Course = {
   id: 1,
-  course_name: 'Mobile App Design',
+  course_name: '移动应用设计',
   weekday: 1,
   start_time: '08:00',
   end_time: '09:40',
   building_id: 1,
   building: {
     id: 1,
-    name: 'Library',
-    type: 'Study'
+    name: '图书馆',
+    type: '学习'
   },
   room_name: 'A101',
-  teacher: 'Teacher Li',
+  teacher: '李老师',
   weeks: '1-16',
   created_at: '2026-05-29T08:00:00'
 }
@@ -161,5 +162,19 @@ describe('course helpers', () => {
 
     expect(overlap?.id).toBe(1)
     expect(findCourseTimeOverlap(baseForm, [baseCourse], 1)).toBeNull()
+  })
+
+  it('finds the nearest future course across the next seven days', () => {
+    const now = new Date('2026-06-15T10:00:00')
+    const result = findNextCourse(
+      [
+        { ...baseCourse, id: 2, weekday: 1, start_time: '09:00' },
+        { ...baseCourse, id: 3, weekday: 2, start_time: '08:00' },
+        { ...baseCourse, id: 4, weekday: 1, start_time: '14:00' }
+      ],
+      now
+    )
+
+    expect(result?.id).toBe(4)
   })
 })

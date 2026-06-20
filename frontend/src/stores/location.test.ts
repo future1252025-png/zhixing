@@ -1,8 +1,8 @@
 import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it } from 'vitest'
 
-import { useLocationStore } from './location'
 import type { Building, LocationPreset } from '@/api/buildings'
+import { useLocationStore } from './location'
 
 const preset: LocationPreset = {
   id: 1,

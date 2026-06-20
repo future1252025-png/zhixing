@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  filterScheduleLocations,
   formatDistance,
-  getStatusMeta,
   getRouteVisualPoints,
-  filterScheduleLocations
+  getStatusMeta
 } from './schedule'
 
 describe('schedule helpers', () => {

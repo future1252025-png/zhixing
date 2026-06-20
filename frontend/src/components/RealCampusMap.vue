@@ -24,7 +24,7 @@ const props = withDefaults(defineProps<{
   fitView?: boolean
   walkingRoute?: boolean
 }>(), {
-  title: '校园真实地图',
+  title: '校园地图',
   subtitle: '基于高德地图展示湖北大学建筑位置',
   buildings: () => [],
   activeBuildingId: null,
@@ -106,10 +106,10 @@ function buildingHitZoneContent(active = false): string {
               inset:50%;
               width:18px;
               height:18px;
-              border:2px solid #1f6feb;
+              border:2px solid #0f7f78;
               border-radius:999px;
-              background:rgba(31,111,235,.16);
-              box-shadow:0 0 0 8px rgba(31,111,235,.14);
+              background:rgba(15,127,120,.16);
+              box-shadow:0 0 0 8px rgba(15,127,120,.14);
               transform:translate(-50%,-50%);
             "></span>`
           : ''
@@ -120,8 +120,8 @@ function buildingHitZoneContent(active = false): string {
 
 function routeMarkerContent(kind: 'from' | 'to'): string {
   const palette = {
-    from: '#10b981',
-    to: '#1f6feb'
+    from: '#13b59b',
+    to: '#218cff'
   }
   return `
     <div style="
@@ -220,9 +220,9 @@ function renderMapContent(adjustView = false) {
   if (props.fromPoint && props.toPoint) {
     const polyline = new amap.value.Polyline({
       path: [pointToLngLat(props.fromPoint), pointToLngLat(props.toPoint)],
-      strokeColor: '#1f6feb',
+      strokeColor: '#218cff',
       strokeWeight: 5,
-      strokeOpacity: 0.88,
+      strokeOpacity: 0.82,
       strokeStyle: 'solid',
       lineJoin: 'round',
       zIndex: 80
@@ -285,7 +285,7 @@ async function initMap() {
     currentZoom.value = map.value.getZoom()
     renderMapContent(true)
   } catch {
-    errorMessage.value = '真实地图加载失败，请检查高德 Key、域名白名单和网络连接'
+    errorMessage.value = '地图加载失败，请检查高德 Key、域名白名单和网络连接'
   } finally {
     loading.value = false
   }
@@ -314,8 +314,8 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="surface-panel real-map-card">
-    <div class="real-map-heading">
+  <section class="real-map-card" :class="{ 'real-map-card--compact': !title && !subtitle }">
+    <div v-if="title || subtitle" class="real-map-heading">
       <div>
         <h2>{{ title }}</h2>
         <p>{{ subtitle }}</p>
@@ -351,7 +351,7 @@ onBeforeUnmount(() => {
       :style="{ height }"
     >
       <div ref="mapContainer" class="real-map-container" />
-      <div v-if="loading" class="map-state">正在加载真实地图...</div>
+      <div v-if="loading" class="map-state">正在加载地图...</div>
       <div v-if="errorMessage" class="map-state error">{{ errorMessage }}</div>
     </div>
     <div v-else class="map-placeholder" :style="{ minHeight: height }">
@@ -370,8 +370,19 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .real-map-card {
-  margin: 14px 0;
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid var(--cm-line);
+  border-radius: var(--cm-radius);
+  background: #fff;
   padding: 12px;
+}
+
+.real-map-card--compact {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
 }
 
 .real-map-heading {
@@ -379,13 +390,14 @@ onBeforeUnmount(() => {
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 10px;
+  margin-bottom: 11px;
 }
 
 .real-map-heading h2 {
   margin: 0;
   color: var(--cm-ink);
-  font-size: 18px;
+  font-size: 19px;
+  font-weight: 760;
   line-height: 1.3;
 }
 
@@ -398,16 +410,17 @@ onBeforeUnmount(() => {
 
 .map-badge {
   flex: 0 0 auto;
+  border: 1px solid var(--cm-line);
   border-radius: 999px;
   background: var(--cm-primary-soft);
   color: var(--cm-primary-dark);
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 700;
   padding: 4px 8px;
 }
 
 .map-search {
-  margin-bottom: 10px;
+  margin-bottom: 11px;
 }
 
 .map-search :deep(.van-search) {
@@ -424,14 +437,14 @@ onBeforeUnmount(() => {
 
 .map-search-results button {
   display: grid;
-  min-width: 138px;
+  min-width: 140px;
   border: 1px solid var(--cm-line);
-  border-radius: 8px;
+  border-radius: var(--cm-radius);
   background: #fff;
   color: var(--cm-ink);
   cursor: pointer;
   gap: 3px;
-  padding: 8px 10px;
+  padding: 9px 10px;
   text-align: left;
 }
 
@@ -461,8 +474,8 @@ onBeforeUnmount(() => {
   position: relative;
   overflow: hidden;
   border: 1px solid var(--cm-line);
-  border-radius: 8px;
-  background: #eef4ff;
+  border-radius: var(--cm-radius);
+  background: #edf2ee;
 }
 
 .real-map-container {
@@ -475,11 +488,11 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin-top: 10px;
-  border: 1px solid var(--cm-primary);
-  border-radius: 8px;
+  margin-top: 11px;
+  border: 1px solid var(--cm-line);
+  border-left: 4px solid var(--cm-primary);
+  border-radius: var(--cm-radius);
   background: #fff;
-  box-shadow: 0 8px 20px rgb(16 24 40 / 8%);
   padding: 10px 12px;
 }
 
@@ -505,12 +518,12 @@ onBeforeUnmount(() => {
 .map-selected-card button {
   flex: 0 0 auto;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--cm-radius-sm);
   background: var(--cm-primary);
   color: #fff;
   cursor: pointer;
   font-size: 13px;
-  font-weight: 800;
+  font-weight: 700;
   padding: 7px 10px;
 }
 
@@ -536,8 +549,8 @@ onBeforeUnmount(() => {
   align-content: center;
   gap: 6px;
   border: 1px dashed var(--cm-line);
-  border-radius: 8px;
-  background: #f8fbff;
+  border-radius: var(--cm-radius);
+  background: #fff;
 }
 
 .map-placeholder strong {

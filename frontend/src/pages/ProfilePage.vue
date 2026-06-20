@@ -28,18 +28,22 @@ async function handleLogout() {
 <template>
   <section class="page">
     <van-nav-bar title="我的" />
-    <div class="page-content">
-      <section class="hero-panel profile-card">
+    <div class="page-content profile-content">
+      <section class="profile-ticket">
         <span class="avatar-mark">{{ authStore.displayName.slice(0, 1) || '智' }}</span>
         <div>
-          <span class="hero-eyebrow">个人中心</span>
-          <h1 class="hero-title">{{ authStore.displayName }}</h1>
-          <p class="hero-copy">管理当前演示账号，课程和留言都与登录状态关联。</p>
+          <span>智行账号</span>
+          <h1>{{ authStore.displayName }}</h1>
+          <p>课程、留言和出发建议均保存在当前账号下。</p>
         </div>
+        <div class="profile-route" aria-hidden="true"><i></i><b></b><i></i><b></b><i></i></div>
       </section>
 
-      <section class="surface-panel account-panel">
-        <h2>账号信息</h2>
+      <section class="account-panel">
+        <div class="panel-title">
+          <h2>账号信息</h2>
+          <p>第一版为课程设计演示账号</p>
+        </div>
         <div class="account-list">
           <article>
             <span>用户名</span>
@@ -59,40 +63,78 @@ async function handleLogout() {
 </template>
 
 <style scoped>
-.profile-card {
+.profile-content { display: grid; gap: 16px; }
+.profile-ticket {
+  position: relative;
   display: grid;
   grid-template-columns: auto 1fr;
-  gap: 14px;
+  gap: 15px;
   align-items: center;
+  overflow: hidden;
+  border-radius: var(--cm-radius);
+  background: #153a3d;
+  color: #fff;
+  box-shadow: var(--cm-shadow-strong);
+  padding: 18px;
 }
 
 .avatar-mark {
   display: grid;
-  width: 58px;
-  height: 58px;
+  width: 64px;
+  height: 64px;
   place-items: center;
+  border: 2px solid rgba(255, 255, 255, 0.48);
   border-radius: 50%;
-  background: linear-gradient(135deg, var(--cm-primary), var(--cm-green));
-  box-shadow: 0 10px 22px rgb(31 111 235 / 22%);
+  background: var(--cm-primary);
   color: #ffffff;
-  font-size: 24px;
-  font-weight: 800;
+  font-size: 25px;
+  font-weight: 760;
 }
+
+.profile-ticket > div > span { color: #9fbfbb; font-size: 11px; }
+.profile-ticket h1 { margin: 4px 0 4px; font-size: 24px; }.profile-ticket p { margin: 0; color: #c7dcd9; font-size: 12px; line-height: 1.5; }
+
+.profile-route {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 0;
+}
+
+.profile-route i {
+  position: relative;
+  width: 10px;
+  height: 10px;
+  border: 2px solid #fff;
+  border-radius: 999px;
+  background: var(--cm-green);
+}
+.profile-route i:last-child { background: var(--cm-amber); }.profile-route b { width: 24px; height: 2px; background: #62c8ba; }
 
 .account-panel {
-  margin-top: 14px;
-  padding: 14px;
+  border-top: 1px solid var(--cm-line);
+  border-bottom: 1px solid var(--cm-line);
+  background: #fff;
+  padding: 15px 14px;
 }
 
-.account-panel h2 {
-  margin: 0 0 12px;
+.panel-title h2 {
+  margin: 0;
   color: var(--cm-ink);
-  font-size: 17px;
+  font-size: 19px;
+  font-weight: 760;
+}
+
+.panel-title p {
+  margin: 5px 0 14px;
+  color: var(--cm-muted);
+  font-size: 13px;
 }
 
 .account-list {
-  display: grid;
-  gap: 10px;
+  border-top: 1px solid var(--cm-line);
 }
 
 .account-list article {
@@ -100,14 +142,9 @@ async function handleLogout() {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  border-bottom: 1px solid var(--cm-line);
-  padding-bottom: 10px;
+  padding: 12px 0;
 }
-
-.account-list article:last-child {
-  border-bottom: 0;
-  padding-bottom: 0;
-}
+.account-list article + article { border-top: 1px solid var(--cm-line); }
 
 .account-list span {
   color: var(--cm-muted);

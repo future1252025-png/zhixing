@@ -1,6 +1,7 @@
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import {
+  ActionSheet,
   Button,
   Cell,
   CellGroup,
@@ -8,6 +9,7 @@ import {
   Empty,
   Field,
   Form,
+  Icon,
   NavBar,
   Search,
   Tabbar,
@@ -25,12 +27,14 @@ app.use(createPinia())
 app.use(router)
 
 app.use(Button)
+app.use(ActionSheet)
 app.use(Cell)
 app.use(CellGroup)
 app.use(ConfigProvider)
 app.use(Empty)
 app.use(Field)
 app.use(Form)
+app.use(Icon)
 app.use(NavBar)
 app.use(Search)
 app.use(Tabbar)

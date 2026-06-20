@@ -95,7 +95,7 @@ function normalizeSearchText(value: string): string {
     .toLowerCase()
     .replace(/\s+/g, '')
     .replace(/(\d+)号教学楼/g, '教$1')
-    .replace(/第(\d+)教学楼/g, '教$1')
+    .replace(/第?(\d+)教学楼/g, '教$1')
 }
 
 export function filterScheduleLocations<T extends SearchableScheduleLocation>(

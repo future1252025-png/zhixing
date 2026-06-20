@@ -130,11 +130,7 @@ onMounted(loadFormData)
   <section class="page">
     <van-nav-bar :title="pageTitle" left-arrow @click-left="router.push('/courses')" />
     <div class="page-content">
-      <section class="hero-panel form-hero">
-        <span class="hero-eyebrow">{{ isEdit ? '编辑安排' : '新增安排' }}</span>
-        <h1 class="hero-title">{{ pageTitle }}</h1>
-        <p class="hero-copy">课程时间、教学楼和教室会用于后续出发建议计算。</p>
-      </section>
+      <header class="form-heading"><span>{{ isEdit ? '编辑课程' : '创建课程' }}</span><h1>{{ pageTitle }}</h1><p>时间和地点会用于下一节课识别与出发建议。</p></header>
 
       <p v-if="loading" class="muted-text">正在加载课程表单...</p>
       <van-empty v-else-if="errorMessage" image="error" :description="errorMessage">
@@ -145,8 +141,10 @@ onMounted(loadFormData)
           </van-button>
         </div>
       </van-empty>
-      <van-form v-else class="course-form surface-panel" @submit="submitCourse">
-        <van-cell-group inset>
+      <van-form v-else class="course-form" @submit="submitCourse">
+        <section class="form-section">
+          <h2>课程信息</h2>
+          <van-cell-group inset>
           <van-field
             v-model="form.course_name"
             required
@@ -167,6 +165,23 @@ onMounted(loadFormData)
               </select>
             </template>
           </van-field>
+          <van-field
+            v-model="form.weeks"
+            label="周次"
+            maxlength="64"
+            placeholder="例如 1-16"
+          />
+          <van-field
+            v-model="form.teacher"
+            label="教师"
+            maxlength="64"
+            placeholder="选填"
+          />
+          </van-cell-group>
+        </section>
+        <section class="form-section">
+          <h2>时间与地点</h2>
+          <van-cell-group inset>
           <van-field
             v-model="form.start_time"
             required
@@ -200,19 +215,8 @@ onMounted(loadFormData)
             maxlength="64"
             placeholder="例如 A101"
           />
-          <van-field
-            v-model="form.teacher"
-            label="教师"
-            maxlength="64"
-            placeholder="选填"
-          />
-          <van-field
-            v-model="form.weeks"
-            label="周次"
-            maxlength="64"
-            placeholder="例如 1-16"
-          />
-        </van-cell-group>
+          </van-cell-group>
+        </section>
 
         <div class="page-actions">
           <van-button type="primary" block native-type="submit" :loading="submitting">
@@ -234,14 +238,10 @@ onMounted(loadFormData)
   font-size: 14px;
 }
 
-.form-hero {
-  margin-bottom: 14px;
-}
-
 .course-form {
   display: grid;
-  gap: 14px;
-  padding: 12px 0 16px;
+  gap: 18px;
+  padding: 6px 0 18px;
 }
 
 .course-form :deep(.van-cell-group--inset) {
@@ -249,8 +249,14 @@ onMounted(loadFormData)
 }
 
 .course-form .page-actions {
-  padding: 0 16px;
+  margin-top: 0;
 }
+
+.form-heading { margin-bottom: 18px; padding: 8px 2px 0; }
+.form-heading span { color: var(--cm-primary); font-size: 12px; font-weight: 700; }
+.form-heading h1 { margin: 6px 0 5px; font-size: 28px; line-height: 1.2; }
+.form-heading p { margin: 0; color: var(--cm-muted); font-size: 13px; line-height: 1.6; }
+.form-section h2 { margin: 0 0 8px 2px; color: var(--cm-text); font-size: 14px; font-weight: 700; }
 
 .form-select {
   width: 100%;

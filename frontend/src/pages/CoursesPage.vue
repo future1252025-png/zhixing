@@ -28,9 +28,12 @@ const weekOptions = Array.from({ length: 20 }, (_, index) => index + 1)
 const timeSlots = getCourseTimeSlots()
 const courseActionOptions = [
   { name: '编辑课程' },
-  { name: '删除课程', color: '#d92d20' }
+  { name: '删除课程', color: '#e44f5f' }
 ]
 const visibleCourses = computed(() => filterCoursesByWeek(courses.value, selectedWeek.value))
+const courseCountText = computed(() =>
+  visibleCourses.value.length > 0 ? `${visibleCourses.value.length} 门课` : '本周暂无课'
+)
 
 function getErrorMessage(error: unknown): string {
   if (isAxiosError(error)) {
@@ -146,32 +149,15 @@ onMounted(loadCourses)
 
 <template>
   <section class="page">
-    <van-nav-bar title="课程表" />
-    <div class="page-content">
-      <div class="hero-panel course-hero">
-        <div>
-          <span class="hero-eyebrow">课程驱动出发建议</span>
-          <h1 class="hero-title">我的课程</h1>
-          <p class="hero-copy">按星期查看课程安排，出发建议会自动寻找未来最近一节课。</p>
-        </div>
-        <div class="hero-actions">
-          <van-button plain type="primary" size="small" icon="description" @click="openImportPage">
-            导入课表
-          </van-button>
-          <van-button type="primary" size="small" icon="plus" @click="openCreatePage">
-            新增课程
-          </van-button>
-        </div>
-      </div>
+    <van-nav-bar title="课表" />
+    <div class="page-content courses-content">
+      <header class="course-toolbar">
+        <div><span>我的课表</span><h1>第 {{ selectedWeek }} 周</h1><p>{{ courseCountText }} · 点击课程可编辑或删除</p></div>
+        <div class="toolbar-actions"><button type="button" aria-label="导入课表" @click="openImportPage"><van-icon name="description" /></button><button type="button" aria-label="新增课程" @click="openCreatePage()"><van-icon name="plus" /></button></div>
+      </header>
 
-      <section class="week-switcher surface-panel">
-        <label for="week-select">当前周次</label>
-        <select id="week-select" v-model.number="selectedWeek" class="week-select">
-          <option v-for="week in weekOptions" :key="week" :value="week">
-            第 {{ week }} 周
-          </option>
-        </select>
-        <span>仅显示本周有课的课程</span>
+      <section class="week-switcher" aria-label="选择周次">
+        <button v-for="week in weekOptions" :key="week" type="button" :class="{ active: selectedWeek === week }" @click="selectedWeek = week"><span>{{ week }}</span><small>周</small></button>
       </section>
 
       <p v-if="loading" class="muted-text">正在加载课程...</p>
@@ -183,50 +169,50 @@ onMounted(loadCourses)
           添加第一门课程
         </van-button>
       </van-empty>
-      <section v-else class="timetable-shell surface-panel">
-        <div class="timetable-scroll" aria-label="周课表">
-          <div class="timetable-grid">
-            <div class="time-head"></div>
-            <div v-for="weekday in WEEKDAYS" :key="weekday.value" class="weekday-head">
-              {{ weekday.label.replace('星期', '周') }}
-            </div>
-
-            <template v-for="slot in timeSlots" :key="slot.section">
-              <div class="time-cell">
-                <strong>{{ slot.section }}</strong>
-                <span>{{ slot.start_time }}</span>
-                <span>{{ slot.end_time }}</span>
-              </div>
-              <div
-                v-for="weekday in WEEKDAYS"
-                :key="`${slot.section}-${weekday.value}`"
-                class="course-cell"
-              >
-                <button
-                  v-if="getCellCourses(weekday.value, slot).length === 0"
-                  type="button"
-                  class="empty-cell-button"
-                  aria-label="在此时间添加课程"
-                  @click="openCreateForSlot(weekday.value, slot)"
-                ></button>
-                <article
-                  v-for="course in getCellCourses(weekday.value, slot)"
-                  :key="course.id"
-                  class="timetable-course"
-                  :class="getCourseTone(course)"
-                >
-                  <button type="button" class="course-content" @click="openCourseActions(course)">
-                    <strong>{{ course.course_name }}</strong>
-                    <span>@{{ course.building.name }}</span>
-                    <span>{{ course.room_name }}</span>
-                    <span v-if="course.teacher">{{ course.teacher }}</span>
-                  </button>
-                </article>
-              </div>
-            </template>
+      <section v-else class="timetable-shell">
+        <div class="timetable-grid" aria-label="周课表">
+          <div class="time-head"></div>
+          <div v-for="weekday in WEEKDAYS" :key="weekday.value" class="weekday-head">
+            {{ weekday.label.replace('星期', '周') }}
           </div>
+
+          <template v-for="slot in timeSlots" :key="slot.section">
+            <div class="time-cell">
+              <strong>{{ slot.section }}</strong>
+              <span>{{ slot.start_time }}</span>
+              <span>{{ slot.end_time }}</span>
+            </div>
+            <div
+              v-for="weekday in WEEKDAYS"
+              :key="`${slot.section}-${weekday.value}`"
+              class="course-cell"
+            >
+              <button
+                v-if="getCellCourses(weekday.value, slot).length === 0"
+                type="button"
+                class="empty-cell-button"
+                aria-label="在此时间添加课程"
+                @click="openCreateForSlot(weekday.value, slot)"
+              ></button>
+              <article
+                v-for="course in getCellCourses(weekday.value, slot)"
+                :key="course.id"
+                class="timetable-course"
+                :class="getCourseTone(course)"
+              >
+                <button type="button" class="course-content" @click="openCourseActions(course)">
+                  <strong>{{ course.course_name }}</strong>
+                  <span>@{{ course.building.name }}</span>
+                  <span>{{ course.room_name }}</span>
+                  <span v-if="course.teacher">{{ course.teacher }}</span>
+                </button>
+              </article>
+            </div>
+          </template>
         </div>
-        <p v-if="visibleCourses.length === 0" class="empty-week">第 {{ selectedWeek }} 周暂无课程</p>
+        <p v-if="visibleCourses.length === 0" class="empty-week">
+          第 {{ selectedWeek }} 周暂无课程，点击空白格即可添加。
+        </p>
       </section>
       <van-action-sheet
         v-model:show="actionSheetVisible"
@@ -240,88 +226,23 @@ onMounted(loadCourses)
 </template>
 
 <style scoped>
-.page-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 16px;
-}
-
-.course-hero {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 16px;
-}
-
-.hero-actions {
+.courses-content {
   display: grid;
-  gap: 8px;
-  min-width: 92px;
-}
-
-.week-switcher {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  align-items: center;
-  gap: 8px 12px;
-  margin-bottom: 16px;
-  padding: 12px 14px;
-}
-
-.week-switcher label {
-  color: var(--cm-ink);
-  font-size: 14px;
-  font-weight: 800;
-}
-
-.week-switcher span {
-  grid-column: 1 / -1;
-  color: var(--cm-muted);
-  font-size: 12px;
-}
-
-.week-select {
-  width: 100%;
-  min-height: 34px;
-  border: 1px solid var(--cm-line);
-  border-radius: 8px;
-  background: #fff;
-  color: var(--cm-ink);
-  font: inherit;
-  padding: 0 10px;
-}
-
-.page-toolbar h1 {
-  margin: 0;
-  font-size: 22px;
-  line-height: 1.25;
-}
-
-.page-toolbar p,
-.muted-text {
-  margin: 4px 0 0;
-  color: #6b7280;
-  font-size: 14px;
+  gap: 15px;
 }
 
 .timetable-shell {
-  padding: 10px;
-}
-
-.timetable-scroll {
-  overflow: visible;
+  overflow: hidden;
+  padding: 8px;
 }
 
 .timetable-grid {
   display: grid;
   grid-template-columns: 34px repeat(7, minmax(0, 1fr));
   width: 100%;
-  border: 1px solid #d8e7f5;
-  border-radius: 12px;
-  background: #f8fbff;
+  border: 1px solid #d7e5ee;
+  border-radius: 6px;
+  background: rgba(248, 252, 255, 0.9);
   overflow: hidden;
 }
 
@@ -329,18 +250,15 @@ onMounted(loadCourses)
 .weekday-head,
 .time-cell,
 .course-cell {
-  border-right: 1px solid #d8e7f5;
-  border-bottom: 1px solid #d8e7f5;
+  border-right: 1px solid #d7e5ee;
+  border-bottom: 1px solid #d7e5ee;
 }
 
 .weekday-head {
-  position: sticky;
-  top: 0;
-  z-index: 2;
-  background: #eef8ff;
-  color: #1688df;
-  font-size: 11px;
-  font-weight: 800;
+  background: #edf8fb;
+  color: var(--cm-primary);
+  font-size: 10px;
+  font-weight: 900;
   line-height: 30px;
   text-align: center;
 }
@@ -349,15 +267,15 @@ onMounted(loadCourses)
   display: grid;
   align-content: center;
   gap: 2px;
-  min-height: 116px;
-  background: #eef8ff;
-  color: #1688df;
+  min-height: 118px;
+  background: #edf8fb;
+  color: var(--cm-primary);
   text-align: center;
   padding: 5px 2px;
 }
 
 .time-cell strong {
-  color: #1f2937;
+  color: var(--cm-ink);
   font-size: 15px;
 }
 
@@ -367,17 +285,29 @@ onMounted(loadCourses)
 
 .course-cell {
   position: relative;
-  min-height: 116px;
-  background: rgba(255, 255, 255, 0.72);
+  min-height: 118px;
+  background: rgba(255, 255, 255, 0.7);
   padding: 3px;
+}
+
+.empty-cell-button {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.empty-cell-button:active {
+  background: rgba(15, 127, 120, 0.06);
 }
 
 .timetable-course {
   position: relative;
-  border: 1px solid rgba(255, 255, 255, 0.58);
-  border-radius: 8px;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.24);
   overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.62);
+  border-radius: 4px;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.22);
 }
 
 .timetable-course + .timetable-course {
@@ -387,12 +317,11 @@ onMounted(loadCourses)
 .course-content {
   display: grid;
   width: 100%;
-  min-height: 96px;
+  min-height: 98px;
   border: 0;
   background: transparent;
   color: #fff;
   cursor: pointer;
-  font: inherit;
   gap: 2px;
   padding: 7px 5px;
   text-align: left;
@@ -413,16 +342,8 @@ onMounted(loadCourses)
   line-height: 1.25;
 }
 
-.empty-cell-button {
-  position: absolute;
-  inset: 0;
-  border: 0;
-  background: transparent;
-  cursor: pointer;
-}
-
 .tone-0 {
-  background: #79a7ef;
+  background: #6e9fe7;
 }
 
 .tone-1 {
@@ -430,44 +351,164 @@ onMounted(loadCourses)
 }
 
 .tone-2 {
-  background: #7fd8c4;
+  background: #67cbb7;
 }
 
 .tone-3 {
-  background: #e0ad63;
+  background: #dca95b;
 }
 
 .tone-4 {
-  background: #9c86df;
+  background: #9a87df;
 }
 
 .tone-5 {
-  background: #6e98c8;
+  background: #5f8fbe;
 }
 
 .empty-week {
-  margin: 10px 0 2px;
+  margin: 10px 0 3px;
   color: var(--cm-muted);
   font-size: 13px;
   text-align: center;
 }
 
-.text-button {
-  border: 0;
-  background: transparent;
+.course-toolbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 5px 2px 2px;
+}
+
+.course-toolbar span {
+  color: var(--cm-primary);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.course-toolbar h1 {
+  margin: 3px 0 3px;
+  font-size: 27px;
+  line-height: 1.2;
+}
+
+.course-toolbar p {
+  margin: 0;
+  color: var(--cm-muted);
+  font-size: 12px;
+}
+
+.toolbar-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.toolbar-actions button {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border: 1px solid var(--cm-line);
+  border-radius: 50%;
+  background: #fff;
   color: var(--cm-primary);
   cursor: pointer;
-  font: inherit;
-  font-size: 13px;
+  font-size: 19px;
+}
+
+.week-switcher {
+  display: flex;
+  gap: 7px;
+  overflow-x: auto;
+  margin: 0 -14px;
+  padding: 4px 14px 8px;
+  scrollbar-width: none;
+}
+
+.week-switcher::-webkit-scrollbar {
+  display: none;
+}
+
+.week-switcher button {
+  display: grid;
+  flex: 0 0 44px;
+  height: 48px;
+  place-items: center;
+  align-content: center;
+  border: 1px solid var(--cm-line);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--cm-muted);
+  cursor: pointer;
+  line-height: 1;
+}
+
+.week-switcher button span {
+  color: inherit;
+  font-size: 15px;
+  font-weight: 750;
+}
+
+.week-switcher button small {
+  margin-top: 3px;
+  font-size: 9px;
+}
+
+.week-switcher button.active {
+  border-color: var(--cm-primary);
+  background: var(--cm-primary);
+  color: #fff;
+}
+
+.timetable-shell {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
   padding: 0;
 }
 
-.text-button:disabled {
-  color: #98a2b3;
-  cursor: not-allowed;
+.timetable-grid {
+  border-color: var(--cm-line);
+  border-radius: 6px;
+  background: #fff;
 }
 
-.danger {
-  color: var(--cm-red);
+.time-head,
+.weekday-head,
+.time-cell,
+.course-cell {
+  border-color: var(--cm-line);
 }
+
+.weekday-head,
+.time-cell {
+  background: #eef3ef;
+}
+
+.weekday-head {
+  color: var(--cm-text);
+  font-weight: 700;
+}
+
+.time-cell {
+  color: var(--cm-muted);
+}
+
+.course-cell {
+  background: #fff;
+}
+
+.timetable-course {
+  border: 0;
+  border-radius: 4px;
+  box-shadow: none;
+}
+
+.tone-0 { background: #4f83bd; }
+.tone-1 { background: #c86d7e; }
+.tone-2 { background: #4ca891; }
+.tone-3 { background: #c29243; }
+.tone-4 { background: #7f72b5; }
+.tone-5 { background: #587b91; }
 </style>

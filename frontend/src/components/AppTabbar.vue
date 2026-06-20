@@ -9,7 +9,7 @@ const activePath = computed(() => route.path)
 <template>
   <van-tabbar class="app-tabbar" :model-value="activePath" route safe-area-inset-bottom>
     <van-tabbar-item to="/home" name="/home" icon="wap-home-o">首页</van-tabbar-item>
-    <van-tabbar-item to="/courses" name="/courses" icon="notes-o">课程</van-tabbar-item>
+    <van-tabbar-item to="/courses" name="/courses" icon="notes-o">课表</van-tabbar-item>
     <van-tabbar-item to="/schedule" name="/schedule" icon="guide-o">建议</van-tabbar-item>
     <van-tabbar-item to="/profile" name="/profile" icon="user-o">我的</van-tabbar-item>
   </van-tabbar>
@@ -17,15 +17,29 @@ const activePath = computed(() => route.path)
 
 <style scoped>
 .app-tabbar {
-  right: 10px;
-  bottom: 8px;
-  left: 10px;
-  width: auto;
-  max-width: 460px;
-  margin: 0 auto;
-  overflow: hidden;
-  border: 1px solid rgb(228 231 236 / 90%);
-  border-radius: 8px;
-  box-shadow: 0 12px 30px rgb(16 24 40 / 14%);
+  border-top: 1px solid var(--cm-line);
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 -4px 16px rgba(28, 50, 42, 0.05);
+  backdrop-filter: blur(12px);
+}
+
+.app-tabbar :deep(.van-tabbar-item) {
+  color: var(--cm-muted);
+  font-size: 11px;
+  font-weight: 600;
+  transition: color 160ms ease, transform 160ms ease;
+}
+
+.app-tabbar :deep(.van-tabbar-item__icon) {
+  margin-bottom: 2px;
+}
+
+.app-tabbar :deep(.van-tabbar-item--active) {
+  background: #fff;
+  color: var(--cm-primary);
+}
+
+.app-tabbar :deep(.van-tabbar-item--active .van-tabbar-item__icon) {
+  transform: translateY(-1px);
 }
 </style>
