@@ -4,8 +4,9 @@ import { isAxiosError } from 'axios'
 import { showFailToast, showSuccessToast } from 'vant'
 import { useRoute, useRouter } from 'vue-router'
 
+import { getCourses } from '@/api/courses'
 import { useAuthStore } from '@/stores/auth'
-import { markLoginIntroPending } from '@/utils/loginIntro'
+import { prepareLoginIntro } from '@/utils/loginIntro'
 
 const router = useRouter()
 const route = useRoute()
@@ -25,7 +26,7 @@ async function handleSubmit() {
   submitting.value = true
   try {
     await authStore.login(form)
-    markLoginIntroPending()
+    await prepareLoginIntro(getCourses)
     showSuccessToast('登录成功')
     const redirect = typeof route.query.redirect === 'string' ? route.query.redirect : '/home'
     await router.replace(redirect)

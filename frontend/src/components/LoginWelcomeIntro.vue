@@ -1,7 +1,14 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { animate, createTimeline, stagger } from 'animejs'
 
+import type { LoginIntroSnapshot } from '@/utils/loginIntro'
+
+const props = withDefaults(defineProps<{
+  snapshot?: LoginIntroSnapshot | null
+}>(), {
+  snapshot: null
+})
 const emit = defineEmits<{ handoff: []; finish: [] }>()
 const root = ref<HTMLElement | null>(null)
 let timeline: ReturnType<typeof createTimeline> | null = null
@@ -9,6 +16,14 @@ let fallbackTimer: number | null = null
 let handoffTimer: number | null = null
 let handoffStarted = false
 let finished = false
+
+const ticketTitle = computed(() => props.snapshot?.courseName ?? '今日路线已接通')
+const ticketMeta = computed(() => {
+  if (!props.snapshot) {
+    return '课表 · 地图 · 出发建议'
+  }
+  return `${props.snapshot.startTime} · ${props.snapshot.buildingName} ${props.snapshot.roomName}`
+})
 
 function startHomeHandoff() {
   if (handoffStarted) return
@@ -64,7 +79,7 @@ onBeforeUnmount(() => {
         <circle class="intro-node end" cx="294" cy="57" r="9" />
       </svg>
       <article class="intro-ticket">
-        <span>下一节课</span><strong>路线已连接</strong><small>课表 · 地图 · 出发建议</small>
+        <span>下一节课</span><strong>{{ ticketTitle }}</strong><small>{{ ticketMeta }}</small>
       </article>
       <div class="intro-copy"><strong>欢迎回来</strong><span>正在打开今天的校园路线</span></div>
     </div>

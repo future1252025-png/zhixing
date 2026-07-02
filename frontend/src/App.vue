@@ -3,13 +3,22 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 
 import AppTabbar from '@/components/AppTabbar.vue'
+import AppLaunchIntro from '@/components/AppLaunchIntro.vue'
 import LoginWelcomeIntro from '@/components/LoginWelcomeIntro.vue'
-import { consumeLoginIntroFlag } from '@/utils/loginIntro'
+import {
+  consumeLoginIntroFlag,
+  consumeLoginIntroSnapshot,
+  shouldPlayAppLaunchIntro,
+  type LoginIntroSnapshot
+} from '@/utils/loginIntro'
 
 const route = useRoute()
 const tabbarRoutes = ['/home', '/courses', '/schedule', '/profile']
 const showTabbar = computed(() => tabbarRoutes.includes(route.path))
+const showLaunchIntro = ref(shouldPlayAppLaunchIntro())
 const showLoginIntro = ref(false)
+const queuedLoginIntro = ref(false)
+const loginIntroSnapshot = ref<LoginIntroSnapshot | null>(null)
 const homeHandoffActive = ref(false)
 let handoffTimer: number | null = null
 
@@ -39,14 +48,32 @@ function startHomeHandoff() {
 
 function finishLoginIntro() {
   showLoginIntro.value = false
+  loginIntroSnapshot.value = null
+}
+
+function startQueuedLoginIntro() {
+  queuedLoginIntro.value = false
+  homeHandoffActive.value = false
+  showLoginIntro.value = true
+}
+
+function finishLaunchIntro() {
+  showLaunchIntro.value = false
+  if (queuedLoginIntro.value) {
+    startQueuedLoginIntro()
+  }
 }
 
 watch(
   () => route.path,
   (path) => {
     if (tabbarRoutes.includes(path) && consumeLoginIntroFlag()) {
-      homeHandoffActive.value = false
-      showLoginIntro.value = true
+      loginIntroSnapshot.value = consumeLoginIntroSnapshot()
+      if (showLaunchIntro.value) {
+        queuedLoginIntro.value = true
+      } else {
+        startQueuedLoginIntro()
+      }
     }
   },
   { immediate: true }
@@ -66,8 +93,13 @@ onBeforeUnmount(() => {
         <router-view />
       </div>
       <AppTabbar v-if="showTabbar" />
+      <AppLaunchIntro
+        v-if="showLaunchIntro"
+        @finish="finishLaunchIntro"
+      />
       <LoginWelcomeIntro
         v-if="showLoginIntro"
+        :snapshot="loginIntroSnapshot"
         @handoff="startHomeHandoff"
         @finish="finishLoginIntro"
       />
