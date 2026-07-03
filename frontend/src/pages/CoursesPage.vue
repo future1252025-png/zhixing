@@ -8,8 +8,10 @@ import { deleteCourse, getCourses } from '@/api/courses'
 import type { Course } from '@/types/course'
 import {
   buildCourseCreateQuery,
+  buildCourseColorMap,
   filterCoursesByWeek,
   getCourseTimeSlots,
+  getQuickWeekOptions,
   getTeachingWeekOptions,
   readSelectedWeek,
   WEEKDAYS,
@@ -33,6 +35,8 @@ const courseActionOptions = [
   { name: '删除课程', color: '#e44f5f' }
 ]
 const visibleCourses = computed(() => filterCoursesByWeek(courses.value, selectedWeek.value))
+const quickWeekOptions = computed(() => getQuickWeekOptions(selectedWeek.value))
+const courseColorMap = computed(() => buildCourseColorMap(visibleCourses.value))
 const courseCountText = computed(() =>
   visibleCourses.value.length > 0 ? `${visibleCourses.value.length} 门课` : '本周暂无课'
 )
@@ -95,8 +99,10 @@ function getCellCourses(weekday: number, slot: { start_time: string; end_time: s
     })
 }
 
-function getCourseTone(course: Course): string {
-  return `tone-${course.id % 6}`
+function getCourseStyle(course: Course): Record<string, string> {
+  return {
+    background: courseColorMap.value[course.id] ?? '#4f83bd'
+  }
 }
 
 function openCourseActions(course: Course) {
@@ -168,7 +174,7 @@ onMounted(loadCourses)
           </select>
         </label>
         <div class="week-switcher" aria-label="快捷选择周次">
-          <button v-for="week in weekOptions" :key="week" type="button" :class="{ active: selectedWeek === week }" @click="selectedWeek = week"><span>{{ week }}</span><small>周</small></button>
+          <button v-for="week in quickWeekOptions" :key="week" type="button" :class="{ active: selectedWeek === week }" @click="selectedWeek = week"><span>{{ week }}</span><small>周</small></button>
         </div>
       </section>
 
@@ -210,7 +216,7 @@ onMounted(loadCourses)
                 v-for="course in getCellCourses(weekday.value, slot)"
                 :key="course.id"
                 class="timetable-course"
-                :class="getCourseTone(course)"
+                :style="getCourseStyle(course)"
               >
                 <button type="button" class="course-content" @click="openCourseActions(course)">
                   <strong>{{ course.course_name }}</strong>
@@ -460,22 +466,18 @@ onMounted(loadCourses)
 }
 
 .week-switcher {
-  display: flex;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 7px;
-  overflow-x: auto;
-  margin: 0 -14px;
-  padding: 4px 14px 8px;
-  scrollbar-width: none;
-}
-
-.week-switcher::-webkit-scrollbar {
-  display: none;
+  margin: 0;
+  padding: 0;
 }
 
 .week-switcher button {
   display: grid;
-  flex: 0 0 44px;
-  height: 48px;
+  width: 100%;
+  min-width: 0;
+  height: 44px;
   place-items: center;
   align-content: center;
   border: 1px solid var(--cm-line);
@@ -501,6 +503,12 @@ onMounted(loadCourses)
   border-color: var(--cm-primary);
   background: var(--cm-primary);
   color: #fff;
+}
+
+@media (max-width: 390px) {
+  .week-switcher {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
 }
 
 .timetable-shell {

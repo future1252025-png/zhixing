@@ -56,6 +56,31 @@ export function getTeachingWeekOptions(): number[] {
   return Array.from({ length: MAX_TEACHING_WEEK }, (_, index) => index + 1)
 }
 
+export function getQuickWeekOptions(
+  selectedWeek: number,
+  visibleCount = 5,
+  maxWeek = MAX_TEACHING_WEEK
+): number[] {
+  const safeCount = Math.max(1, Math.min(visibleCount, maxWeek))
+  const week = Number.isInteger(selectedWeek)
+    ? Math.min(Math.max(selectedWeek, 1), maxWeek)
+    : 1
+  const half = Math.floor(safeCount / 2)
+  let start = week - half
+  let end = start + safeCount - 1
+
+  if (start < 1) {
+    start = 1
+    end = safeCount
+  }
+  if (end > maxWeek) {
+    end = maxWeek
+    start = Math.max(1, end - safeCount + 1)
+  }
+
+  return Array.from({ length: end - start + 1 }, (_, index) => start + index)
+}
+
 export function buildWeeksRange(startWeek: number, endWeek: number): string {
   const start = Math.min(startWeek, endWeek)
   const end = Math.max(startWeek, endWeek)
@@ -111,6 +136,28 @@ export function buildCourseCreateQuery(
   }
 
   return query
+}
+
+export function buildCourseColorMap(
+  courses: Pick<Course, 'id' | 'course_name'>[]
+): Record<number, string> {
+  const subjectNames = Array.from(
+    new Set(courses.map((course) => course.course_name.trim() || `课程 ${course.id}`))
+  ).sort((left, right) => left.localeCompare(right, 'zh-Hans-CN'))
+  const total = Math.max(subjectNames.length, 1)
+  const subjectColors = subjectNames.reduce<Record<string, string>>((colorMap, subject, index) => {
+    const hue = Math.round((index * 360) / total)
+    const saturation = 45 + (index % 3) * 7
+    const lightness = 40 + (index % 4) * 4
+    colorMap[subject] = `hsl(${hue} ${saturation}% ${lightness}%)`
+    return colorMap
+  }, {})
+
+  return courses.reduce<Record<number, string>>((colorMap, course) => {
+    const subject = course.course_name.trim() || `课程 ${course.id}`
+    colorMap[course.id] = subjectColors[subject]
+    return colorMap
+  }, {})
 }
 
 export function readSelectedWeek(storage: StorageLike): number {

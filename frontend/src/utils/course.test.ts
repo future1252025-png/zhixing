@@ -3,12 +3,14 @@ import { describe, expect, it } from 'vitest'
 import {
   buildEmptyCourseForm,
   buildCourseCreateQuery,
+  buildCourseColorMap,
   parseWeeksRangeToPicker,
   buildWeeksRange,
   filterCoursesByWeek,
   findNextCourse,
   findCourseTimeOverlap,
   getCourseTimeSlots,
+  getQuickWeekOptions,
   getTeachingWeekOptions,
   groupCoursesByWeekday,
   isCourseActiveInWeek,
@@ -152,6 +154,35 @@ describe('course helpers', () => {
     expect(options[0]).toBe(1)
     expect(options[15]).toBe(16)
     expect(options[19]).toBe(20)
+  })
+
+  it('provides compact quick week options around the selected week', () => {
+    expect(getQuickWeekOptions(1)).toEqual([1, 2, 3, 4, 5])
+    expect(getQuickWeekOptions(10)).toEqual([8, 9, 10, 11, 12])
+    expect(getQuickWeekOptions(19)).toEqual([16, 17, 18, 19, 20])
+  })
+
+  it('assigns the same color to courses with the same subject name', () => {
+    const colorMap = buildCourseColorMap([
+      { ...baseCourse, id: 1, course_name: '数据结构' },
+      { ...baseCourse, id: 2, course_name: '数据结构' },
+      { ...baseCourse, id: 3, course_name: '计算机组成原理' }
+    ])
+
+    expect(colorMap[1]).toBe(colorMap[2])
+    expect(colorMap[1]).not.toBe(colorMap[3])
+  })
+
+  it('assigns a unique color to each subject name', () => {
+    const courses = Array.from({ length: 12 }, (_, index) => ({
+      ...baseCourse,
+      course_name: `课程 ${index + 1}`,
+      id: index + 1
+    }))
+    const colorMap = buildCourseColorMap(courses)
+    const colors = [...new Set(Object.values(colorMap))]
+
+    expect(colors).toHaveLength(courses.length)
   })
 
   it('builds teaching week ranges from picker values', () => {
