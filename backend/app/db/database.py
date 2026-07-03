@@ -36,7 +36,25 @@ def ensure_sqlite_schema_compatibility(bind: Engine) -> None:
         return
 
     inspector = inspect(bind)
-    if "messages" not in inspector.get_table_names():
+    table_names = inspector.get_table_names()
+    if "users" in table_names:
+        existing_user_columns = {
+            column["name"]
+            for column in inspector.get_columns("users")
+        }
+        user_columns = {
+            "avatar_text": "VARCHAR(4)",
+            "avatar_color": "VARCHAR(16)",
+        }
+
+        with bind.begin() as connection:
+            for column_name, column_type in user_columns.items():
+                if column_name not in existing_user_columns:
+                    connection.execute(
+                        text(f"ALTER TABLE users ADD COLUMN {column_name} {column_type}")
+                    )
+
+    if "messages" not in table_names:
         return
 
     existing_columns = {
@@ -44,6 +62,7 @@ def ensure_sqlite_schema_compatibility(bind: Engine) -> None:
         for column in inspector.get_columns("messages")
     }
     message_columns = {
+        "room_name": "VARCHAR(64)",
         "latitude": "FLOAT",
         "longitude": "FLOAT",
         "location_source": "VARCHAR(32)",
