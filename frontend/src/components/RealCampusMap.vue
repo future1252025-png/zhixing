@@ -23,6 +23,7 @@ const props = withDefaults(defineProps<{
   zoom?: number
   fitView?: boolean
   walkingRoute?: boolean
+  selectedActionText?: string
 }>(), {
   title: '校园地图',
   subtitle: '基于高德地图展示湖北大学建筑位置',
@@ -33,7 +34,8 @@ const props = withDefaults(defineProps<{
   height: '260px',
   zoom: 16,
   fitView: true,
-  walkingRoute: false
+  walkingRoute: false,
+  selectedActionText: '查看详情'
 })
 
 const emit = defineEmits<{
@@ -217,7 +219,7 @@ function renderMapContent(adjustView = false) {
     nextOverlays.push(marker)
   }
 
-  if (props.fromPoint && props.toPoint) {
+  if (props.fromPoint && props.toPoint && !props.walkingRoute) {
     const polyline = new amap.value.Polyline({
       path: [pointToLngLat(props.fromPoint), pointToLngLat(props.toPoint)],
       strokeColor: '#218cff',
@@ -363,7 +365,7 @@ onBeforeUnmount(() => {
         <strong>{{ selectedBuilding.name }}</strong>
         <span>{{ selectedBuilding.type }}</span>
       </div>
-      <button type="button" @click="openSelectedBuilding">查看详情</button>
+      <button type="button" @click="openSelectedBuilding">{{ selectedActionText }}</button>
     </article>
   </section>
 </template>

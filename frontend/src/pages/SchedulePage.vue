@@ -15,6 +15,7 @@ import type { ScheduleSuggestion } from '@/types/schedule'
 import {
   filterScheduleLocations,
   formatDistance,
+  getLocationDisplayInfo,
   getStatusMeta,
   type SearchableScheduleLocation
 } from '@/utils/schedule'
@@ -126,6 +127,14 @@ function selectStartLocation(location: ScheduleLocationOption) {
 function selectDestination(building: Building) {
   selectedDestination.value = building
   destinationQuery.value = building.name
+}
+
+function locationTitle(location: Pick<SearchableScheduleLocation, 'name' | 'type'>): string {
+  return getLocationDisplayInfo(location).title
+}
+
+function locationSubtitle(location: Pick<SearchableScheduleLocation, 'name' | 'type'>): string {
+  return getLocationDisplayInfo(location).subtitle
 }
 
 function clearDestination() {
@@ -245,14 +254,17 @@ onMounted(loadScheduleData)
                 :class="{ active: selectedOption === `${location.source}:${location.id}` }"
                 @click="selectStartLocation(location)"
               >
-                <strong>{{ location.name }}</strong>
-                <span>{{ location.type }}</span>
+                <strong>{{ locationTitle(location) }}</strong>
+                <span>{{ locationSubtitle(location) }}</span>
               </button>
             </div>
           </div>
 
           <div v-if="locationStore.selectedLocation" class="selected-location">
-            <strong>{{ locationStore.selectedLocation.name }}</strong>
+            <strong>{{ locationTitle({
+              name: locationStore.selectedLocation.name,
+              type: locationStore.selectedLocation.source === 'browser' ? '浏览器定位' : '已选起点'
+            }) }}</strong>
             <span>{{ locationStore.selectedLocation.description || '已选择当前位置' }}</span>
           </div>
 
@@ -272,14 +284,14 @@ onMounted(loadScheduleData)
                 :class="{ active: selectedDestination?.id === building.id }"
                 @click="selectDestination(building)"
               >
-                <strong>{{ building.name }}</strong>
-                <span>{{ building.type }}</span>
+                <strong>{{ locationTitle(building) }}</strong>
+                <span>{{ locationSubtitle(building) }}</span>
               </button>
             </div>
           </div>
           <div v-if="selectedDestination" class="selected-location">
-            <strong>{{ selectedDestination.name }}</strong>
-            <span>已作为地图路线终点</span>
+            <strong>{{ locationTitle(selectedDestination) }}</strong>
+            <span>{{ locationSubtitle(selectedDestination) }} · 已作为地图路线终点</span>
             <button type="button" class="inline-clear" @click="clearDestination">
               改用下一节课终点
             </button>
@@ -428,9 +440,9 @@ onMounted(loadScheduleData)
 
 .location-result-list button {
   display: grid;
-  flex: 0 0 142px;
+  flex: 0 0 178px;
   gap: 2px;
-  min-height: 58px;
+  min-height: 66px;
   border: 1px solid var(--cm-line);
   border-radius: var(--cm-radius);
   background: #fff;
@@ -447,10 +459,9 @@ onMounted(loadScheduleData)
 }
 
 .location-result-list strong {
-  overflow: hidden;
   font-size: 13px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
 }
 
 .location-result-list span {

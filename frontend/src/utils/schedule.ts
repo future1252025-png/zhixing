@@ -29,6 +29,11 @@ export type SearchableScheduleLocation = {
   longitude: number
 }
 
+export type LocationDisplayInfo = {
+  title: string
+  subtitle: string
+}
+
 export function formatDistance(distanceMeters: number): string {
   if (distanceMeters < 1000) {
     return `${Math.round(distanceMeters)} 米`
@@ -52,6 +57,34 @@ export function getStatusMeta(status: ScheduleStatus): StatusMeta {
     }
   }
   return statusMap[status]
+}
+
+export function getLocationDisplayInfo(
+  location: Pick<SearchableScheduleLocation, 'name' | 'type'>
+): LocationDisplayInfo {
+  const name = location.name.trim()
+  const type = location.type?.trim() || '校园地点'
+  const campusPrefix = name.includes('湖北大学') && name.includes('武昌校区')
+    ? '湖北大学武昌校区'
+    : ''
+  const title = name
+    .replace(/^湖北大学(?:\(|（)武昌校区(?:\)|）)/, '')
+    .replace(/^湖北大学武昌校区/, '')
+    .replace(/^湖北大学[-—·\s]*/, '')
+    .replace(/^[-—·\s]+/, '')
+    .trim()
+
+  if (!title || title === name) {
+    return {
+      title: name,
+      subtitle: type
+    }
+  }
+
+  return {
+    title,
+    subtitle: campusPrefix ? `${campusPrefix} · ${type}` : type
+  }
 }
 
 function clamp(value: number, min: number, max: number): number {

@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   filterScheduleLocations,
   formatDistance,
+  getLocationDisplayInfo,
   getRouteVisualPoints,
   getStatusMeta
 } from './schedule'
@@ -48,5 +49,20 @@ describe('schedule helpers', () => {
 
     expect(filterScheduleLocations(locations, '教3')[0].name).toBe('3号教学楼')
     expect(filterScheduleLocations(locations, '食堂')[0].name).toBe('风华园食堂')
+  })
+
+  it('highlights the distinctive part of long campus place names', () => {
+    expect(getLocationDisplayInfo({
+      name: '湖北大学武昌校区生命科学学院',
+      type: '校园地点'
+    })).toEqual({
+      title: '生命科学学院',
+      subtitle: '湖北大学武昌校区 · 校园地点'
+    })
+
+    expect(getLocationDisplayInfo({
+      name: '湖北大学(武昌校区)图书馆',
+      type: '校园地点'
+    }).title).toBe('图书馆')
   })
 })
