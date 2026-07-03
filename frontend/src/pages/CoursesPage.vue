@@ -7,8 +7,10 @@ import { useRouter } from 'vue-router'
 import { deleteCourse, getCourses } from '@/api/courses'
 import type { Course } from '@/types/course'
 import {
+  buildCourseCreateQuery,
   filterCoursesByWeek,
   getCourseTimeSlots,
+  getTeachingWeekOptions,
   readSelectedWeek,
   WEEKDAYS,
   writeSelectedWeek
@@ -24,7 +26,7 @@ const errorMessage = ref('')
 const selectedWeek = ref(
   typeof window === 'undefined' ? 1 : readSelectedWeek(window.localStorage)
 )
-const weekOptions = Array.from({ length: 20 }, (_, index) => index + 1)
+const weekOptions = getTeachingWeekOptions()
 const timeSlots = getCourseTimeSlots()
 const courseActionOptions = [
   { name: '编辑课程' },
@@ -61,6 +63,10 @@ function openCreatePage(query: Record<string, string> = {}) {
   router.push({ path: '/courses/new', query })
 }
 
+function openCreateForCurrentWeek() {
+  openCreatePage({ weeks: String(selectedWeek.value) })
+}
+
 function openImportPage() {
   router.push('/courses/import')
 }
@@ -70,11 +76,7 @@ function openEditPage(courseId: number) {
 }
 
 function openCreateForSlot(weekday: number, slot: { start_time: string; end_time: string }) {
-  openCreatePage({
-    weekday: String(weekday),
-    start_time: slot.start_time,
-    end_time: slot.end_time
-  })
+  openCreatePage(buildCourseCreateQuery(weekday, slot, selectedWeek.value))
 }
 
 function getCellCourses(weekday: number, slot: { start_time: string; end_time: string }) {
@@ -153,11 +155,21 @@ onMounted(loadCourses)
     <div class="page-content courses-content">
       <header class="course-toolbar">
         <div><span>我的课表</span><h1>第 {{ selectedWeek }} 周</h1><p>{{ courseCountText }} · 点击课程可编辑或删除</p></div>
-        <div class="toolbar-actions"><button type="button" aria-label="导入课表" @click="openImportPage"><van-icon name="description" /></button><button type="button" aria-label="新增课程" @click="openCreatePage()"><van-icon name="plus" /></button></div>
+        <div class="toolbar-actions"><button type="button" aria-label="导入课表" @click="openImportPage"><van-icon name="description" /></button><button type="button" aria-label="新增课程" @click="openCreateForCurrentWeek"><van-icon name="plus" /></button></div>
       </header>
 
-      <section class="week-switcher" aria-label="选择周次">
-        <button v-for="week in weekOptions" :key="week" type="button" :class="{ active: selectedWeek === week }" @click="selectedWeek = week"><span>{{ week }}</span><small>周</small></button>
+      <section class="week-panel" aria-label="选择周次">
+        <label class="week-select-label" for="courseWeekSelect">
+          <span>当前周次</span>
+          <select id="courseWeekSelect" v-model.number="selectedWeek">
+            <option v-for="week in weekOptions" :key="week" :value="week">
+              第 {{ week }} 周
+            </option>
+          </select>
+        </label>
+        <div class="week-switcher" aria-label="快捷选择周次">
+          <button v-for="week in weekOptions" :key="week" type="button" :class="{ active: selectedWeek === week }" @click="selectedWeek = week"><span>{{ week }}</span><small>周</small></button>
+        </div>
       </section>
 
       <p v-if="loading" class="muted-text">正在加载课程...</p>
@@ -165,7 +177,7 @@ onMounted(loadCourses)
         <van-button type="primary" size="small" @click="loadCourses">重试</van-button>
       </van-empty>
       <van-empty v-else-if="courses.length === 0" description="暂无课程">
-        <van-button type="primary" size="small" @click="openCreatePage">
+        <van-button type="primary" size="small" @click="openCreateForCurrentWeek">
           添加第一门课程
         </van-button>
       </van-empty>
@@ -415,6 +427,36 @@ onMounted(loadCourses)
   color: var(--cm-primary);
   cursor: pointer;
   font-size: 19px;
+}
+
+.week-panel {
+  display: grid;
+  gap: 9px;
+}
+
+.week-select-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid var(--cm-line);
+  border-radius: var(--cm-radius);
+  background: #fff;
+  color: var(--cm-text);
+  font-size: 13px;
+  font-weight: 700;
+  padding: 9px 11px;
+}
+
+.week-select-label select {
+  min-width: 118px;
+  border: 1px solid var(--cm-line);
+  border-radius: 6px;
+  background: #f8faf8;
+  color: var(--cm-ink);
+  cursor: pointer;
+  font: inherit;
+  padding: 7px 9px;
 }
 
 .week-switcher {

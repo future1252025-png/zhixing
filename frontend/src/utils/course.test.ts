@@ -2,10 +2,14 @@ import { describe, expect, it } from 'vitest'
 
 import {
   buildEmptyCourseForm,
+  buildCourseCreateQuery,
+  parseWeeksRangeToPicker,
+  buildWeeksRange,
   filterCoursesByWeek,
   findNextCourse,
   findCourseTimeOverlap,
   getCourseTimeSlots,
+  getTeachingWeekOptions,
   groupCoursesByWeekday,
   isCourseActiveInWeek,
   readSelectedWeek,
@@ -135,8 +139,46 @@ describe('course helpers', () => {
     expect(readSelectedWeek(localStorageLike)).toBe(1)
     writeSelectedWeek(localStorageLike, 13)
     expect(readSelectedWeek(localStorageLike)).toBe(13)
+    writeSelectedWeek(localStorageLike, 16)
+    expect(readSelectedWeek(localStorageLike)).toBe(16)
     writeSelectedWeek(localStorageLike, 99)
     expect(readSelectedWeek(localStorageLike)).toBe(1)
+  })
+
+  it('provides all teaching week options including week 16', () => {
+    const options = getTeachingWeekOptions()
+
+    expect(options).toHaveLength(20)
+    expect(options[0]).toBe(1)
+    expect(options[15]).toBe(16)
+    expect(options[19]).toBe(20)
+  })
+
+  it('builds teaching week ranges from picker values', () => {
+    expect(buildWeeksRange(1, 16)).toBe('1-16')
+    expect(buildWeeksRange(16, 16)).toBe('16')
+    expect(buildWeeksRange(16, 1)).toBe('1-16')
+  })
+
+  it('parses existing weeks text back into picker values', () => {
+    expect(parseWeeksRangeToPicker('16')).toEqual({ startWeek: 16, endWeek: 16 })
+    expect(parseWeeksRangeToPicker('9-16(双)')).toEqual({ startWeek: 9, endWeek: 16 })
+    expect(parseWeeksRangeToPicker('1-16(周)[01-02节]')).toEqual({
+      startWeek: 1,
+      endWeek: 16
+    })
+    expect(parseWeeksRangeToPicker('')).toBeNull()
+  })
+
+  it('builds create-course query with selected week, weekday, and time', () => {
+    expect(
+      buildCourseCreateQuery(5, { start_time: '14:00', end_time: '15:40' }, 16)
+    ).toEqual({
+      weekday: '5',
+      start_time: '14:00',
+      end_time: '15:40',
+      weeks: '16'
+    })
   })
 
   it('provides table time slots for timetable layout', () => {

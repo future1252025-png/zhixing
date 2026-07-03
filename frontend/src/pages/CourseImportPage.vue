@@ -7,6 +7,7 @@ import { useRouter } from 'vue-router'
 import { getBuildings, type Building } from '@/api/buildings'
 import { createCourse, previewCourseImport } from '@/api/courses'
 import type { CourseImportPreviewItem } from '@/types/course'
+import { filterBuildingsByKeyword, includeSelectedBuilding } from '@/utils/buildings'
 import { validateCourseForm } from '@/utils/course'
 
 const router = useRouter()
@@ -16,6 +17,7 @@ const selectedFile = ref<File | null>(null)
 const loading = ref(false)
 const importing = ref(false)
 const errorMessage = ref('')
+const buildingKeyword = ref('')
 
 const matchedCount = computed(
   () => previewItems.value.filter((item) => item.building_id).length
@@ -23,6 +25,13 @@ const matchedCount = computed(
 const needsReviewCount = computed(
   () => previewItems.value.filter((item) => !item.building_id).length
 )
+const filteredBuildings = computed(() =>
+  filterBuildingsByKeyword(buildings.value, buildingKeyword.value, 80)
+)
+
+function getVisibleBuildings(selectedBuildingId: number | null) {
+  return includeSelectedBuilding(filteredBuildings.value, buildings.value, selectedBuildingId)
+}
 
 function getErrorMessage(error: unknown): string {
   if (isAxiosError(error)) {
@@ -144,6 +153,18 @@ onMounted(loadBuildings)
         <span>待确认 {{ needsReviewCount }}</span>
       </section>
 
+      <section v-if="previewItems.length" class="building-search-panel">
+        <label>
+          <span>筛选上课建筑</span>
+          <input
+            v-model="buildingKeyword"
+            type="search"
+            placeholder="输入教学楼、实验楼或地点"
+          />
+        </label>
+        <small>当前显示 {{ filteredBuildings.length }} / {{ buildings.length }} 个地点</small>
+      </section>
+
       <section v-if="previewItems.length" class="preview-list">
         <article
           v-for="(item, index) in previewItems"
@@ -163,7 +184,7 @@ onMounted(loadBuildings)
               <select v-model.number="item.building_id" class="form-select">
                 <option :value="null">请选择建筑</option>
                 <option
-                  v-for="building in buildings"
+                  v-for="building in getVisibleBuildings(item.building_id)"
                   :key="building.id"
                   :value="building.id"
                 >
@@ -254,6 +275,44 @@ onMounted(loadBuildings)
   text-align: center;
 }
 .preview-summary span + span { border-left: 1px solid var(--cm-line); }
+
+.building-search-panel {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 14px;
+  border: 1px solid var(--cm-line);
+  border-radius: var(--cm-radius);
+  background: #fff;
+  padding: 11px 13px;
+}
+
+.building-search-panel label {
+  display: grid;
+  gap: 7px;
+}
+
+.building-search-panel span {
+  color: var(--cm-text);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.building-search-panel input {
+  width: 100%;
+  min-height: 36px;
+  border: 1px solid var(--cm-line);
+  border-radius: 6px;
+  background: #f8faf8;
+  color: var(--cm-ink);
+  font: inherit;
+  outline: none;
+  padding: 0 10px;
+}
+
+.building-search-panel small {
+  color: var(--cm-muted);
+  font-size: 11px;
+}
 
 .preview-card {
   border: 1px solid var(--cm-line);

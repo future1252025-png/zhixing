@@ -27,12 +27,18 @@ export type CourseTimeSlot = {
   end_time: string
 }
 
+export type WeeksRangePickerValue = {
+  startWeek: number
+  endWeek: number
+}
+
 type StorageLike = {
   getItem(key: string): string | null
   setItem(key: string, value: string): void
 }
 
 export const SELECTED_WEEK_STORAGE_KEY = 'campusmind-selected-week'
+export const MAX_TEACHING_WEEK = 20
 
 const COURSE_TIME_SLOTS: CourseTimeSlot[] = [
   { label: '第一二节', section: '1-2', start_time: '08:00', end_time: '09:40' },
@@ -46,16 +52,77 @@ export function getCourseTimeSlots(): CourseTimeSlot[] {
   return [...COURSE_TIME_SLOTS]
 }
 
+export function getTeachingWeekOptions(): number[] {
+  return Array.from({ length: MAX_TEACHING_WEEK }, (_, index) => index + 1)
+}
+
+export function buildWeeksRange(startWeek: number, endWeek: number): string {
+  const start = Math.min(startWeek, endWeek)
+  const end = Math.max(startWeek, endWeek)
+  if (start === end) {
+    return String(start)
+  }
+  return `${start}-${end}`
+}
+
+export function parseWeeksRangeToPicker(weeks: string | null | undefined): WeeksRangePickerValue | null {
+  const normalized = normalizeWeeksExpression(weeks)
+  const range = normalized.match(/(\d{1,2})\s*-\s*(\d{1,2})/)
+  if (range) {
+    const start = Number(range[1])
+    const end = Number(range[2])
+    if (start >= 1 && end >= 1 && start <= MAX_TEACHING_WEEK && end <= MAX_TEACHING_WEEK) {
+      return {
+        startWeek: Math.min(start, end),
+        endWeek: Math.max(start, end)
+      }
+    }
+  }
+
+  const single = normalized.match(/\d{1,2}/)
+  if (single) {
+    const week = Number(single[0])
+    if (week >= 1 && week <= MAX_TEACHING_WEEK) {
+      return { startWeek: week, endWeek: week }
+    }
+  }
+
+  return null
+}
+
+export function buildCourseCreateQuery(
+  weekday: number,
+  slot: Pick<CourseTimeSlot, 'start_time' | 'end_time'>,
+  selectedWeek?: number
+): Record<string, string> {
+  const query: Record<string, string> = {
+    weekday: String(weekday),
+    start_time: slot.start_time,
+    end_time: slot.end_time
+  }
+
+  if (
+    selectedWeek !== undefined &&
+    Number.isInteger(selectedWeek) &&
+    selectedWeek >= 1 &&
+    selectedWeek <= MAX_TEACHING_WEEK
+  ) {
+    query.weeks = String(selectedWeek)
+  }
+
+  return query
+}
+
 export function readSelectedWeek(storage: StorageLike): number {
   const value = Number(storage.getItem(SELECTED_WEEK_STORAGE_KEY))
-  if (Number.isInteger(value) && value >= 1 && value <= 20) {
+  if (Number.isInteger(value) && value >= 1 && value <= MAX_TEACHING_WEEK) {
     return value
   }
   return 1
 }
 
 export function writeSelectedWeek(storage: StorageLike, week: number): void {
-  if (Number.isInteger(week) && week >= 1 && week <= 20) {
+  if (Number.isInteger(week) && week >= 1 && week <= MAX_TEACHING_WEEK) {
     storage.setItem(SELECTED_WEEK_STORAGE_KEY, String(week))
   } else {
     storage.setItem(SELECTED_WEEK_STORAGE_KEY, '1')

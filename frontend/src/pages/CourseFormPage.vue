@@ -7,12 +7,16 @@ import { useRoute, useRouter } from 'vue-router'
 import { getBuildings, type Building } from '@/api/buildings'
 import { createCourse, getCourses, updateCourse } from '@/api/courses'
 import type { Course } from '@/types/course'
+import { filterBuildingsByKeyword, includeSelectedBuilding } from '@/utils/buildings'
 import {
   WEEKDAYS,
   buildEmptyCourseForm,
+  buildWeeksRange,
   courseToForm,
   findCourseTimeOverlap,
   formToPayload,
+  getTeachingWeekOptions,
+  parseWeeksRangeToPicker,
   validateCourseForm
 } from '@/utils/course'
 
@@ -24,6 +28,10 @@ const courses = ref<Course[]>([])
 const loading = ref(true)
 const submitting = ref(false)
 const errorMessage = ref('')
+const weekOptions = getTeachingWeekOptions()
+const weekRangeStart = ref(1)
+const weekRangeEnd = ref(16)
+const buildingKeyword = ref('')
 
 const courseId = computed(() => {
   const id = Number(route.params.id)
@@ -31,6 +39,13 @@ const courseId = computed(() => {
 })
 const isEdit = computed(() => courseId.value !== null)
 const pageTitle = computed(() => (isEdit.value ? '编辑课程' : '新增课程'))
+const visibleBuildings = computed(() =>
+  includeSelectedBuilding(
+    filterBuildingsByKeyword(buildings.value, buildingKeyword.value, 80),
+    buildings.value,
+    form.building_id
+  )
+)
 
 function applyCreateDefaultsFromQuery() {
   if (isEdit.value) {
@@ -40,6 +55,7 @@ function applyCreateDefaultsFromQuery() {
   const weekday = Number(route.query.weekday)
   const startTime = typeof route.query.start_time === 'string' ? route.query.start_time : ''
   const endTime = typeof route.query.end_time === 'string' ? route.query.end_time : ''
+  const weeks = typeof route.query.weeks === 'string' ? route.query.weeks.trim() : ''
   if (Number.isInteger(weekday) && weekday >= 1 && weekday <= 7) {
     form.weekday = weekday
   }
@@ -49,6 +65,28 @@ function applyCreateDefaultsFromQuery() {
   if (/^\d{2}:\d{2}$/.test(endTime)) {
     form.end_time = endTime
   }
+  if (weeks && weeks.length <= 64) {
+    form.weeks = weeks
+    syncWeekRangePicker(weeks)
+  }
+}
+
+function syncWeekRangePicker(weeks: string | null | undefined) {
+  const range = parseWeeksRangeToPicker(weeks)
+  if (!range) {
+    return
+  }
+  weekRangeStart.value = range.startWeek
+  weekRangeEnd.value = range.endWeek
+}
+
+function applyWeeksRange() {
+  form.weeks = buildWeeksRange(weekRangeStart.value, weekRangeEnd.value)
+}
+
+function applyWeeksPreset(value: string) {
+  form.weeks = value
+  syncWeekRangePicker(value)
 }
 
 function getErrorMessage(error: unknown): string {
@@ -79,6 +117,7 @@ async function loadFormData() {
         return
       }
       Object.assign(form, courseToForm(course))
+      syncWeekRangePicker(form.weeks)
     } else {
       applyCreateDefaultsFromQuery()
     }
@@ -171,6 +210,32 @@ onMounted(loadFormData)
             maxlength="64"
             placeholder="例如 1-16"
           />
+          <div class="week-range-picker">
+            <label>
+              <span>起始周</span>
+              <select v-model.number="weekRangeStart" class="form-select">
+                <option v-for="week in weekOptions" :key="week" :value="week">
+                  第 {{ week }} 周
+                </option>
+              </select>
+            </label>
+            <label>
+              <span>结束周</span>
+              <select v-model.number="weekRangeEnd" class="form-select">
+                <option v-for="week in weekOptions" :key="week" :value="week">
+                  第 {{ week }} 周
+                </option>
+              </select>
+            </label>
+            <button type="button" @click="applyWeeksRange">应用周次</button>
+          </div>
+          <div class="week-presets" aria-label="周次快捷选择">
+            <button type="button" @click="applyWeeksPreset('1-16')">1-16 周</button>
+            <button type="button" @click="applyWeeksPreset('1-8')">1-8 周</button>
+            <button type="button" @click="applyWeeksPreset('9-16')">9-16 周</button>
+            <button type="button" @click="applyWeeksPreset('1-16(单)')">单周</button>
+            <button type="button" @click="applyWeeksPreset('1-16(双)')">双周</button>
+          </div>
           <van-field
             v-model="form.teacher"
             label="教师"
@@ -196,16 +261,25 @@ onMounted(loadFormData)
           />
           <van-field required label="上课建筑">
             <template #input>
-              <select v-model.number="form.building_id" class="form-select">
+              <div class="building-picker">
+                <input
+                  v-model="buildingKeyword"
+                  class="form-input"
+                  type="search"
+                  placeholder="搜索教学楼、实验楼或地点"
+                />
+                <select v-model.number="form.building_id" class="form-select">
                 <option :value="0">请选择建筑</option>
                 <option
-                  v-for="building in buildings"
+                  v-for="building in visibleBuildings"
                   :key="building.id"
                   :value="building.id"
                 >
                   {{ building.name }}
                 </option>
               </select>
+              <small>{{ visibleBuildings.length }} / {{ buildings.length }} 个地点</small>
+              </div>
             </template>
           </van-field>
           <van-field
@@ -266,5 +340,104 @@ onMounted(loadFormData)
   color: var(--cm-ink);
   font: inherit;
   outline: none;
+}
+
+.building-picker {
+  display: grid;
+  width: 100%;
+  gap: 7px;
+}
+
+.form-input {
+  width: 100%;
+  min-height: 34px;
+  border: 1px solid var(--cm-line);
+  border-radius: 6px;
+  background: #f8faf8;
+  color: var(--cm-ink);
+  font: inherit;
+  outline: none;
+  padding: 0 9px;
+}
+
+.building-picker select {
+  min-height: 34px;
+  border: 1px solid var(--cm-line);
+  border-radius: 6px;
+  background: #fff;
+  padding: 0 9px;
+}
+
+.building-picker small {
+  color: var(--cm-muted);
+  font-size: 11px;
+}
+
+.week-range-picker {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: 8px;
+  border-top: 1px solid var(--cm-line);
+  background: #fff;
+  padding: 10px 14px;
+}
+
+.week-range-picker label {
+  display: grid;
+  gap: 5px;
+}
+
+.week-range-picker span {
+  color: var(--cm-muted);
+  font-size: 11px;
+}
+
+.week-range-picker select {
+  min-height: 34px;
+  border: 1px solid var(--cm-line);
+  border-radius: 6px;
+  background: #f8faf8;
+  padding: 0 8px;
+}
+
+.week-range-picker button,
+.week-presets button {
+  border: 1px solid var(--cm-line);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--cm-primary);
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.week-range-picker button {
+  align-self: end;
+  min-height: 34px;
+  padding: 0 10px;
+}
+
+.week-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  border-top: 1px solid var(--cm-line);
+  background: #fff;
+  padding: 10px 14px 12px;
+}
+
+.week-presets button {
+  min-height: 30px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+@media (max-width: 390px) {
+  .week-range-picker {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .week-range-picker button {
+    grid-column: 1 / -1;
+  }
 }
 </style>
