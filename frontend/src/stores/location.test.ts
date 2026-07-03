@@ -1,8 +1,16 @@
 import { createPinia, setActivePinia } from 'pinia'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import type { Building, LocationPreset } from '@/api/buildings'
 import { useLocationStore } from './location'
+
+const amapMock = vi.hoisted(() => ({
+  requestAMapCurrentPosition: vi.fn()
+}))
+
+vi.mock('@/utils/amap', () => ({
+  requestAMapCurrentPosition: amapMock.requestAMapCurrentPosition
+}))
 
 const preset: LocationPreset = {
   id: 1,
@@ -29,6 +37,11 @@ const building: Building = {
 describe('location store', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
+    amapMock.requestAMapCurrentPosition.mockReset()
+    Object.defineProperty(navigator, 'geolocation', {
+      value: undefined,
+      configurable: true
+    })
   })
 
   it('selects a preset and prefers current_building_id when available', () => {
@@ -59,6 +72,79 @@ describe('location store', () => {
       latitude: 30.58,
       longitude: 114.32
     })
+  })
+
+  it('falls back to AMap location when browser geolocation is unavailable', async () => {
+    amapMock.requestAMapCurrentPosition.mockResolvedValue({
+      latitude: 30.581,
+      longitude: 114.329,
+      description: '来自高德定位'
+    })
+    const store = useLocationStore()
+
+    await store.requestBrowserLocation()
+
+    expect(amapMock.requestAMapCurrentPosition).toHaveBeenCalled()
+    expect(store.selectedLocation).toMatchObject({
+      source: 'browser',
+      name: '当前位置',
+      latitude: 30.581,
+      longitude: 114.329,
+      description: '来自高德定位'
+    })
+  })
+
+  it('falls back to AMap location when browser geolocation is denied', async () => {
+    const getCurrentPosition = vi.fn(
+      (_resolve: PositionCallback, reject: PositionErrorCallback) => {
+        reject({
+          code: 1,
+          message: 'denied',
+          PERMISSION_DENIED: 1,
+          POSITION_UNAVAILABLE: 2,
+          TIMEOUT: 3
+        } as GeolocationPositionError)
+      }
+    )
+    Object.defineProperty(navigator, 'geolocation', {
+      value: { getCurrentPosition },
+      configurable: true
+    })
+    amapMock.requestAMapCurrentPosition.mockResolvedValue({
+      latitude: 30.582,
+      longitude: 114.33,
+      description: '来自高德定位'
+    })
+    const store = useLocationStore()
+
+    await store.requestBrowserLocation()
+
+    expect(getCurrentPosition).toHaveBeenCalled()
+    expect(amapMock.requestAMapCurrentPosition).toHaveBeenCalled()
+    expect(store.suggestionPayload).toEqual({
+      latitude: 30.582,
+      longitude: 114.33
+    })
+  })
+
+  it('uses campus center when all geolocation providers fail', async () => {
+    amapMock.requestAMapCurrentPosition.mockRejectedValue(
+      new Error('Get ipLocation failed.Get geolocation timeout.')
+    )
+    const store = useLocationStore()
+
+    await store.requestBrowserLocation()
+
+    expect(store.selectedLocation).toMatchObject({
+      source: 'fallback',
+      name: '校园中心',
+      building_id: null
+    })
+    expect(store.suggestionPayload).toEqual({
+      latitude: expect.any(Number),
+      longitude: expect.any(Number)
+    })
+    expect(store.browserError).toContain('定位失败')
   })
 
   it('can clear the selected location', () => {

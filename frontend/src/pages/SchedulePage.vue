@@ -172,11 +172,15 @@ async function loadScheduleData() {
 
 async function useBrowserLocation() {
   try {
-    await locationStore.requestBrowserLocation()
-    selectedOption.value = 'browser'
-    startQuery.value = '浏览器定位：当前位置'
+    const location = await locationStore.requestBrowserLocation()
+    selectedOption.value = location.source
+    startQuery.value = location.source === 'fallback'
+      ? '校园中心'
+      : '浏览器定位：当前位置'
     suggestion.value = null
-    showToast('已使用浏览器定位')
+    showToast(location.source === 'fallback'
+      ? '定位超时，已使用校园中心，可搜索调整'
+      : '已使用当前位置')
   } catch {
     showFailToast(locationStore.browserError || '浏览器定位失败，请手动选择当前位置')
   }
@@ -263,7 +267,11 @@ onMounted(loadScheduleData)
           <div v-if="locationStore.selectedLocation" class="selected-location">
             <strong>{{ locationTitle({
               name: locationStore.selectedLocation.name,
-              type: locationStore.selectedLocation.source === 'browser' ? '浏览器定位' : '已选起点'
+              type: locationStore.selectedLocation.source === 'browser'
+                ? '浏览器定位'
+                : locationStore.selectedLocation.source === 'fallback'
+                  ? '定位兜底'
+                  : '已选起点'
             }) }}</strong>
             <span>{{ locationStore.selectedLocation.description || '已选择当前位置' }}</span>
           </div>
