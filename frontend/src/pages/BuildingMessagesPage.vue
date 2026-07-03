@@ -5,6 +5,9 @@ import { showFailToast, showSuccessToast } from 'vant'
 import { useRoute, useRouter } from 'vue-router'
 import { getBuildingDetail, type Building } from '@/api/buildings'
 import { createBuildingMessage, getBuildingMessages, validateMessageContent, type BuildingMessage, type MessageLocationSource } from '@/api/messages'
+import { haversineDistanceMeters } from '@/utils/geo'
+
+const MAX_MESSAGE_DISTANCE_METERS = 500
 
 const route = useRoute()
 const router = useRouter()
@@ -24,10 +27,41 @@ const selectedRoomName = computed(() => {
 const roomTitle = computed(() => selectedRoomName.value || '建筑总聊')
 const remainingCount = computed(() => Math.max(0, 200 - draft.value.length))
 const currentLocation = ref<{ latitude: number; longitude: number; location_source: MessageLocationSource; label: string } | null>(null)
-const locationText = computed(() => currentLocation.value ? `${currentLocation.value.location_source === 'browser' ? '浏览器定位' : '建筑位置'} · ${currentLocation.value.label}` : '发布前需要确认位置')
+const distanceToBuildingMeters = computed(() => {
+  if (!currentLocation.value || !building.value) return null
+  return haversineDistanceMeters(currentLocation.value, building.value)
+})
+const isLocationInsideBuildingRange = computed(() =>
+  distanceToBuildingMeters.value !== null &&
+  distanceToBuildingMeters.value <= MAX_MESSAGE_DISTANCE_METERS
+)
+const composerDisabled = computed(() =>
+  !currentLocation.value || !isLocationInsideBuildingRange.value
+)
+const composerPrompt = computed(() => {
+  if (!currentLocation.value) return '请先点击“定位”或“使用建筑位置”，确认你在该建筑附近后才能留言'
+  if (!isLocationInsideBuildingRange.value) {
+    return `当前位置距该建筑约 ${formatDistance(distanceToBuildingMeters.value)}，超过 ${MAX_MESSAGE_DISTANCE_METERS} 米，不能在这里留言`
+  }
+  return ''
+})
+const locationText = computed(() => {
+  if (!currentLocation.value) return '发布前需要确认位置'
+  const source = currentLocation.value.location_source === 'browser' ? '浏览器定位' : '建筑位置'
+  const distance = distanceToBuildingMeters.value === null
+    ? ''
+    : ` · 距建筑约 ${formatDistance(distanceToBuildingMeters.value)}`
+  return `${source} · ${currentLocation.value.label}${distance}`
+})
 
 function getErrorMessage(error: unknown): string {
-  if (isAxiosError(error) && typeof error.response?.data?.detail === 'string') return error.response.data.detail
+  if (isAxiosError(error) && typeof error.response?.data?.detail === 'string') {
+    const detail = error.response.data.detail
+    if (detail.toLowerCase().includes('location is too far')) {
+      return '当前位置距离该建筑过远，不能在这里留言'
+    }
+    return detail
+  }
   return '留言请求失败，请稍后重试'
 }
 function formatTime(value: string): string { const date = new Date(value); return Number.isNaN(date.getTime()) ? '' : date.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) }
@@ -55,6 +89,7 @@ function requestBrowserLocation() {
   )
 }
 async function submitMessage() {
+  if (composerDisabled.value) return showFailToast(composerPrompt.value)
   const validationError = validateMessageContent(draft.value)
   if (validationError) return showFailToast(validationError)
   if (!currentLocation.value) return showFailToast('请先定位或使用当前建筑位置')
@@ -63,6 +98,9 @@ async function submitMessage() {
     await createBuildingMessage(buildingId.value, { content: draft.value, room_name: selectedRoomName.value, latitude: currentLocation.value.latitude, longitude: currentLocation.value.longitude, location_source: currentLocation.value.location_source })
     draft.value = ''; showSuccessToast('留言已发送'); await loadMessages()
   } catch (error) { showFailToast(getErrorMessage(error)) } finally { sending.value = false }
+}
+function handleComposerClick() {
+  if (composerDisabled.value) showFailToast(composerPrompt.value)
 }
 onMounted(loadPage)
 watch(() => route.query.room_name, () => { void loadPage() })
@@ -81,7 +119,7 @@ watch(() => route.query.room_name, () => { void loadPage() })
         <article v-for="message in messages" :key="message.id" class="message-row"><div class="message-meta"><span>{{ message.display_name || '匿名同学' }}</span><span v-if="message.distance_to_building_meters !== null">距建筑约 {{ formatDistance(message.distance_to_building_meters) }}</span><time>{{ formatTime(message.created_at) }}</time></div><p class="message-bubble">{{ message.content }}</p></article>
       </div>
     </div>
-    <form class="message-composer" @submit.prevent="submitMessage"><van-field v-model="draft" type="textarea" rows="1" autosize maxlength="200" placeholder="写一条匿名留言" :border="false" /><div class="composer-actions"><span>{{ remainingCount }}/200</span><van-button type="primary" size="small" native-type="submit" :loading="sending">发送</van-button></div></form>
+    <form class="message-composer" :class="{ disabled: composerDisabled }" @click.capture="handleComposerClick" @submit.prevent="submitMessage"><van-field v-model="draft" type="textarea" rows="1" autosize maxlength="200" :disabled="composerDisabled" :placeholder="composerDisabled ? '确认在建筑附近后才能留言' : '写一条匿名留言'" :border="false" /><div class="composer-actions"><span>{{ remainingCount }}/200</span><van-button type="primary" size="small" native-type="submit" :loading="sending" :disabled="composerDisabled">发送</van-button></div></form>
   </section>
 </template>
 
@@ -90,5 +128,5 @@ watch(() => route.query.room_name, () => { void loadPage() })
 .message-heading { display: flex; align-items: center; justify-content: space-between; padding: 4px 2px 12px; }.message-heading div { display: grid; gap: 3px; }.message-heading strong { font-size: 18px; }.message-heading span { color: var(--cm-muted); font-size: 11px; }.message-heading > span { color: var(--cm-primary); font-weight: 700; }
 .location-strip { display: grid; gap: 9px; margin-bottom: 16px; border-top: 1px solid var(--cm-line); border-bottom: 1px solid var(--cm-line); background: #fff; padding: 11px 12px; }.location-strip > div { display: flex; align-items: center; gap: 7px; }.location-strip > div:first-child { color: var(--cm-text); font-size: 12px; }.location-strip .van-icon { color: var(--cm-primary); font-size: 16px; }.location-strip button { border: 1px solid var(--cm-line); border-radius: 5px; background: #fff; color: var(--cm-primary); cursor: pointer; font-size: 11px; padding: 5px 8px; }
 .message-list { display: grid; gap: 15px; max-height: calc(100vh - 270px); overflow-y: auto; padding: 4px 2px 18px; }.message-row { display: grid; gap: 5px; }.message-meta { display: flex; flex-wrap: wrap; gap: 8px; color: var(--cm-muted); font-size: 10px; }.message-meta span:first-child { color: var(--cm-text); font-weight: 700; }.message-meta time { margin-left: auto; }.message-bubble { width: fit-content; max-width: 82%; margin: 0; border-radius: 4px 10px 10px 10px; background: #fff; box-shadow: 0 1px 3px rgba(24,43,37,.1); color: var(--cm-ink); font-size: 14px; line-height: 1.6; padding: 10px 12px; overflow-wrap: anywhere; }
-.message-composer { position: fixed; right: 0; bottom: 0; left: 0; z-index: 110; width: min(100%,520px); margin: 0 auto; border-top: 1px solid var(--cm-line); background: rgba(255,255,255,.97); padding: 9px 12px calc(9px + env(safe-area-inset-bottom)); backdrop-filter: blur(10px); }.message-composer :deep(.van-field) { border: 1px solid var(--cm-line); border-radius: var(--cm-radius); background: #f8faf8; padding: 9px 11px; }.composer-actions { display: flex; align-items: center; justify-content: space-between; margin-top: 7px; }.composer-actions span { color: var(--cm-muted); font-size: 10px; }
+.message-composer { position: fixed; right: 0; bottom: 0; left: 0; z-index: 110; width: min(100%,520px); margin: 0 auto; border-top: 1px solid var(--cm-line); background: rgba(255,255,255,.97); padding: 9px 12px calc(9px + env(safe-area-inset-bottom)); backdrop-filter: blur(10px); }.message-composer :deep(.van-field) { border: 1px solid var(--cm-line); border-radius: var(--cm-radius); background: #f8faf8; padding: 9px 11px; }.message-composer.disabled { cursor: not-allowed; }.message-composer.disabled :deep(.van-field) { background: #eef3f1; opacity: 1; }.composer-actions { display: flex; align-items: center; justify-content: space-between; margin-top: 7px; }.composer-actions span { color: var(--cm-muted); font-size: 10px; }
 </style>

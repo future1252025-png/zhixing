@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest'
 
-import { gcj02ToWgs84, isPointInPolygon, wgs84ToGcj02 } from './geo'
+import {
+  gcj02ToWgs84,
+  haversineDistanceMeters,
+  isPointInPolygon,
+  wgs84ToGcj02
+} from './geo'
 
 describe('geo utils', () => {
   it('converts Hubei University Wuchang coordinates for AMap display', () => {
@@ -35,5 +40,18 @@ describe('geo utils', () => {
 
     expect(isPointInPolygon({ latitude: 1, longitude: 1 }, polygon)).toBe(true)
     expect(isPointInPolygon({ latitude: 3, longitude: 1 }, polygon)).toBe(false)
+  })
+
+  it('calculates distance between two campus points in meters', () => {
+    const distance = haversineDistanceMeters(
+      { latitude: 30.58122, longitude: 114.32917 },
+      { latitude: 30.58122, longitude: 114.32917 }
+    )
+
+    expect(distance).toBe(0)
+    expect(haversineDistanceMeters(
+      { latitude: 30.58122, longitude: 114.32917 },
+      { latitude: 30.58622, longitude: 114.32917 }
+    )).toBeGreaterThan(500)
   })
 })

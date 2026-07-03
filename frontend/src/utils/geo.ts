@@ -8,6 +8,8 @@ export type LatLngPoint = {
   longitude: number
 }
 
+const EARTH_RADIUS_METERS = 6371000
+
 function outOfChina(latitude: number, longitude: number): boolean {
   return longitude < 72.004 || longitude > 137.8347 || latitude < 0.8293 || latitude > 55.8271
 }
@@ -57,6 +59,26 @@ export function gcj02ToWgs84(latitude: number, longitude: number): LngLat {
     longitude * 2 - convertedLongitude,
     latitude * 2 - convertedLatitude
   ]
+}
+
+function toRadians(value: number): number {
+  return (value * PI) / 180
+}
+
+export function haversineDistanceMeters(from: LatLngPoint, to: LatLngPoint): number {
+  if (from.latitude === to.latitude && from.longitude === to.longitude) {
+    return 0
+  }
+
+  const deltaLatitude = toRadians(to.latitude - from.latitude)
+  const deltaLongitude = toRadians(to.longitude - from.longitude)
+  const fromLatitude = toRadians(from.latitude)
+  const toLatitude = toRadians(to.latitude)
+  const a = Math.sin(deltaLatitude / 2) ** 2
+    + Math.cos(fromLatitude) * Math.cos(toLatitude) * Math.sin(deltaLongitude / 2) ** 2
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+
+  return Math.round(EARTH_RADIUS_METERS * c)
 }
 
 export function isPointInPolygon(point: LatLngPoint, polygon: LatLngPoint[]): boolean {
