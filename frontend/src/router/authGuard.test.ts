@@ -87,6 +87,13 @@ describe('auth route guard decisions', () => {
     expect(match.meta.requiresAuth).toBe(true)
   })
 
+  it('registers building chatrooms as a protected route', () => {
+    const match = router.resolve('/buildings/1/chats')
+
+    expect(match.name).toBe('building-chatrooms')
+    expect(match.meta.requiresAuth).toBe(true)
+  })
+
   it('registers course form routes as protected routes', () => {
     const newMatch = router.resolve('/courses/new')
     const editMatch = router.resolve('/courses/1/edit')

@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import request from './request'
 import {
   createBuildingMessage,
+  getBuildingChatrooms,
   getBuildingMessages,
   validateMessageContent
 } from './messages'
@@ -36,11 +37,33 @@ describe('message api', () => {
     expect(result[0].display_name).toBe('匿名同学')
   })
 
+  it('fetches building messages by room name', async () => {
+    vi.mocked(request.get).mockResolvedValue({ data: [message] })
+
+    await getBuildingMessages(1, '教4-203')
+
+    expect(request.get).toHaveBeenCalledWith('/api/buildings/1/messages', {
+      params: { room_name: '教4-203' }
+    })
+  })
+
+  it('fetches building chatrooms', async () => {
+    vi.mocked(request.get).mockResolvedValue({
+      data: [{ name: '教4-203', room_name: '教4-203', message_count: 2, is_general: false }]
+    })
+
+    const result = await getBuildingChatrooms(1)
+
+    expect(request.get).toHaveBeenCalledWith('/api/buildings/1/chatrooms')
+    expect(result[0].room_name).toBe('教4-203')
+  })
+
   it('creates a building message with location payload', async () => {
     vi.mocked(request.post).mockResolvedValue({ data: message })
 
     const result = await createBuildingMessage(1, {
       content: '今天这里很安静',
+      room_name: '教4-203',
       latitude: 30.581,
       longitude: 114.329,
       location_source: 'browser'
@@ -48,6 +71,7 @@ describe('message api', () => {
 
     expect(request.post).toHaveBeenCalledWith('/api/buildings/1/messages', {
       content: '今天这里很安静',
+      room_name: '教4-203',
       latitude: 30.581,
       longitude: 114.329,
       location_source: 'browser'

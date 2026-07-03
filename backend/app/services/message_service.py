@@ -1,8 +1,13 @@
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.models import Building, Message, User
-from app.schemas.message import ANONYMOUS_DISPLAY_NAME, MessageCreate, MessageRead
+from app.models import Building, Course, Message, User
+from app.schemas.message import (
+    ANONYMOUS_DISPLAY_NAME,
+    ChatRoomRead,
+    MessageCreate,
+    MessageRead,
+)
 from app.services.location_service import haversine_distance_meters
 
 
@@ -23,6 +28,7 @@ def to_message_read(message: Message) -> MessageRead:
         building_id=message.building_id,
         content=message.content,
         display_name=ANONYMOUS_DISPLAY_NAME,
+        room_name=message.room_name,
         created_at=message.created_at,
         latitude=message.latitude,
         longitude=message.longitude,
@@ -31,13 +37,61 @@ def to_message_read(message: Message) -> MessageRead:
     )
 
 
-def list_building_messages(session: Session, building_id: int) -> list[MessageRead]:
-    messages = session.scalars(
+def list_building_messages(
+    session: Session,
+    building_id: int,
+    room_name: str | None = None,
+) -> list[MessageRead]:
+    statement = (
         select(Message)
         .where(Message.building_id == building_id, Message.status == "normal")
         .order_by(Message.created_at.asc(), Message.id.asc())
-    ).all()
+    )
+    if room_name is not None:
+        statement = statement.where(Message.room_name == room_name)
+
+    messages = session.scalars(statement).all()
     return [to_message_read(message) for message in messages]
+
+
+def list_building_chatrooms(session: Session, building_id: int) -> list[ChatRoomRead]:
+    course_rooms = {
+        room_name.strip()
+        for room_name in session.scalars(
+            select(Course.room_name).where(Course.building_id == building_id)
+        ).all()
+        if room_name and room_name.strip()
+    }
+    message_count_rows = session.execute(
+        select(Message.room_name, func.count(Message.id))
+        .where(Message.building_id == building_id, Message.status == "normal")
+        .group_by(Message.room_name)
+    ).all()
+    message_counts = {
+        room_name: int(count)
+        for room_name, count in message_count_rows
+        if room_name is not None
+    }
+    general_count = sum(int(count) for _, count in message_count_rows)
+    room_names = sorted(course_rooms | set(message_counts.keys()))
+
+    return [
+        ChatRoomRead(
+            name="建筑总聊",
+            room_name=None,
+            message_count=general_count,
+            is_general=True,
+        ),
+        *[
+            ChatRoomRead(
+                name=room_name,
+                room_name=room_name,
+                message_count=message_counts.get(room_name, 0),
+                is_general=False,
+            )
+            for room_name in room_names
+        ],
+    ]
 
 
 def create_building_message(
@@ -66,6 +120,7 @@ def create_building_message(
         user_id=user.id,
         content=payload.content,
         display_name=ANONYMOUS_DISPLAY_NAME,
+        room_name=payload.room_name,
         latitude=payload.latitude,
         longitude=payload.longitude,
         location_source=payload.location_source,

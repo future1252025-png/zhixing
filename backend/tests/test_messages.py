@@ -296,3 +296,53 @@ def test_create_message_for_missing_building_returns_404(
     )
 
     assert response.status_code == 404
+
+
+def test_get_building_chatrooms_includes_general_and_course_rooms(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    client, _ = client_and_session
+    building_id = get_building_id_by_name(client, "湖北大学武昌校区国际教育学院")
+
+    response = client.get(
+        f"/api/buildings/{building_id}/chatrooms",
+        headers=auth_headers(client),
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data[0]["name"] == "建筑总聊"
+    assert data[0]["room_name"] is None
+    assert any(room["room_name"] for room in data)
+
+
+def test_room_messages_are_filtered_by_room_name(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    client, _ = client_and_session
+    building = get_first_building(client)
+    headers = auth_headers(client)
+    location = message_location_payload(building)
+
+    first = client.post(
+        f"/api/buildings/{building['id']}/messages",
+        json={"content": "203 教室有人吗", "room_name": "教4-203", **location},
+        headers=headers,
+    )
+    second = client.post(
+        f"/api/buildings/{building['id']}/messages",
+        json={"content": "204 教室有人吗", "room_name": "教4-204", **location},
+        headers=headers,
+    )
+
+    assert first.status_code == 201
+    assert second.status_code == 201
+    response = client.get(
+        f"/api/buildings/{building['id']}/messages",
+        params={"room_name": "教4-203"},
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    assert [message["content"] for message in response.json()] == ["203 教室有人吗"]
+    assert response.json()[0]["room_name"] == "教4-203"

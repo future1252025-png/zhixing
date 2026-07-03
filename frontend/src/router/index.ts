@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
 
+import BuildingChatroomsPage from '@/pages/BuildingChatroomsPage.vue'
 import BuildingDetailPage from '@/pages/BuildingDetailPage.vue'
 import BuildingMessagesPage from '@/pages/BuildingMessagesPage.vue'
 import CourseFormPage from '@/pages/CourseFormPage.vue'
@@ -72,6 +73,12 @@ const routes: RouteRecordRaw[] = [
     path: '/buildings/:id',
     name: 'building-detail',
     component: BuildingDetailPage,
+    meta: { requiresAuth: true }
+  },
+  {
+    path: '/buildings/:id/chats',
+    name: 'building-chatrooms',
+    component: BuildingChatroomsPage,
     meta: { requiresAuth: true }
   },
   {

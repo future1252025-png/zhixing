@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { isAxiosError } from 'axios'
 import { showFailToast, showSuccessToast } from 'vant'
 import { useRoute, useRouter } from 'vue-router'
@@ -17,6 +17,11 @@ const locating = ref(false)
 const errorMessage = ref('')
 const messageListRef = ref<HTMLElement | null>(null)
 const buildingId = computed(() => Number(route.params.id))
+const selectedRoomName = computed(() => {
+  const value = route.query.room_name
+  return typeof value === 'string' && value.trim() ? value.trim() : null
+})
+const roomTitle = computed(() => selectedRoomName.value || '建筑总聊')
 const remainingCount = computed(() => Math.max(0, 200 - draft.value.length))
 const currentLocation = ref<{ latitude: number; longitude: number; location_source: MessageLocationSource; label: string } | null>(null)
 const locationText = computed(() => currentLocation.value ? `${currentLocation.value.location_source === 'browser' ? '浏览器定位' : '建筑位置'} · ${currentLocation.value.label}` : '发布前需要确认位置')
@@ -28,11 +33,11 @@ function getErrorMessage(error: unknown): string {
 function formatTime(value: string): string { const date = new Date(value); return Number.isNaN(date.getTime()) ? '' : date.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) }
 function formatDistance(value: number | null): string { if (value === null) return ''; return value >= 1000 ? `${(value / 1000).toFixed(1)} km` : `${Math.round(value)} m` }
 async function scrollToBottom() { await nextTick(); if (messageListRef.value) messageListRef.value.scrollTop = messageListRef.value.scrollHeight }
-async function loadMessages() { if (!Number.isFinite(buildingId.value)) return; try { messages.value = await getBuildingMessages(buildingId.value); await scrollToBottom() } catch (error) { errorMessage.value = getErrorMessage(error) } }
+async function loadMessages() { if (!Number.isFinite(buildingId.value)) return; try { messages.value = await getBuildingMessages(buildingId.value, selectedRoomName.value); await scrollToBottom() } catch (error) { errorMessage.value = getErrorMessage(error) } }
 async function loadPage() {
   if (!Number.isFinite(buildingId.value)) { errorMessage.value = '建筑编号无效'; loading.value = false; return }
   loading.value = true; errorMessage.value = ''
-  try { const [nextBuilding, nextMessages] = await Promise.all([getBuildingDetail(buildingId.value), getBuildingMessages(buildingId.value)]); building.value = nextBuilding; messages.value = nextMessages; await scrollToBottom() }
+  try { const [nextBuilding, nextMessages] = await Promise.all([getBuildingDetail(buildingId.value), getBuildingMessages(buildingId.value, selectedRoomName.value)]); building.value = nextBuilding; messages.value = nextMessages; await scrollToBottom() }
   catch (error) { errorMessage.value = getErrorMessage(error) } finally { loading.value = false }
 }
 function useBuildingLocation() {
@@ -55,18 +60,19 @@ async function submitMessage() {
   if (!currentLocation.value) return showFailToast('请先定位或使用当前建筑位置')
   sending.value = true
   try {
-    await createBuildingMessage(buildingId.value, { content: draft.value, latitude: currentLocation.value.latitude, longitude: currentLocation.value.longitude, location_source: currentLocation.value.location_source })
+    await createBuildingMessage(buildingId.value, { content: draft.value, room_name: selectedRoomName.value, latitude: currentLocation.value.latitude, longitude: currentLocation.value.longitude, location_source: currentLocation.value.location_source })
     draft.value = ''; showSuccessToast('留言已发送'); await loadMessages()
   } catch (error) { showFailToast(getErrorMessage(error)) } finally { sending.value = false }
 }
 onMounted(loadPage)
+watch(() => route.query.room_name, () => { void loadPage() })
 </script>
 
 <template>
   <section class="page message-page">
-    <van-nav-bar :title="building?.name || '建筑留言'" left-arrow @click-left="router.push(`/buildings/${buildingId}`)" />
+    <van-nav-bar :title="roomTitle" left-arrow @click-left="router.push(`/buildings/${buildingId}/chats`)" />
     <div class="message-content">
-      <header class="message-heading"><div><strong>匿名留言区</strong><span>HTTP 留言 · 按时间顺序</span></div><span>{{ messages.length }} 条</span></header>
+      <header class="message-heading"><div><strong>{{ roomTitle }}</strong><span>{{ building?.name || '建筑会话' }} · HTTP 聊天 · 按时间顺序</span></div><span>{{ messages.length }} 条</span></header>
       <section class="location-strip"><div><van-icon name="location-o" /><span>{{ locationText }}</span></div><div><button type="button" :disabled="locating" @click="requestBrowserLocation">{{ locating ? '定位中' : '定位' }}</button><button type="button" @click="useBuildingLocation">使用建筑位置</button></div></section>
       <p v-if="loading" class="muted-text">正在加载留言...</p>
       <van-empty v-else-if="errorMessage" image="error" :description="errorMessage"><van-button type="primary" size="small" @click="loadPage">重试</van-button></van-empty>

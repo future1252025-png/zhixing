@@ -14,6 +14,7 @@ class Message(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     content: Mapped[str] = mapped_column(Text)
     display_name: Mapped[str] = mapped_column(String(64), default="匿名同学")
+    room_name: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     latitude: Mapped[float | None] = mapped_column(Float, nullable=True)
     longitude: Mapped[float | None] = mapped_column(Float, nullable=True)
     location_source: Mapped[str | None] = mapped_column(String(32), nullable=True)

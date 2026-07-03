@@ -28,7 +28,7 @@ async function loadHomeData() {
   } finally { loading.value = false }
 }
 
-function openBuilding(buildingId: number) { router.push(`/buildings/${buildingId}`) }
+function openBuilding(buildingId: number) { router.push(`/buildings/${buildingId}/chats`) }
 onMounted(loadHomeData)
 </script>
 
@@ -60,7 +60,7 @@ onMounted(loadHomeData)
 
       <section class="home-map-section">
         <div class="section-heading"><div><h2 class="section-title">校园地图</h2><p class="section-subtitle">搜索地点，或直接点击地图中的建筑区域</p></div><span>{{ buildings.length }} 个地点</span></div>
-        <RealCampusMap v-if="!loading && buildings.length" :buildings="buildings" title="" subtitle="" height="440px" @building-click="openBuilding" />
+        <RealCampusMap v-if="!loading && buildings.length" :buildings="buildings" title="" subtitle="" height="440px" selected-action-text="进入会话" @building-click="openBuilding" />
         <p v-if="loading" class="muted-text map-loading">正在加载校园地图...</p>
         <van-empty v-else-if="errorMessage" image="error" :description="errorMessage"><van-button type="primary" size="small" @click="loadHomeData">重试</van-button></van-empty>
         <van-empty v-else-if="!buildings.length" description="暂无建筑数据" />

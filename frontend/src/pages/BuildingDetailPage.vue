@@ -25,7 +25,7 @@ async function loadBuilding() {
   finally { loading.value = false }
 }
 
-function openMessages() { router.push(`/buildings/${buildingId.value}/messages`) }
+function openMessages() { router.push(`/buildings/${buildingId.value}/chats`) }
 function openSchedule() { router.push({ path: '/schedule', query: { destination: String(buildingId.value) } }) }
 onMounted(loadBuilding)
 </script>
@@ -42,7 +42,7 @@ onMounted(loadBuilding)
         <header class="building-heading"><span>{{ building.type }}</span><h1>{{ building.name }}</h1><p>{{ building.description }}</p></header>
         <RealCampusMap title="所在位置" subtitle="地图已定位到当前建筑" :buildings="[building]" :active-building-id="building.id" height="285px" />
         <section class="building-note"><span>步行提示</span><p>{{ building.walk_hint || '暂无步行提示，可从地图查看周边道路和入口。' }}</p></section>
-        <div class="building-actions"><button type="button" @click="openMessages"><van-icon name="chat-o" /><span><strong>建筑留言</strong><small>查看附近同学的匿名留言</small></span><van-icon name="arrow" /></button><button type="button" @click="openSchedule"><van-icon name="guide-o" /><span><strong>规划到这里</strong><small>作为路线终点打开出发建议</small></span><van-icon name="arrow" /></button></div>
+        <div class="building-actions"><button type="button" @click="openMessages"><van-icon name="chat-o" /><span><strong>建筑会话</strong><small>选择总聊或具体教室聊天室</small></span><van-icon name="arrow" /></button><button type="button" @click="openSchedule"><van-icon name="guide-o" /><span><strong>规划到这里</strong><small>作为路线终点打开出发建议</small></span><van-icon name="arrow" /></button></div>
       </template>
     </div>
   </section>
