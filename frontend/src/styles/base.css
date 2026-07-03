@@ -52,6 +52,17 @@ textarea {
   font: inherit;
 }
 
+input,
+select {
+  line-height: 1.2;
+}
+
+input:not([type="checkbox"]):not([type="radio"]),
+select {
+  display: inline-flex;
+  align-items: center;
+}
+
 button {
   -webkit-tap-highlight-color: transparent;
 }
@@ -286,10 +297,68 @@ a {
   font-weight: 650;
 }
 
+.van-field__value {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+
+.van-field__body {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  min-height: 28px;
+}
+
+.van-field__left-icon,
+.van-field__right-icon {
+  display: inline-flex;
+  align-items: center;
+  line-height: 1;
+}
+
+.van-field__control:not(textarea) {
+  min-height: 24px;
+  line-height: 24px;
+}
+
 .van-search__content {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
   border: 1px solid var(--cm-line);
   border-radius: var(--cm-radius);
   background: #fff;
+  padding: 0 12px;
+}
+
+.van-search .van-cell,
+.van-search .van-field {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 42px;
+  background: transparent;
+  padding: 0;
+}
+
+.van-search .van-field__body {
+  min-height: 42px;
+}
+
+.van-search .van-field__control {
+  height: 24px;
+  line-height: 24px;
+  padding: 0;
+}
+
+.form-input,
+.collector-input,
+.building-search-panel input {
+  min-height: 36px;
+  line-height: 20px;
+  padding-top: 0;
+  padding-bottom: 0;
 }
 
 .van-empty {

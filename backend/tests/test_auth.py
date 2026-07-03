@@ -154,3 +154,51 @@ def test_me_with_invalid_token_returns_401(
     )
 
     assert response.status_code == 401
+
+
+def test_update_profile_changes_nickname_and_avatar(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    client, SessionLocal = client_and_session
+    client.post("/api/auth/register", json=register_payload())
+    login = client.post(
+        "/api/auth/login",
+        json={"username": "alice", "password": "secret123"},
+    )
+    token = login.json()["access_token"]
+
+    response = client.patch(
+        "/api/auth/me",
+        json={
+            "nickname": "小智同学",
+            "avatar_text": "智",
+            "avatar_color": "#0b766f",
+        },
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["nickname"] == "小智同学"
+    assert data["avatar_text"] == "智"
+    assert data["avatar_color"] == "#0b766f"
+    assert "password_hash" not in data
+
+    with SessionLocal() as session:
+        user = session.query(User).filter(User.username == "alice").one()
+        assert user.nickname == "小智同学"
+        assert user.avatar_text == "智"
+        assert user.avatar_color == "#0b766f"
+
+
+def test_update_profile_requires_login(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    client, _ = client_and_session
+
+    response = client.patch(
+        "/api/auth/me",
+        json={"nickname": "访客", "avatar_text": "访", "avatar_color": "#2b6fbe"},
+    )
+
+    assert response.status_code == 401

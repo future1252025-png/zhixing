@@ -5,6 +5,8 @@ export type AuthUser = {
   student_id: string | null
   username: string
   nickname: string
+  avatar_text: string | null
+  avatar_color: string | null
   role: string
   created_at: string
 }
@@ -19,6 +21,12 @@ export type RegisterPayload = {
 export type LoginPayload = {
   username: string
   password: string
+}
+
+export type ProfileUpdatePayload = {
+  nickname: string
+  avatar_text?: string | null
+  avatar_color?: string | null
 }
 
 export type LoginResponse = {
@@ -39,5 +47,10 @@ export async function login(payload: LoginPayload): Promise<LoginResponse> {
 
 export async function getCurrentUser(): Promise<AuthUser> {
   const response = await request.get<AuthUser>('/api/auth/me')
+  return response.data
+}
+
+export async function updateProfile(payload: ProfileUpdatePayload): Promise<AuthUser> {
+  const response = await request.patch<AuthUser>('/api/auth/me', payload)
   return response.data
 }

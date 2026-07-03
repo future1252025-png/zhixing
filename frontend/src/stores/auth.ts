@@ -4,8 +4,10 @@ import {
   getCurrentUser,
   login as loginRequest,
   register as registerRequest,
+  updateProfile as updateProfileRequest,
   type AuthUser,
   type LoginPayload,
+  type ProfileUpdatePayload,
   type RegisterPayload
 } from '@/api/auth'
 import { TOKEN_STORAGE_KEY } from '@/api/request'
@@ -37,6 +39,11 @@ export const useAuthStore = defineStore('auth', {
     },
     async register(payload: RegisterPayload) {
       return registerRequest(payload)
+    },
+    async updateProfile(payload: ProfileUpdatePayload) {
+      const user = await updateProfileRequest(payload)
+      this.setCurrentUser(user)
+      return user
     },
     async login(payload: LoginPayload) {
       const result = await loginRequest(payload)

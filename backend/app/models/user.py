@@ -19,6 +19,8 @@ class User(Base):
     username: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     password_hash: Mapped[str] = mapped_column(String(255))
     nickname: Mapped[str] = mapped_column(String(64))
+    avatar_text: Mapped[str | None] = mapped_column(String(4), nullable=True)
+    avatar_color: Mapped[str | None] = mapped_column(String(16), nullable=True)
     role: Mapped[str] = mapped_column(String(32), default="student")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

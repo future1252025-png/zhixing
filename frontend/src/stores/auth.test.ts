@@ -8,7 +8,8 @@ import { useAuthStore } from './auth'
 vi.mock('@/api/auth', () => ({
   getCurrentUser: vi.fn(),
   login: vi.fn(),
-  register: vi.fn()
+  register: vi.fn(),
+  updateProfile: vi.fn()
 }))
 
 const user = {
@@ -16,6 +17,8 @@ const user = {
   student_id: '20240001',
   username: 'alice',
   nickname: 'Alice',
+  avatar_text: 'A',
+  avatar_color: '#0b766f',
   role: 'student',
   created_at: '2026-05-27T00:00:00Z'
 }
@@ -65,5 +68,33 @@ describe('auth store', () => {
     expect(store.token).toBeNull()
     expect(store.currentUser).toBeNull()
     expect(localStorage.getItem(TOKEN_STORAGE_KEY)).toBeNull()
+  })
+
+  it('updates current user profile after saving profile changes', async () => {
+    const updatedUser = {
+      ...user,
+      nickname: '小智同学',
+      avatar_text: '智',
+      avatar_color: '#2b6fbe'
+    }
+    vi.mocked(authApi.updateProfile).mockResolvedValue(updatedUser)
+
+    const store = useAuthStore()
+    store.setCurrentUser(user)
+
+    await store.updateProfile({
+      nickname: '小智同学',
+      avatar_text: '智',
+      avatar_color: '#2b6fbe'
+    })
+
+    expect(authApi.updateProfile).toHaveBeenCalledWith({
+      nickname: '小智同学',
+      avatar_text: '智',
+      avatar_color: '#2b6fbe'
+    })
+    expect(store.currentUser?.nickname).toBe('小智同学')
+    expect(store.currentUser?.avatar_text).toBe('智')
+    expect(store.currentUser?.avatar_color).toBe('#2b6fbe')
   })
 })

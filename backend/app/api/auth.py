@@ -5,12 +5,13 @@ from app.core.security import create_access_token, get_current_user
 from app.db.database import get_session
 from app.models import User
 from app.schemas.auth import LoginRequest, LoginResponse, RegisterRequest, TokenResponse
-from app.schemas.user import UserRead
+from app.schemas.user import UserProfileUpdate, UserRead
 from app.services.auth_service import (
     authenticate_user,
     create_user,
     get_user_by_student_id,
     get_user_by_username,
+    update_user_profile,
 )
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -50,3 +51,12 @@ def login(payload: LoginRequest, session: Session = Depends(get_session)) -> Log
 @router.get("/me", response_model=UserRead)
 def read_current_user(current_user: User = Depends(get_current_user)) -> User:
     return current_user
+
+
+@router.patch("/me", response_model=UserRead)
+def update_current_user_profile(
+    payload: UserProfileUpdate,
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+) -> User:
+    return update_user_profile(session, current_user, payload)
