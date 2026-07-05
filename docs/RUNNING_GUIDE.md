@@ -1,6 +1,6 @@
 # 运行说明
 
-本文档用于帮助老师、评审或同学在本地快速运行智行 CampusMind MVP。
+本文档用于帮助老师、评审、面试官或同学在本地快速运行智行 CampusMind。
 
 ## 环境要求
 
@@ -55,6 +55,12 @@ python -m uvicorn app.main:app --host 127.0.0.1 --port 8018
 GET http://127.0.0.1:8000/health
 ```
 
+后端接口可视化文档：
+
+```text
+http://127.0.0.1:8000/docs
+```
+
 ## 前端安装依赖
 
 ```powershell
@@ -63,6 +69,22 @@ npm install
 ```
 
 ## 启动前端
+
+首次运行前建议复制环境变量模板：
+
+```powershell
+Copy-Item .env.example .env.local
+```
+
+`.env.local` 示例：
+
+```env
+VITE_API_BASE_URL=http://127.0.0.1:8000
+VITE_AMAP_KEY=你的高德Web端JS API Key
+VITE_AMAP_SECURITY_CODE=你的高德安全密钥
+```
+
+高德地图相关能力需要申请 **Web端(JS API)** Key，并在高德控制台配置安全密钥。未配置时，地图功能会提示缺少配置，但普通后端接口和部分页面仍可验证。
 
 ```powershell
 npm run dev
@@ -121,3 +143,18 @@ git push origin main
 ### 前端无法连接后端
 
 检查后端是否已启动，并确认前端环境变量 `VITE_API_BASE_URL` 指向正确后端地址。
+
+### 高德地图不显示或路线失败
+
+请依次检查：
+
+- `frontend/.env.local` 是否配置 `VITE_AMAP_KEY` 和 `VITE_AMAP_SECURITY_CODE`。
+- 高德 Key 是否选择 Web端(JS API)。
+- 当前浏览器是否允许定位。
+- 当前网络是否能访问高德地图服务。
+
+路线失败时不会影响课程、留言和基础出发建议流程，可以刷新或重新选择起终点后重试。
+
+### 定位失败
+
+浏览器定位受系统权限、浏览器权限、网络和设备环境影响。建议优先使用 Edge、Chrome 等现代浏览器，并确认系统定位权限已经开启。本项目在定位失败时保留手动搜索地点和选择校园点位的兜底路径。
