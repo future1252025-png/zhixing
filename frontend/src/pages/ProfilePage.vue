@@ -202,8 +202,11 @@ async function handleLogout() {
   gap: 15px;
   align-items: center;
   overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: var(--cm-radius);
-  background: #153a3d;
+  background:
+    linear-gradient(90deg, rgba(255, 255, 255, 0.08) 1px, transparent 1px) 0 0 / 24px 24px,
+    linear-gradient(180deg, #17383d 0%, #10272c 100%);
   color: #fff;
   box-shadow: var(--cm-shadow-strong);
   padding: 18px;
@@ -223,7 +226,7 @@ async function handleLogout() {
 
 .profile-main {
   min-width: 0;
-  padding-right: 86px;
+  padding-right: 96px;
 }
 
 .profile-main > span {
@@ -250,9 +253,9 @@ async function handleLogout() {
   right: 16px;
   z-index: 1;
   min-height: 32px;
-  border: 0;
-  border-radius: 999px;
-  background: #ffffff;
+  border: 1px solid rgba(255, 255, 255, 0.26);
+  border-radius: var(--cm-radius-sm);
+  background: rgba(255, 255, 255, 0.94);
   color: var(--cm-primary-dark);
   cursor: pointer;
   font-size: 12px;
@@ -260,9 +263,18 @@ async function handleLogout() {
   line-height: 1;
   padding: 0 13px;
   box-shadow: 0 8px 18px rgba(0, 0, 0, 0.18);
+  transition:
+    transform var(--cm-motion),
+    background var(--cm-motion),
+    box-shadow var(--cm-motion);
+}
+
+.edit-profile-button:focus-visible {
+  box-shadow: 0 0 0 3px rgba(128, 216, 203, 0.36), 0 8px 18px rgba(0, 0, 0, 0.18);
 }
 
 .edit-profile-button:active {
+  transform: translateY(1px);
   background: var(--cm-primary-soft);
 }
 
@@ -295,10 +307,11 @@ async function handleLogout() {
 }
 
 .account-panel {
-  border-top: 1px solid var(--cm-line);
-  border-bottom: 1px solid var(--cm-line);
-  background: #fff;
+  border: 1px solid var(--cm-line);
+  border-radius: var(--cm-radius);
+  background: var(--cm-surface);
   padding: 15px 14px;
+  box-shadow: 0 8px 24px rgba(28, 50, 42, 0.05);
 }
 
 .edit-panel {

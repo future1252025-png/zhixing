@@ -6,6 +6,7 @@ import {
   getBuildingChatrooms,
   type BuildingChatRoom
 } from '@/api/messages'
+import { rememberRecentChatEntry } from '@/utils/chat'
 
 const route = useRoute()
 const router = useRouter()
@@ -13,16 +14,58 @@ const building = ref<Building | null>(null)
 const rooms = ref<BuildingChatRoom[]>([])
 const loading = ref(true)
 const errorMessage = ref('')
+const roomQuery = ref('')
 const buildingId = computed(() => Number(route.params.id))
 const roomCountText = computed(() => {
   const specificRooms = rooms.value.filter((room) => !room.is_general).length
   return specificRooms > 0 ? `${specificRooms} 个教室聊天室` : '可先进入建筑总聊'
 })
+const filteredRooms = computed(() => {
+  const query = roomQuery.value.trim().toLowerCase()
+  if (!query) {
+    return rooms.value
+  }
+  return rooms.value.filter((room) =>
+    `${room.name} ${room.room_name ?? ''}`.toLowerCase().includes(query)
+  )
+})
+const canOpenCustomRoom = computed(() => {
+  const query = roomQuery.value.trim()
+  if (!query) {
+    return false
+  }
+  return !rooms.value.some((room) =>
+    room.room_name === query || room.name === query
+  )
+})
 
 function openRoom(room: BuildingChatRoom) {
+  if (building.value && typeof window !== 'undefined') {
+    rememberRecentChatEntry(window.localStorage, {
+      buildingId: buildingId.value,
+      buildingName: building.value.name,
+      roomName: room.room_name || null
+    })
+  }
   router.push({
     path: `/buildings/${buildingId.value}/messages`,
     query: room.room_name ? { room_name: room.room_name } : {}
+  })
+}
+
+function openCustomRoom() {
+  const roomName = roomQuery.value.trim()
+  if (!roomName || !building.value) {
+    return
+  }
+  rememberRecentChatEntry(window.localStorage, {
+    buildingId: buildingId.value,
+    buildingName: building.value.name,
+    roomName
+  })
+  router.push({
+    path: `/buildings/${buildingId.value}/messages`,
+    query: { room_name: roomName }
   })
 }
 
@@ -64,13 +107,30 @@ onMounted(loadPage)
         <header class="chatrooms-hero">
           <span>建筑会话</span>
           <h1>{{ building?.name || '校园建筑' }}</h1>
-          <p>先选择总聊或具体教室，再进入匿名聊天。</p>
+          <p>先进入建筑总聊，也可以搜索或输入具体教室号。</p>
           <strong>{{ roomCountText }}</strong>
         </header>
 
+        <section class="room-search">
+          <van-search
+            v-model="roomQuery"
+            placeholder="搜索或输入教室号，例如 教4-203"
+            shape="round"
+            background="transparent"
+          />
+          <button v-if="canOpenCustomRoom" type="button" class="custom-room-card" @click="openCustomRoom">
+            <span class="room-icon"><van-icon name="plus" /></span>
+            <span class="room-copy">
+              <strong>进入 {{ roomQuery.trim() }}</strong>
+              <small>还没有历史消息，也可以先创建这个教室频道</small>
+            </span>
+            <van-icon name="arrow" />
+          </button>
+        </section>
+
         <section class="room-list" aria-label="聊天室列表">
           <button
-            v-for="room in rooms"
+            v-for="room in filteredRooms"
             :key="room.room_name || 'general'"
             type="button"
             class="room-card"
@@ -92,8 +152,8 @@ onMounted(loadPage)
         </section>
 
         <van-empty
-          v-if="rooms.length === 0"
-          description="暂无聊天室"
+          v-if="filteredRooms.length === 0 && !canOpenCustomRoom"
+          description="暂无匹配聊天室"
         />
       </template>
     </div>
@@ -107,11 +167,26 @@ onMounted(loadPage)
 }
 
 .chatrooms-hero {
-  border-radius: 20px;
-  background: linear-gradient(135deg, #0b7771, #133f48);
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: var(--cm-radius);
+  background:
+    linear-gradient(90deg, rgba(255, 255, 255, 0.08) 1px, transparent 1px) 0 0 / 24px 24px,
+    linear-gradient(180deg, #17383d 0%, #10272c 100%);
   color: #fff;
   padding: 20px;
   box-shadow: 0 18px 42px rgba(9, 70, 74, .18);
+}
+
+.chatrooms-hero::after {
+  position: absolute;
+  right: 18px;
+  bottom: 18px;
+  width: 86px;
+  height: 1px;
+  background: linear-gradient(90deg, rgba(128, 216, 203, 0.2), rgba(242, 184, 75, 0.85));
+  content: "";
 }
 
 .chatrooms-hero span {
@@ -135,8 +210,8 @@ onMounted(loadPage)
 
 .chatrooms-hero strong {
   display: inline-flex;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, .14);
+  border-radius: var(--cm-radius-sm);
+  background: rgba(255, 255, 255, .12);
   padding: 7px 11px;
   font-size: 12px;
 }
@@ -146,6 +221,23 @@ onMounted(loadPage)
   gap: 10px;
 }
 
+.room-search {
+  display: grid;
+  gap: 10px;
+}
+
+.room-search :deep(.van-search) {
+  padding: 0;
+}
+
+.room-search :deep(.van-search__content) {
+  align-items: center;
+  min-height: 50px;
+  border: 1px solid var(--cm-line);
+  background: #fff;
+  padding: 0 12px;
+}
+
 .room-card {
   display: grid;
   grid-template-columns: 42px minmax(0, 1fr) auto 18px;
@@ -153,18 +245,59 @@ onMounted(loadPage)
   gap: 11px;
   width: 100%;
   border: 1px solid var(--cm-line);
-  border-radius: 16px;
-  background: #fff;
+  border-left: 4px solid transparent;
+  border-radius: var(--cm-radius);
+  background: var(--cm-surface);
   color: var(--cm-ink);
   cursor: pointer;
   padding: 14px;
   text-align: left;
   box-shadow: 0 8px 22px rgba(24, 43, 37, .06);
+  transition:
+    border-color var(--cm-motion),
+    box-shadow var(--cm-motion),
+    transform var(--cm-motion),
+    background var(--cm-motion);
+}
+
+.custom-room-card {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr) 18px;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  border: 1px dashed rgba(13, 133, 124, .42);
+  border-radius: var(--cm-radius);
+  background: rgba(13, 133, 124, .08);
+  color: var(--cm-ink);
+  cursor: pointer;
+  padding: 14px;
+  text-align: left;
+  transition:
+    border-color var(--cm-motion),
+    transform var(--cm-motion),
+    background var(--cm-motion);
 }
 
 .room-card.is-general {
   border-color: rgba(13, 133, 124, .28);
+  border-left-color: var(--cm-primary);
   background: linear-gradient(135deg, rgba(13, 133, 124, .12), #fff);
+}
+
+.room-card:not(.is-general) {
+  border-left-color: var(--cm-chat);
+}
+
+.room-card:active,
+.custom-room-card:active {
+  transform: translateY(1px);
+}
+
+.room-card:hover,
+.custom-room-card:hover {
+  border-color: rgba(88, 101, 242, .28);
+  box-shadow: 0 12px 28px rgba(24, 43, 37, .08);
 }
 
 .room-icon {
@@ -172,10 +305,15 @@ onMounted(loadPage)
   width: 42px;
   height: 42px;
   place-items: center;
-  border-radius: 14px;
-  background: rgba(13, 133, 124, .1);
-  color: var(--cm-primary);
+  border-radius: var(--cm-radius);
+  background: var(--cm-chat-soft);
+  color: var(--cm-chat-dark);
   font-size: 20px;
+}
+
+.room-card.is-general .room-icon {
+  background: var(--cm-primary-soft);
+  color: var(--cm-primary);
 }
 
 .room-copy {
@@ -198,7 +336,7 @@ onMounted(loadPage)
 
 .room-count {
   border-radius: 999px;
-  background: var(--cm-surface);
+  background: var(--cm-surface-muted);
   color: var(--cm-muted);
   font-size: 12px;
   padding: 5px 8px;

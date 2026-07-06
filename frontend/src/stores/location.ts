@@ -11,6 +11,23 @@ const CAMPUS_CENTER_LOCATION = {
   longitude: 114.328253
 }
 
+function getBrowserGeolocationErrorMessage(error: unknown): string {
+  const geoError = error as Partial<GeolocationPositionError> | undefined
+  if (geoError?.code === 1) {
+    return '浏览器定位失败：请允许定位权限，或手动搜索选择起点'
+  }
+  if (geoError?.code === 2) {
+    return '浏览器定位失败：暂时无法获取当前位置，请手动搜索选择起点'
+  }
+  if (geoError?.code === 3) {
+    return '浏览器定位超时：已停止继续请求定位，请手动搜索选择起点'
+  }
+  if (error instanceof Error && error.message) {
+    return `浏览器定位失败：${error.message}`
+  }
+  return '浏览器定位失败：请手动搜索选择起点'
+}
+
 export type SelectedLocation = {
   source: SelectedLocationSource
   name: string
@@ -112,8 +129,9 @@ export const useLocationStore = defineStore('location', {
               '来自浏览器定位'
             )
             return this.selectedLocation as SelectedLocation
-          } catch {
-            // Continue to AMap fallback below.
+          } catch (error) {
+            this.setCampusCenterFallback(getBrowserGeolocationErrorMessage(error))
+            return this.selectedLocation as SelectedLocation
           }
         }
 

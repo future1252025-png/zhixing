@@ -246,7 +246,7 @@ onMounted(loadCourses)
 <style scoped>
 .courses-content {
   display: grid;
-  gap: 15px;
+  gap: 16px;
 }
 
 .timetable-shell {
@@ -396,7 +396,12 @@ onMounted(loadCourses)
   align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
-  padding: 5px 2px 2px;
+  border: 1px solid var(--cm-line);
+  border-left: 5px solid var(--cm-primary);
+  border-radius: var(--cm-radius);
+  background: var(--cm-surface);
+  padding: 14px;
+  box-shadow: 0 8px 24px rgba(28, 50, 42, 0.05);
 }
 
 .course-toolbar span {
@@ -428,16 +433,29 @@ onMounted(loadCourses)
   height: 38px;
   place-items: center;
   border: 1px solid var(--cm-line);
-  border-radius: 50%;
+  border-radius: var(--cm-radius);
   background: #fff;
   color: var(--cm-primary);
   cursor: pointer;
   font-size: 19px;
+  transition:
+    transform var(--cm-motion),
+    border-color var(--cm-motion),
+    box-shadow var(--cm-motion);
+}
+
+.toolbar-actions button:active {
+  transform: translateY(1px);
 }
 
 .week-panel {
   display: grid;
   gap: 9px;
+  border: 1px solid var(--cm-line);
+  border-radius: var(--cm-radius);
+  background: var(--cm-surface);
+  padding: 12px;
+  box-shadow: 0 8px 24px rgba(28, 50, 42, 0.05);
 }
 
 .week-select-label {
@@ -445,13 +463,13 @@ onMounted(loadCourses)
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  border: 1px solid var(--cm-line);
-  border-radius: var(--cm-radius);
-  background: #fff;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
   color: var(--cm-text);
   font-size: 13px;
   font-weight: 700;
-  padding: 9px 11px;
+  padding: 0;
 }
 
 .week-select-label select {
@@ -482,10 +500,15 @@ onMounted(loadCourses)
   align-content: center;
   border: 1px solid var(--cm-line);
   border-radius: 6px;
-  background: #fff;
+  background: rgba(255, 255, 255, 0.88);
   color: var(--cm-muted);
   cursor: pointer;
   line-height: 1;
+  transition:
+    transform var(--cm-motion),
+    border-color var(--cm-motion),
+    background var(--cm-motion),
+    color var(--cm-motion);
 }
 
 .week-switcher button span {
@@ -503,6 +526,11 @@ onMounted(loadCourses)
   border-color: var(--cm-primary);
   background: var(--cm-primary);
   color: #fff;
+  box-shadow: 0 8px 18px rgba(11, 118, 111, 0.16);
+}
+
+.week-switcher button:active {
+  transform: translateY(1px);
 }
 
 @media (max-width: 390px) {
@@ -512,10 +540,12 @@ onMounted(loadCourses)
 }
 
 .timetable-shell {
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--cm-line);
+  border-radius: var(--cm-radius);
+  background: var(--cm-surface);
+  padding: 8px;
+  box-shadow: 0 8px 24px rgba(28, 50, 42, 0.05);
 }
 
 .timetable-grid {
@@ -533,7 +563,7 @@ onMounted(loadCourses)
 
 .weekday-head,
 .time-cell {
-  background: #eef3ef;
+  background: #edf4f0;
 }
 
 .weekday-head {
@@ -546,13 +576,24 @@ onMounted(loadCourses)
 }
 
 .course-cell {
-  background: #fff;
+  background: rgba(255, 255, 255, 0.78);
 }
 
 .timetable-course {
   border: 0;
   border-radius: 4px;
-  box-shadow: none;
+  box-shadow: 0 4px 12px rgba(20, 33, 36, 0.08);
+  transition:
+    filter var(--cm-motion),
+    transform var(--cm-motion);
+}
+
+.timetable-course:active {
+  transform: translateY(1px);
+}
+
+.course-content {
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.12);
 }
 
 .tone-0 { background: #4f83bd; }

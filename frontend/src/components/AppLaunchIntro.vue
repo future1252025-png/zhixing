@@ -106,7 +106,7 @@ onBeforeUnmount(() => {
   display: grid;
   place-items: center;
   background:
-    radial-gradient(circle at 18% 18%, rgba(98, 200, 186, 0.18), transparent 28%),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.08) 1px, transparent 1px) 0 0 / 28px 28px,
     linear-gradient(180deg, #11383a 0%, #092525 100%);
   color: #fff;
   will-change: opacity;

@@ -6,6 +6,11 @@
   --cm-primary: #0b766f;
   --cm-primary-dark: #07534f;
   --cm-primary-soft: #e4f1ed;
+  --cm-chat: #5865f2;
+  --cm-chat-dark: #3442c5;
+  --cm-chat-soft: #eef0ff;
+  --cm-graphite: #132427;
+  --cm-graphite-2: #203235;
   --cm-blue: #2b6fbe;
   --cm-blue-soft: #e7eef8;
   --cm-green: #168f78;
@@ -19,13 +24,16 @@
   --cm-muted: #6d7c76;
   --cm-line: #d9e1dc;
   --cm-line-strong: #c6d1ca;
-  --cm-bg: #f3f6f2;
+  --cm-bg: #eff5f1;
   --cm-card: #ffffff;
+  --cm-surface: rgba(255, 255, 255, 0.9);
+  --cm-surface-muted: #f7faf7;
   --cm-radius: 8px;
   --cm-radius-sm: 6px;
   --cm-shadow: 0 8px 24px rgba(28, 50, 42, 0.08);
   --cm-shadow-strong: 0 16px 38px rgba(23, 48, 40, 0.14);
   --cm-focus: 0 0 0 3px rgba(11, 118, 111, 0.18);
+  --cm-motion: 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
 html,
@@ -36,7 +44,8 @@ body,
 }
 
 body {
-  background: var(--cm-bg);
+  background:
+    linear-gradient(180deg, #f6faf6 0%, var(--cm-bg) 38%, #edf3ef 100%);
   color: var(--cm-ink);
   font-family:
     Inter, "SF Pro Text", "PingFang SC", -apple-system, BlinkMacSystemFont,
@@ -88,13 +97,15 @@ a {
 
 .page {
   min-height: 100vh;
-  background: var(--cm-bg);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.56), rgba(255, 255, 255, 0) 180px),
+    var(--cm-bg);
 }
 
 .page-content {
   width: min(100%, 560px);
   margin: 0 auto;
-  padding: 14px 14px 28px;
+  padding: 16px 14px 30px;
 }
 
 .page-actions {
@@ -231,8 +242,8 @@ a {
   top: 0;
   z-index: 100;
   border-bottom: 1px solid rgba(217, 225, 220, 0.88);
-  background: rgba(243, 246, 242, 0.96);
-  backdrop-filter: blur(12px);
+  background: rgba(246, 250, 246, 0.92);
+  backdrop-filter: blur(16px);
 }
 
 .van-nav-bar::after {
@@ -270,6 +281,16 @@ a {
 .van-button {
   border-radius: var(--cm-radius);
   font-weight: 700;
+  transition:
+    transform var(--cm-motion),
+    border-color var(--cm-motion),
+    background var(--cm-motion),
+    color var(--cm-motion),
+    box-shadow var(--cm-motion);
+}
+
+.van-button:active {
+  transform: translateY(1px);
 }
 
 .van-button--primary {
@@ -328,8 +349,19 @@ a {
   min-height: 44px;
   border: 1px solid var(--cm-line);
   border-radius: var(--cm-radius);
-  background: #fff;
+  background: rgba(255, 255, 255, 0.96);
   padding: 0 12px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
+  transition:
+    border-color var(--cm-motion),
+    box-shadow var(--cm-motion),
+    background var(--cm-motion);
+}
+
+.van-search__content:focus-within {
+  border-color: rgba(11, 118, 111, 0.48);
+  background: #fff;
+  box-shadow: var(--cm-focus);
 }
 
 .van-search .van-cell,
@@ -368,17 +400,27 @@ a {
 }
 
 .login-handoff-active .home-ticket,
+.login-handoff-active .chat-hero,
+.login-handoff-active .next-chat-card,
+.login-handoff-active .chat-search-panel,
+.login-handoff-active .chat-strip-section,
 .login-handoff-active .home-map-section,
 .login-handoff-active .home-action-row {
   animation: cm-home-handoff 680ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
 }
 
+.login-handoff-active .next-chat-card,
 .login-handoff-active .home-action-row {
   animation-delay: 100ms;
 }
 
+.login-handoff-active .chat-search-panel,
 .login-handoff-active .home-map-section {
   animation-delay: 180ms;
+}
+
+.login-handoff-active .chat-strip-section {
+  animation-delay: 240ms;
 }
 
 @keyframes cm-home-handoff {

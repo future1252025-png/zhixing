@@ -87,7 +87,18 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.login-intro { position: fixed; inset: 0; z-index: 9999; display: grid; place-items: center; background: #11383a; color: #fff; will-change: opacity; }
+.login-intro {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: grid;
+  place-items: center;
+  background:
+    linear-gradient(90deg, rgba(255, 255, 255, 0.08) 1px, transparent 1px) 0 0 / 28px 28px,
+    linear-gradient(180deg, #11383a 0%, #092525 100%);
+  color: #fff;
+  will-change: opacity;
+}
 .intro-stage { width: min(88vw, 360px); }
 .intro-brand { display: flex; align-items: center; gap: 10px; opacity: 0; }
 .intro-brand span { display: grid; width: 38px; height: 38px; place-items: center; border: 1px solid rgba(255,255,255,.35); border-radius: 8px; background: #0b766f; font-weight: 800; }

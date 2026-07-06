@@ -94,7 +94,7 @@ describe('location store', () => {
     })
   })
 
-  it('falls back to AMap location when browser geolocation is denied', async () => {
+  it('does not request AMap location again when browser geolocation is denied', async () => {
     const getCurrentPosition = vi.fn(
       (_resolve: PositionCallback, reject: PositionErrorCallback) => {
         reject({
@@ -110,21 +110,47 @@ describe('location store', () => {
       value: { getCurrentPosition },
       configurable: true
     })
-    amapMock.requestAMapCurrentPosition.mockResolvedValue({
-      latitude: 30.582,
-      longitude: 114.33,
-      description: '来自高德定位'
+    const store = useLocationStore()
+
+    await store.requestBrowserLocation()
+
+    expect(getCurrentPosition).toHaveBeenCalled()
+    expect(amapMock.requestAMapCurrentPosition).not.toHaveBeenCalled()
+    expect(store.selectedLocation).toMatchObject({
+      source: 'fallback',
+      name: '校园中心',
+      building_id: null
+    })
+    expect(store.browserError).toContain('浏览器定位失败')
+  })
+
+  it('does not request AMap location again when browser geolocation times out', async () => {
+    const getCurrentPosition = vi.fn(
+      (_resolve: PositionCallback, reject: PositionErrorCallback) => {
+        reject({
+          code: 3,
+          message: 'timeout',
+          PERMISSION_DENIED: 1,
+          POSITION_UNAVAILABLE: 2,
+          TIMEOUT: 3
+        } as GeolocationPositionError)
+      }
+    )
+    Object.defineProperty(navigator, 'geolocation', {
+      value: { getCurrentPosition },
+      configurable: true
     })
     const store = useLocationStore()
 
     await store.requestBrowserLocation()
 
     expect(getCurrentPosition).toHaveBeenCalled()
-    expect(amapMock.requestAMapCurrentPosition).toHaveBeenCalled()
+    expect(amapMock.requestAMapCurrentPosition).not.toHaveBeenCalled()
     expect(store.suggestionPayload).toEqual({
-      latitude: 30.582,
-      longitude: 114.33
+      latitude: expect.any(Number),
+      longitude: expect.any(Number)
     })
+    expect(store.browserError).toContain('浏览器定位超时')
   })
 
   it('uses campus center when all geolocation providers fail', async () => {

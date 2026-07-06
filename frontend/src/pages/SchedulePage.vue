@@ -388,10 +388,11 @@ onMounted(loadScheduleData)
 .schedule-heading p { margin: 0; color: var(--cm-muted); font-size: 14px; line-height: 1.65; }
 
 .panel {
-  border-top: 1px solid var(--cm-line);
-  border-bottom: 1px solid var(--cm-line);
-  background: #fff;
+  border: 1px solid var(--cm-line);
+  border-radius: var(--cm-radius);
+  background: var(--cm-surface);
   padding: 15px 14px;
+  box-shadow: 0 8px 24px rgba(28, 50, 42, 0.05);
 }
 
 .panel-heading {
@@ -458,12 +459,22 @@ onMounted(loadScheduleData)
   cursor: pointer;
   padding: 9px 11px;
   text-align: left;
+  transition:
+    transform var(--cm-motion),
+    border-color var(--cm-motion),
+    box-shadow var(--cm-motion),
+    background var(--cm-motion);
 }
 
 .location-result-list button.active {
   border-color: var(--cm-primary);
   background: var(--cm-primary-soft);
   color: var(--cm-primary-dark);
+  box-shadow: 0 8px 18px rgba(11, 118, 111, 0.12);
+}
+
+.location-result-list button:active {
+  transform: translateY(1px);
 }
 
 .location-result-list strong {
@@ -489,6 +500,7 @@ onMounted(loadScheduleData)
   border-radius: var(--cm-radius);
   background: #fff;
   padding: 11px;
+  box-shadow: 0 6px 16px rgba(28, 50, 42, 0.05);
 }
 
 .selected-location span {
@@ -509,10 +521,25 @@ onMounted(loadScheduleData)
 }
 
 .map-panel {
-  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--cm-line);
+  border-radius: var(--cm-radius);
+  background: var(--cm-surface);
+  padding: 10px;
+  box-shadow: 0 8px 24px rgba(28, 50, 42, 0.05);
 }
 
-.suggestion-ticket { overflow: hidden; border-radius: var(--cm-radius); background: #153a3d; color: #fff; box-shadow: var(--cm-shadow-strong); padding: 16px; }
+.suggestion-ticket {
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: var(--cm-radius);
+  background:
+    linear-gradient(90deg, rgba(255, 255, 255, 0.08) 1px, transparent 1px) 0 0 / 24px 24px,
+    linear-gradient(180deg, #17383d 0%, #10272c 100%);
+  color: #fff;
+  box-shadow: var(--cm-shadow-strong);
+  padding: 16px;
+}
 
 .suggestion-header {
   display: flex;
