@@ -30,6 +30,12 @@ export type BuildingChatRoom = {
   is_general: boolean
 }
 
+export type GetBuildingMessagesOptions = {
+  roomName?: string | null
+  limit?: number
+  offset?: number
+}
+
 export function validateMessageContent(content: string): string | null {
   const text = content.trim()
   if (!text) {
@@ -43,18 +49,27 @@ export function validateMessageContent(content: string): string | null {
 
 export async function getBuildingMessages(
   buildingId: number,
-  roomName?: string | null
+  optionsOrRoomName?: GetBuildingMessagesOptions | string | null
 ): Promise<BuildingMessage[]> {
-  if (!roomName) {
-    const response = await request.get<BuildingMessage[]>(
-      `/api/buildings/${buildingId}/messages`
-    )
-    return response.data
+  const options = typeof optionsOrRoomName === 'string' || optionsOrRoomName === null
+    ? { roomName: optionsOrRoomName }
+    : optionsOrRoomName
+  const params: Record<string, number | string> = {}
+  const roomName = options?.roomName?.trim()
+  if (roomName) {
+    params.room_name = roomName
   }
-  const response = await request.get<BuildingMessage[]>(
-    `/api/buildings/${buildingId}/messages`,
-    { params: { room_name: roomName } }
-  )
+  if (options?.limit !== undefined) {
+    params.limit = options.limit
+  }
+  if (options?.offset !== undefined) {
+    params.offset = options.offset
+  }
+  const config = Object.keys(params).length ? { params } : undefined
+  const url = `/api/buildings/${buildingId}/messages`
+  const response = config
+    ? await request.get<BuildingMessage[]>(url, config)
+    : await request.get<BuildingMessage[]>(url)
   return response.data
 }
 

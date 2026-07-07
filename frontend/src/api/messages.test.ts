@@ -37,13 +37,33 @@ describe('message api', () => {
     expect(result[0].display_name).toBe('匿名同学')
   })
 
+  it('fetches building messages with pagination params', async () => {
+    vi.mocked(request.get).mockResolvedValue({ data: [message] })
+
+    await getBuildingMessages(1, { limit: 50, offset: 100 })
+
+    expect(request.get).toHaveBeenCalledWith('/api/buildings/1/messages', {
+      params: { limit: 50, offset: 100 }
+    })
+  })
+
   it('fetches building messages by room name', async () => {
     vi.mocked(request.get).mockResolvedValue({ data: [message] })
 
-    await getBuildingMessages(1, '教4-203')
+    await getBuildingMessages(1, { roomName: '教4-203' })
 
     expect(request.get).toHaveBeenCalledWith('/api/buildings/1/messages', {
       params: { room_name: '教4-203' }
+    })
+  })
+
+  it('fetches room messages with pagination params', async () => {
+    vi.mocked(request.get).mockResolvedValue({ data: [message] })
+
+    await getBuildingMessages(1, { roomName: '教4-203', limit: 50, offset: 50 })
+
+    expect(request.get).toHaveBeenCalledWith('/api/buildings/1/messages', {
+      params: { room_name: '教4-203', limit: 50, offset: 50 }
     })
   })
 

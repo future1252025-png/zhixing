@@ -6,6 +6,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { getBuildingDetail, type Building } from '@/api/buildings'
 import { createBuildingMessage, getBuildingMessages, validateMessageContent, type BuildingMessage, type MessageLocationSource } from '@/api/messages'
 import { haversineDistanceMeters } from '@/utils/geo'
+import { MESSAGE_PAGE_SIZE, hasMoreMessagePages, mergeOlderMessages } from '@/utils/messagePagination'
 
 const MAX_MESSAGE_DISTANCE_METERS = 500
 
@@ -18,6 +19,8 @@ const loading = ref(true)
 const sending = ref(false)
 const locating = ref(false)
 const errorMessage = ref('')
+const loadingOlder = ref(false)
+const hasMoreMessages = ref(false)
 const messageListRef = ref<HTMLElement | null>(null)
 const buildingId = computed(() => Number(route.params.id))
 const selectedRoomName = computed(() => {
@@ -67,11 +70,47 @@ function getErrorMessage(error: unknown): string {
 function formatTime(value: string): string { const date = new Date(value); return Number.isNaN(date.getTime()) ? '' : date.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) }
 function formatDistance(value: number | null): string { if (value === null) return ''; return value >= 1000 ? `${(value / 1000).toFixed(1)} km` : `${Math.round(value)} m` }
 async function scrollToBottom() { await nextTick(); if (messageListRef.value) messageListRef.value.scrollTop = messageListRef.value.scrollHeight }
-async function loadMessages() { if (!Number.isFinite(buildingId.value)) return; try { messages.value = await getBuildingMessages(buildingId.value, selectedRoomName.value); await scrollToBottom() } catch (error) { errorMessage.value = getErrorMessage(error) } }
+async function loadMessages() {
+  if (!Number.isFinite(buildingId.value)) return
+  try {
+    const nextMessages = await getBuildingMessages(buildingId.value, { roomName: selectedRoomName.value, limit: MESSAGE_PAGE_SIZE, offset: 0 })
+    messages.value = nextMessages
+    hasMoreMessages.value = hasMoreMessagePages(nextMessages)
+    await scrollToBottom()
+  } catch (error) {
+    errorMessage.value = getErrorMessage(error)
+  }
+}
+async function loadOlderMessages() {
+  if (!Number.isFinite(buildingId.value) || loadingOlder.value || !hasMoreMessages.value) return
+  loadingOlder.value = true
+  try {
+    const olderMessages = await getBuildingMessages(buildingId.value, {
+      roomName: selectedRoomName.value,
+      limit: MESSAGE_PAGE_SIZE,
+      offset: messages.value.length
+    })
+    messages.value = mergeOlderMessages(messages.value, olderMessages)
+    hasMoreMessages.value = hasMoreMessagePages(olderMessages)
+  } catch (error) {
+    showFailToast(getErrorMessage(error))
+  } finally {
+    loadingOlder.value = false
+  }
+}
 async function loadPage() {
   if (!Number.isFinite(buildingId.value)) { errorMessage.value = '建筑编号无效'; loading.value = false; return }
   loading.value = true; errorMessage.value = ''
-  try { const [nextBuilding, nextMessages] = await Promise.all([getBuildingDetail(buildingId.value), getBuildingMessages(buildingId.value, selectedRoomName.value)]); building.value = nextBuilding; messages.value = nextMessages; await scrollToBottom() }
+  try {
+    const [nextBuilding, nextMessages] = await Promise.all([
+      getBuildingDetail(buildingId.value),
+      getBuildingMessages(buildingId.value, { roomName: selectedRoomName.value, limit: MESSAGE_PAGE_SIZE, offset: 0 })
+    ])
+    building.value = nextBuilding
+    messages.value = nextMessages
+    hasMoreMessages.value = hasMoreMessagePages(nextMessages)
+    await scrollToBottom()
+  }
   catch (error) { errorMessage.value = getErrorMessage(error) } finally { loading.value = false }
 }
 function useBuildingLocation() {
@@ -116,6 +155,9 @@ watch(() => route.query.room_name, () => { void loadPage() })
       <van-empty v-else-if="errorMessage" image="error" :description="errorMessage"><van-button type="primary" size="small" @click="loadPage">重试</van-button></van-empty>
       <van-empty v-else-if="messages.length === 0" description="还没有留言，发出第一条吧" />
       <div v-else ref="messageListRef" class="message-list">
+        <button v-if="hasMoreMessages" type="button" class="load-more-button" :disabled="loadingOlder" @click="loadOlderMessages">
+          {{ loadingOlder ? '正在加载...' : '加载更早留言' }}
+        </button>
         <article v-for="message in messages" :key="message.id" class="message-row"><div class="message-meta"><span>{{ message.display_name || '匿名同学' }}</span><span v-if="message.distance_to_building_meters !== null">距建筑约 {{ formatDistance(message.distance_to_building_meters) }}</span><time>{{ formatTime(message.created_at) }}</time></div><p class="message-bubble">{{ message.content }}</p></article>
       </div>
     </div>
@@ -222,6 +264,24 @@ watch(() => route.query.room_name, () => { void loadPage() })
   max-height: calc(100vh - 290px);
   overflow-y: auto;
   padding: 4px 2px 18px;
+}
+
+.load-more-button {
+  justify-self: center;
+  min-height: 34px;
+  border: 1px solid var(--cm-line);
+  border-radius: var(--cm-radius-sm);
+  background: #fff;
+  color: var(--cm-primary);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 800;
+  padding: 7px 12px;
+}
+
+.load-more-button:disabled {
+  color: var(--cm-muted);
+  cursor: wait;
 }
 
 .message-row {

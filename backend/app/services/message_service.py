@@ -41,17 +41,20 @@ def list_building_messages(
     session: Session,
     building_id: int,
     room_name: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
 ) -> list[MessageRead]:
     statement = (
         select(Message)
         .where(Message.building_id == building_id, Message.status == "normal")
-        .order_by(Message.created_at.asc(), Message.id.asc())
+        .order_by(Message.created_at.desc(), Message.id.desc())
     )
     if room_name is not None:
         statement = statement.where(Message.room_name == room_name)
 
+    statement = statement.limit(limit).offset(offset)
     messages = session.scalars(statement).all()
-    return [to_message_read(message) for message in messages]
+    return [to_message_read(message) for message in reversed(messages)]
 
 
 def list_building_chatrooms(session: Session, building_id: int) -> list[ChatRoomRead]:

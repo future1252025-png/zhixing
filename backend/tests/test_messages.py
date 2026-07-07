@@ -159,6 +159,102 @@ def test_messages_are_returned_in_created_at_ascending_order(
     assert [message["content"] for message in response.json()] == ["first", "second"]
 
 
+def test_get_messages_defaults_to_latest_50_in_ascending_display_order(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    client, SessionLocal = client_and_session
+    headers = auth_headers(client)
+
+    with SessionLocal() as session:
+        building = session.query(Building).first()
+        user = session.query(User).filter(User.username == "alice").one()
+        assert building is not None
+        session.query(Message).filter(Message.building_id == building.id).delete()
+        base_time = datetime(2026, 5, 29, 8, 0, tzinfo=timezone.utc)
+        session.add_all(
+            [
+                Message(
+                    building_id=building.id,
+                    user_id=user.id,
+                    content=f"message-{index:02d}",
+                    display_name="Other",
+                    status="normal",
+                    created_at=base_time + timedelta(minutes=index),
+                )
+                for index in range(60)
+            ]
+        )
+        session.commit()
+        building_id = building.id
+
+    response = client.get(f"/api/buildings/{building_id}/messages", headers=headers)
+
+    assert response.status_code == 200
+    contents = [message["content"] for message in response.json()]
+    assert len(contents) == 50
+    assert contents[0] == "message-10"
+    assert contents[-1] == "message-59"
+
+
+def test_get_messages_limit_and_offset_page_latest_messages(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    client, SessionLocal = client_and_session
+    headers = auth_headers(client)
+
+    with SessionLocal() as session:
+        building = session.query(Building).first()
+        user = session.query(User).filter(User.username == "alice").one()
+        assert building is not None
+        session.query(Message).filter(Message.building_id == building.id).delete()
+        base_time = datetime(2026, 5, 29, 8, 0, tzinfo=timezone.utc)
+        session.add_all(
+            [
+                Message(
+                    building_id=building.id,
+                    user_id=user.id,
+                    content=f"message-{index:02d}",
+                    display_name="Other",
+                    status="normal",
+                    created_at=base_time + timedelta(minutes=index),
+                )
+                for index in range(20)
+            ]
+        )
+        session.commit()
+        building_id = building.id
+
+    response = client.get(
+        f"/api/buildings/{building_id}/messages",
+        params={"limit": 5, "offset": 10},
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    assert [message["content"] for message in response.json()] == [
+        "message-05",
+        "message-06",
+        "message-07",
+        "message-08",
+        "message-09",
+    ]
+
+
+def test_get_messages_rejects_limit_above_100(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    client, _ = client_and_session
+    building_id = get_first_building_id(client)
+
+    response = client.get(
+        f"/api/buildings/{building_id}/messages",
+        params={"limit": 101},
+        headers=auth_headers(client),
+    )
+
+    assert response.status_code == 422
+
+
 def test_get_messages_for_missing_building_returns_404(
     client_and_session: tuple[TestClient, sessionmaker],
 ) -> None:

@@ -2,6 +2,7 @@ from collections.abc import Generator
 
 from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine
+from sqlalchemy import event
 from sqlalchemy import inspect, text
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
@@ -13,10 +14,24 @@ class Base(DeclarativeBase):
 
 
 def create_sqlite_engine(database_url: str = settings.database_url) -> Engine:
-    return create_engine(
+    sqlite_engine = create_engine(
         database_url,
         connect_args={"check_same_thread": False},
     )
+    if database_url.startswith("sqlite:///"):
+        configure_sqlite_pragmas(sqlite_engine)
+    return sqlite_engine
+
+
+def configure_sqlite_pragmas(sqlite_engine: Engine) -> None:
+    @event.listens_for(sqlite_engine, "connect")
+    def set_sqlite_pragmas(dbapi_connection, connection_record) -> None:
+        _ = connection_record
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA busy_timeout=5000")
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
 
 
 engine = create_sqlite_engine()

@@ -33,6 +33,17 @@ def test_database_tables_can_be_created(tmp_path: Path) -> None:
     }.issubset(table_names)
 
 
+def test_sqlite_file_engine_uses_wal_and_busy_timeout(tmp_path: Path) -> None:
+    engine = create_sqlite_engine(make_test_database_url(tmp_path / "wal.db"))
+
+    with engine.connect() as connection:
+        journal_mode = connection.exec_driver_sql("PRAGMA journal_mode").scalar()
+        busy_timeout = connection.exec_driver_sql("PRAGMA busy_timeout").scalar()
+
+    assert str(journal_mode).lower() == "wal"
+    assert int(busy_timeout) >= 5000
+
+
 def test_map_points_seed_file_loads_common_campus_points() -> None:
     points = load_map_points_seed()
 

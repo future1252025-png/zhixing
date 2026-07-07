@@ -41,11 +41,19 @@ def read_building_chatrooms(
 def read_building_messages(
     building_id: int,
     room_name: str | None = Query(default=None, max_length=64),
+    limit: int = Query(default=50, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ) -> list[MessageRead]:
     require_building(session, building_id)
-    return list_building_messages(session, building_id, room_name)
+    return list_building_messages(
+        session,
+        building_id,
+        room_name,
+        limit=limit,
+        offset=offset,
+    )
 
 
 @router.post("/messages", response_model=MessageRead, status_code=status.HTTP_201_CREATED)
