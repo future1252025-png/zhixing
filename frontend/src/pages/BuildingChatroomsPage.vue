@@ -104,14 +104,14 @@ onMounted(loadPage)
       </van-empty>
 
       <template v-else>
-        <header class="chatrooms-hero">
+        <header v-reveal class="chatrooms-hero">
           <span>建筑会话</span>
           <h1>{{ building?.name || '校园建筑' }}</h1>
           <p>先进入建筑总聊，也可以搜索或输入具体教室号。</p>
           <strong>{{ roomCountText }}</strong>
         </header>
 
-        <section class="room-search">
+        <section v-reveal="{ delay: 45 }" class="room-search">
           <van-search
             v-model="roomQuery"
             placeholder="搜索或输入教室号，例如 教4-203"
@@ -128,7 +128,7 @@ onMounted(loadPage)
           </button>
         </section>
 
-        <section class="room-list" aria-label="聊天室列表">
+        <section v-reveal="{ delay: 80 }" class="room-list" aria-label="聊天室列表">
           <button
             v-for="room in filteredRooms"
             :key="room.room_name || 'general'"
@@ -169,14 +169,14 @@ onMounted(loadPage)
 .chatrooms-hero {
   position: relative;
   overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.16);
+  border: 1px solid rgba(10, 125, 115, 0.18);
   border-radius: var(--cm-radius);
   background:
-    linear-gradient(90deg, rgba(255, 255, 255, 0.08) 1px, transparent 1px) 0 0 / 24px 24px,
-    linear-gradient(180deg, #17383d 0%, #10272c 100%);
-  color: #fff;
+    linear-gradient(90deg, rgba(10, 125, 115, 0.065) 1px, transparent 1px) 0 0 / 24px 24px,
+    linear-gradient(135deg, #f8fdf9 0%, #e7f4ed 60%, #e9f2fa 100%);
+  color: var(--cm-ink);
   padding: 20px;
-  box-shadow: 0 18px 42px rgba(9, 70, 74, .18);
+  box-shadow: 0 18px 42px rgba(30, 68, 55, .11);
 }
 
 .chatrooms-hero::after {
@@ -185,12 +185,12 @@ onMounted(loadPage)
   bottom: 18px;
   width: 86px;
   height: 1px;
-  background: linear-gradient(90deg, rgba(128, 216, 203, 0.2), rgba(242, 184, 75, 0.85));
+  background: linear-gradient(90deg, rgba(10, 125, 115, 0.22), rgba(67, 135, 199, 0.66), rgba(242, 184, 75, 0.85));
   content: "";
 }
 
 .chatrooms-hero span {
-  color: rgba(255, 255, 255, .72);
+  color: var(--cm-primary);
   font-size: 12px;
   font-weight: 700;
 }
@@ -203,7 +203,7 @@ onMounted(loadPage)
 
 .chatrooms-hero p {
   margin: 0 0 14px;
-  color: rgba(255, 255, 255, .8);
+  color: var(--cm-muted);
   font-size: 14px;
   line-height: 1.55;
 }
@@ -211,7 +211,9 @@ onMounted(loadPage)
 .chatrooms-hero strong {
   display: inline-flex;
   border-radius: var(--cm-radius-sm);
-  background: rgba(255, 255, 255, .12);
+  border: 1px solid rgba(10, 125, 115, .14);
+  background: rgba(255, 255, 255, .74);
+  color: var(--cm-primary-dark);
   padding: 7px 11px;
   font-size: 12px;
 }

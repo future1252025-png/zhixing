@@ -46,6 +46,11 @@ const activePath = computed(() => route.path)
 
 .app-tabbar :deep(.van-tabbar-item__icon) {
   margin-bottom: 2px;
+  transition: transform 260ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.app-tabbar :deep(.van-tabbar-item:active) {
+  transform: scale(0.94);
 }
 
 .app-tabbar :deep(.van-tabbar-item--active) {
@@ -60,5 +65,14 @@ const activePath = computed(() => route.path)
 
 .app-tabbar :deep(.van-tabbar-item--active .van-tabbar-item__icon) {
   transform: translateY(-1px);
+}
+
+.app-tabbar :deep(.van-tabbar-item--active .van-tabbar-item__icon::before) {
+  animation: tab-icon-arrive 360ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes tab-icon-arrive {
+  0% { opacity: 0.6; transform: translateY(3px) scale(0.82); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
 }
 </style>

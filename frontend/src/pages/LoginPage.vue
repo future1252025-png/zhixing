@@ -77,26 +77,33 @@ async function handleSubmit() {
 </template>
 
 <style scoped>
-.auth-page { min-height: 100vh; background: #fff; }
-.auth-route-board { position: relative; min-height: 365px; overflow: hidden; background: #11383a; color: #fff; padding: 28px 22px 30px; }
-.auth-brand { display: flex; align-items: center; gap: 10px; }
-.brand-mark { display: grid; width: 38px; height: 38px; place-items: center; border: 1px solid rgba(255,255,255,.35); border-radius: 8px; background: #0b766f; font-weight: 800; }
+.auth-page { min-height: 100vh; background: var(--cm-bg); }
+.auth-route-board { position: relative; min-height: 365px; overflow: hidden; border-bottom: 1px solid rgba(10,125,115,.14); background: linear-gradient(90deg, rgba(10,125,115,.065) 1px, transparent 1px) 0 0 / 28px 28px, linear-gradient(145deg, #fbfdf9 0%, #e9f5ed 62%, #e7f1fa 100%); color: var(--cm-ink); padding: 28px 22px 30px; }
+.auth-brand { display: flex; align-items: center; gap: 10px; animation: auth-rise 620ms cubic-bezier(.16,1,.3,1) both; }
+.brand-mark { display: grid; width: 38px; height: 38px; place-items: center; border: 1px solid rgba(7,86,79,.18); border-radius: 8px; background: var(--cm-primary); color: #fff; box-shadow: 0 10px 24px rgba(10,125,115,.2); font-weight: 800; }
 .auth-brand div { display: grid; gap: 1px; }
 .auth-brand strong { font-size: 17px; }
-.auth-brand small { color: #aac7c4; font-size: 10px; }
+.auth-brand small { color: var(--cm-muted); font-size: 10px; }
 .auth-route { position: absolute; top: 74px; right: 16px; left: 16px; width: calc(100% - 32px); height: 132px; }
-.auth-route path { fill: none; stroke: #62c8ba; stroke-width: 5; stroke-linecap: round; }
-.auth-route circle { fill: #11383a; stroke: #fff; stroke-width: 4; }
-.auth-route .route-mid { fill: #2b6fbe; }
+.auth-route path { fill: none; stroke: #21a18f; stroke-width: 5; stroke-linecap: round; stroke-dasharray: 430; stroke-dashoffset: 430; filter: drop-shadow(0 8px 14px rgba(10,125,115,.16)); animation: auth-route-draw 980ms 120ms cubic-bezier(.16,1,.3,1) forwards; }
+.auth-route circle { fill: var(--cm-primary); stroke: #fff; stroke-width: 4; opacity: 0; transform-box: fill-box; transform-origin: center; animation: auth-node-in 380ms cubic-bezier(.16,1,.3,1) forwards; }
+.auth-route .route-start { animation-delay: 360ms; }
+.auth-route .route-mid { fill: #4387c7; animation-delay: 540ms; }
 .auth-route .route-end { fill: #f2b84b; }
-.route-label { position: absolute; border-radius: 4px; background: rgba(255,255,255,.12); color: #d9ebe8; font-size: 10px; padding: 4px 6px; }
+.auth-route .route-end { animation-delay: 720ms; }
+.route-label { position: absolute; border: 1px solid rgba(10,125,115,.12); border-radius: 4px; background: rgba(255,255,255,.72); color: var(--cm-primary-dark); font-size: 10px; padding: 4px 6px; opacity: 0; animation: auth-rise 420ms 680ms cubic-bezier(.16,1,.3,1) forwards; }
 .route-label-start { top: 176px; left: 20px; }
 .route-label-end { top: 118px; right: 17px; }
-.auth-route-board h1 { position: absolute; bottom: 62px; left: 22px; margin: 0; font-size: 30px; font-weight: 750; line-height: 1.2; }
-.auth-route-board p { position: absolute; right: 22px; bottom: 28px; left: 22px; margin: 0; color: #bcd1ce; font-size: 13px; }
-.auth-form-wrap { position: relative; margin-top: -12px; border-radius: 12px 12px 0 0; background: #fff; padding: 22px 14px 28px; }
+.auth-route-board h1 { position: absolute; bottom: 62px; left: 22px; margin: 0; font-size: 30px; font-weight: 750; line-height: 1.2; opacity: 0; animation: auth-rise 560ms 620ms cubic-bezier(.16,1,.3,1) forwards; }
+.auth-route-board p { position: absolute; right: 22px; bottom: 28px; left: 22px; margin: 0; color: var(--cm-muted); font-size: 13px; opacity: 0; animation: auth-rise 560ms 710ms cubic-bezier(.16,1,.3,1) forwards; }
+.auth-form-wrap { position: relative; margin-top: -12px; border: 1px solid rgba(10,125,115,.1); border-bottom: 0; border-radius: 12px 12px 0 0; background: rgba(255,255,255,.92); box-shadow: 0 -10px 32px rgba(28,50,42,.07); padding: 22px 14px 28px; animation: auth-form-in 640ms 160ms cubic-bezier(.16,1,.3,1) both; backdrop-filter: blur(18px); }
 .auth-form { width: min(100%, 500px); margin: 0 auto; }
 .form-heading { margin-bottom: 16px; padding: 0 2px; }
 .form-heading h2 { margin: 0; color: var(--cm-ink); font-size: 23px; }
 .form-heading p { margin: 5px 0 0; color: var(--cm-muted); font-size: 13px; }
+
+@keyframes auth-route-draw { to { stroke-dashoffset: 0; } }
+@keyframes auth-node-in { from { opacity: 0; transform: scale(.35); } to { opacity: 1; transform: scale(1); } }
+@keyframes auth-rise { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes auth-form-in { from { opacity: 0; transform: translateY(24px); } to { opacity: 1; transform: translateY(0); } }
 </style>

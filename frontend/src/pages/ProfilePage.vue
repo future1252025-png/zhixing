@@ -103,7 +103,7 @@ async function handleLogout() {
   <section class="page">
     <van-nav-bar title="我的" />
     <div class="page-content profile-content">
-      <section class="profile-ticket">
+      <section v-reveal class="profile-ticket">
         <span class="avatar-mark" :style="avatarStyle">{{ avatarText }}</span>
         <div class="profile-main">
           <span>智行账号</span>
@@ -116,7 +116,7 @@ async function handleLogout() {
         <div class="profile-route" aria-hidden="true"><i></i><b></b><i></i><b></b><i></i></div>
       </section>
 
-      <section v-if="editing" class="account-panel edit-panel">
+      <section v-if="editing" v-reveal="{ delay: 35 }" class="account-panel edit-panel">
         <div class="panel-title">
           <h2>编辑资料</h2>
           <p>修改昵称和头像后，会同步保存到当前登录账号。</p>
@@ -162,7 +162,7 @@ async function handleLogout() {
         </div>
       </section>
 
-      <section class="account-panel">
+      <section v-reveal="{ delay: 60 }" class="account-panel">
         <div class="panel-title">
           <h2>账号信息</h2>
           <p>第一版为课程设计演示账号，真实统一身份认证作为后续扩展。</p>
@@ -182,7 +182,7 @@ async function handleLogout() {
           </article>
         </div>
       </section>
-      <div class="page-actions">
+      <div v-reveal="{ delay: 85 }" class="page-actions">
         <van-button type="danger" plain block @click="handleLogout">退出登录</van-button>
       </div>
     </div>

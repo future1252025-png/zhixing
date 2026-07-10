@@ -3,7 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch 
 
 import type { Building } from '@/api/buildings'
 import type { CampusMapPoint } from '@/types/map'
-import { isAMapConfigured, loadAMapSdk } from '@/utils/amap'
+import { isAMapConfigured, loadAMapPlugin, loadAMapSdk } from '@/utils/amap'
 import { wgs84ToGcj02 } from '@/utils/geo'
 import {
   getBuildingHitZoneSize,
@@ -158,7 +158,14 @@ function clearWalkingRoute() {
 }
 
 function renderWalkingRoute() {
-  if (!props.walkingRoute || !map.value || !amap.value || !props.fromPoint || !props.toPoint) {
+  if (
+    !props.walkingRoute ||
+    !map.value ||
+    !amap.value ||
+    typeof amap.value.Walking !== 'function' ||
+    !props.fromPoint ||
+    !props.toPoint
+  ) {
     return
   }
 
@@ -262,6 +269,26 @@ function openSelectedBuilding() {
   }
 }
 
+async function installMapControls() {
+  if (!map.value) {
+    return
+  }
+
+  try {
+    const [scaleAMap, toolbarAMap] = await Promise.all([
+      loadAMapPlugin('AMap.Scale'),
+      loadAMapPlugin('AMap.ToolBar')
+    ])
+    if (!map.value) {
+      return
+    }
+    map.value.addControl(new scaleAMap.Scale())
+    map.value.addControl(new toolbarAMap.ToolBar({ position: 'RB' }))
+  } catch {
+    // The base map remains usable when optional controls fail to load.
+  }
+}
+
 async function initMap() {
   if (!hasConfig.value || !mapContainer.value) {
     return
@@ -271,6 +298,9 @@ async function initMap() {
   errorMessage.value = ''
   try {
     amap.value = await loadAMapSdk()
+    if (props.walkingRoute) {
+      amap.value = await loadAMapPlugin('AMap.Walking')
+    }
     await nextTick()
     map.value = new amap.value.Map(mapContainer.value, {
       center: getMapCenter(),
@@ -279,8 +309,7 @@ async function initMap() {
       resizeEnable: true,
       mapStyle: 'amap://styles/normal'
     })
-    map.value.addControl(new amap.value.Scale())
-    map.value.addControl(new amap.value.ToolBar({ position: 'RB' }))
+    void installMapControls()
     map.value.on('zoomend', () => {
       currentZoom.value = map.value.getZoom()
     })

@@ -149,12 +149,12 @@ watch(() => route.query.room_name, () => { void loadPage() })
   <section class="page message-page">
     <van-nav-bar :title="roomTitle" left-arrow @click-left="router.push(`/buildings/${buildingId}/chats`)" />
     <div class="message-content">
-      <header class="message-heading"><div><strong>{{ roomTitle }}</strong><span>{{ building?.name || '建筑会话' }} · HTTP 聊天 · 按时间顺序</span></div><span>{{ messages.length }} 条</span></header>
-      <section class="location-strip"><div><van-icon name="location-o" /><span>{{ locationText }}</span></div><div><button type="button" :disabled="locating" @click="requestBrowserLocation">{{ locating ? '定位中' : '定位' }}</button><button type="button" @click="useBuildingLocation">使用建筑位置</button></div></section>
+      <header v-reveal class="message-heading"><div><strong>{{ roomTitle }}</strong><span>{{ building?.name || '建筑会话' }} · HTTP 聊天 · 按时间顺序</span></div><span>{{ messages.length }} 条</span></header>
+      <section v-reveal="{ delay: 45 }" class="location-strip"><div><van-icon name="location-o" /><span>{{ locationText }}</span></div><div><button type="button" :disabled="locating" @click="requestBrowserLocation">{{ locating ? '定位中' : '定位' }}</button><button type="button" @click="useBuildingLocation">使用建筑位置</button></div></section>
       <p v-if="loading" class="muted-text">正在加载留言...</p>
       <van-empty v-else-if="errorMessage" image="error" :description="errorMessage"><van-button type="primary" size="small" @click="loadPage">重试</van-button></van-empty>
       <van-empty v-else-if="messages.length === 0" description="还没有留言，发出第一条吧" />
-      <div v-else ref="messageListRef" class="message-list">
+      <div v-else ref="messageListRef" v-reveal="{ delay: 80 }" class="message-list">
         <button v-if="hasMoreMessages" type="button" class="load-more-button" :disabled="loadingOlder" @click="loadOlderMessages">
           {{ loadingOlder ? '正在加载...' : '加载更早留言' }}
         </button>

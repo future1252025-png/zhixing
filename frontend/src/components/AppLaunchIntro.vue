@@ -38,31 +38,31 @@ onMounted(() => {
   timeline
     .set('.launch-route-path', { strokeDashoffset: 240 })
     .add('.launch-brand > *', {
-      translateY: [10, 0],
+      translateY: [14, 0],
       opacity: [0, 1],
-      delay: stagger(70),
-      duration: 320
+      delay: stagger(85),
+      duration: 420
     })
     .add('.launch-route-path', {
       strokeDashoffset: [240, 0],
       opacity: [0, 1],
-      duration: 620
-    }, '-=110')
+      duration: 760
+    }, '-=150')
     .add('.launch-stop', {
-      scale: [0.4, 1],
+      scale: [0.25, 1],
       opacity: [0, 1],
-      delay: stagger(95),
-      duration: 300
-    }, '-=430')
+      delay: stagger(110),
+      duration: 380
+    }, '-=510')
     .add('.launch-copy > *', {
-      translateY: [8, 0],
+      translateY: [12, 0],
       opacity: [0, 1],
-      delay: stagger(58),
-      duration: 280
-    }, '-=230')
-    .add(rootElement, { opacity: [1, 0], duration: 260 }, '+=180')
+      delay: stagger(72),
+      duration: 360
+    }, '-=260')
+    .add(rootElement, { opacity: [1, 0], scale: [1, 1.012], duration: 420, ease: 'inOutQuad' }, '+=220')
 
-  fallbackTimer = window.setTimeout(finishIntro, 1300)
+  fallbackTimer = window.setTimeout(finishIntro, 1900)
 })
 
 onBeforeUnmount(() => {
@@ -106,14 +106,20 @@ onBeforeUnmount(() => {
   display: grid;
   place-items: center;
   background:
-    linear-gradient(90deg, rgba(255, 255, 255, 0.08) 1px, transparent 1px) 0 0 / 28px 28px,
-    linear-gradient(180deg, #11383a 0%, #092525 100%);
-  color: #fff;
+    linear-gradient(90deg, rgba(10, 125, 115, 0.07) 1px, transparent 1px) 0 0 / 28px 28px,
+    linear-gradient(180deg, #fbfdf9 0%, #edf7f0 58%, #e8f3f1 100%);
+  color: #17231f;
   will-change: opacity;
 }
 
 .launch-stage {
   width: min(86vw, 350px);
+  border: 1px solid rgba(10, 125, 115, 0.14);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.72);
+  box-shadow: 0 24px 64px rgba(30, 68, 55, 0.12);
+  padding: 22px 20px 20px;
+  backdrop-filter: blur(18px);
 }
 
 .launch-brand {
@@ -132,9 +138,11 @@ onBeforeUnmount(() => {
   width: 40px;
   height: 40px;
   place-items: center;
-  border: 1px solid rgba(255, 255, 255, 0.38);
+  border: 1px solid rgba(7, 86, 79, 0.18);
   border-radius: 8px;
-  background: #0b766f;
+  background: #0a7d73;
+  color: #fff;
+  box-shadow: 0 10px 24px rgba(10, 125, 115, 0.2);
   font-weight: 800;
 }
 
@@ -150,24 +158,24 @@ onBeforeUnmount(() => {
 
 .launch-route-path {
   fill: none;
-  stroke: #62c8ba;
+  stroke: #21a18f;
   stroke-dasharray: 240;
   stroke-linecap: round;
   stroke-width: 6;
-  filter: drop-shadow(0 10px 18px rgba(0, 0, 0, 0.2));
+  filter: drop-shadow(0 8px 15px rgba(10, 125, 115, 0.2));
 }
 
 .launch-stop {
-  fill: #11383a;
+  fill: #0a7d73;
   opacity: 0;
-  stroke: #fff;
+  stroke: #ffffff;
   stroke-width: 5;
   transform-box: fill-box;
   transform-origin: center;
 }
 
 .launch-stop.middle {
-  fill: #2b6fbe;
+  fill: #4387c7;
 }
 
 .launch-stop.end {
@@ -185,7 +193,7 @@ onBeforeUnmount(() => {
 }
 
 .launch-copy span {
-  color: #bcd1ce;
+  color: #6d7c76;
   font-size: 13px;
 }
 </style>

@@ -216,9 +216,9 @@ onMounted(loadScheduleData)
   <section class="page">
     <van-nav-bar title="出发建议" />
     <div class="page-content schedule-content">
-      <header class="schedule-heading"><span>校园步行建议</span><h1>从这里，到下一站。</h1><p>选择起点和终点；不选终点时，系统自动使用下一节课地点。</p></header>
+      <header v-reveal class="schedule-heading"><span>校园步行建议</span><h1>从这里，到下一站。</h1><p>选择起点和终点；不选终点时，系统自动使用下一节课地点。</p></header>
 
-      <section class="panel route-control-panel">
+      <section v-reveal="{ delay: 45 }" class="panel route-control-panel">
         <div class="panel-heading">
           <div>
             <h2>选择路线</h2>
@@ -316,7 +316,7 @@ onMounted(loadScheduleData)
         </template>
       </section>
 
-      <section v-if="routeReady" class="map-panel">
+      <section v-if="routeReady" v-reveal="{ delay: 65 }" class="map-panel">
         <RealCampusMap
           title="路线预览"
           subtitle="地图路线仅用于校园内步行参考"
@@ -327,7 +327,7 @@ onMounted(loadScheduleData)
         />
       </section>
 
-      <section v-if="suggestion && statusMeta" class="suggestion-ticket">
+      <section v-if="suggestion && statusMeta" v-reveal="{ delay: 80 }" class="suggestion-ticket">
         <div class="suggestion-header" :class="statusMeta.className">
           <span>{{ statusMeta.label }}</span>
           <strong>{{ suggestion.suggest_departure_time }} 出发</strong>

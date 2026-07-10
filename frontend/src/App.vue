@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 
 import AppTabbar from '@/components/AppTabbar.vue'
 import AppLaunchIntro from '@/components/AppLaunchIntro.vue'
 import LoginWelcomeIntro from '@/components/LoginWelcomeIntro.vue'
+import { preloadAMapSdk } from '@/utils/amap'
 import {
   consumeLoginIntroFlag,
   consumeLoginIntroSnapshot,
@@ -79,6 +80,10 @@ watch(
   { immediate: true }
 )
 
+onMounted(() => {
+  preloadAMapSdk()
+})
+
 onBeforeUnmount(() => {
   if (handoffTimer !== null) {
     window.clearTimeout(handoffTimer)
@@ -90,7 +95,11 @@ onBeforeUnmount(() => {
   <van-config-provider :theme-vars="themeVars">
     <div class="app-frame" :class="{ 'login-handoff-active': homeHandoffActive }">
       <div class="app-shell">
-        <router-view />
+        <router-view v-slot="{ Component, route: viewRoute }">
+          <Transition name="route-page" mode="out-in">
+            <component :is="Component" :key="viewRoute.path" />
+          </Transition>
+        </router-view>
       </div>
       <AppTabbar v-if="showTabbar" />
       <AppLaunchIntro

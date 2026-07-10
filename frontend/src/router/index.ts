@@ -142,6 +142,7 @@ router.beforeEach(async (to) => {
     try {
       await authStore.loadCurrentUser()
     } catch {
+      authStore.logout()
       return {
         path: '/login',
         query: { redirect: to.fullPath }

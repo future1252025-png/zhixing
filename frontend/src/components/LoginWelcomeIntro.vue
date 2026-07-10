@@ -50,12 +50,12 @@ onMounted(() => {
   timeline = createTimeline({ defaults: { ease: 'outCubic' }, onComplete: finishIntro })
   timeline
     .set('.intro-route', { strokeDashoffset: 280 })
-    .add('.intro-brand', { translateY: [10, 0], opacity: [0, 1], duration: 360 })
-    .add('.intro-route', { strokeDashoffset: [280, 0], opacity: [0, 1], duration: 900 }, '-=120')
-    .add('.intro-node', { scale: [0.45, 1], opacity: [0, 1], delay: stagger(130), duration: 430 }, '-=620')
-    .add('.intro-ticket', { translateY: [18, 0], opacity: [0, 1], duration: 480 }, '-=230')
-    .add('.intro-copy > *', { translateY: [9, 0], opacity: [0, 1], delay: stagger(65), duration: 380 }, '-=300')
-    .add(rootElement, { opacity: [1, 0], duration: 470 }, '+=260')
+    .add('.intro-brand', { translateY: [14, 0], opacity: [0, 1], duration: 440 })
+    .add('.intro-route', { strokeDashoffset: [280, 0], opacity: [0, 1], duration: 980 }, '-=150')
+    .add('.intro-node', { scale: [0.3, 1], opacity: [0, 1], delay: stagger(135), duration: 460 }, '-=700')
+    .add('.intro-ticket', { translateY: [22, 0], scale: [0.98, 1], opacity: [0, 1], duration: 540 }, '-=260')
+    .add('.intro-copy > *', { translateY: [12, 0], opacity: [0, 1], delay: stagger(75), duration: 420 }, '-=330')
+    .add(rootElement, { opacity: [1, 0], scale: [1, 1.012], duration: 520, ease: 'inOutQuad' }, '+=260')
 
   handoffTimer = window.setTimeout(startHomeHandoff, 1480)
   fallbackTimer = window.setTimeout(finishIntro, 2350)
@@ -94,21 +94,21 @@ onBeforeUnmount(() => {
   display: grid;
   place-items: center;
   background:
-    linear-gradient(90deg, rgba(255, 255, 255, 0.08) 1px, transparent 1px) 0 0 / 28px 28px,
-    linear-gradient(180deg, #11383a 0%, #092525 100%);
-  color: #fff;
+    linear-gradient(90deg, rgba(10, 125, 115, 0.07) 1px, transparent 1px) 0 0 / 28px 28px,
+    linear-gradient(180deg, #fbfdf9 0%, #edf7f0 58%, #e8f3f1 100%);
+  color: #17231f;
   will-change: opacity;
 }
-.intro-stage { width: min(88vw, 360px); }
+.intro-stage { width: min(88vw, 360px); border: 1px solid rgba(10, 125, 115, .14); border-radius: 8px; background: rgba(255,255,255,.72); box-shadow: 0 24px 64px rgba(30,68,55,.12); padding: 21px 20px 20px; backdrop-filter: blur(18px); }
 .intro-brand { display: flex; align-items: center; gap: 10px; opacity: 0; }
-.intro-brand span { display: grid; width: 38px; height: 38px; place-items: center; border: 1px solid rgba(255,255,255,.35); border-radius: 8px; background: #0b766f; font-weight: 800; }
+.intro-brand span { display: grid; width: 38px; height: 38px; place-items: center; border: 1px solid rgba(7,86,79,.18); border-radius: 8px; background: #0a7d73; color: #fff; box-shadow: 0 10px 24px rgba(10,125,115,.2); font-weight: 800; }
 .intro-brand strong { font-size: 15px; }
 .intro-stage svg { width: 100%; margin: 18px 0 4px; overflow: visible; }
-.intro-route { fill: none; stroke: #62c8ba; stroke-width: 6; stroke-linecap: round; stroke-dasharray: 280; filter: drop-shadow(0 8px 16px rgba(0,0,0,.18)); }
-.intro-node { fill: #11383a; stroke: #fff; stroke-width: 5; transform-box: fill-box; transform-origin: center; opacity: 0; }
-.intro-node.mid { fill: #2b6fbe; }.intro-node.end { fill: #f2b84b; }
-.intro-ticket { display: grid; gap: 4px; border-left: 4px solid #f2b84b; border-radius: 0 6px 6px 0; background: #fff; color: #17231f; padding: 13px 15px; opacity: 0; }
+.intro-route { fill: none; stroke: #21a18f; stroke-width: 6; stroke-linecap: round; stroke-dasharray: 280; filter: drop-shadow(0 8px 15px rgba(10,125,115,.2)); }
+.intro-node { fill: #0a7d73; stroke: #fff; stroke-width: 5; transform-box: fill-box; transform-origin: center; opacity: 0; }
+.intro-node.mid { fill: #4387c7; }.intro-node.end { fill: #f2b84b; }
+.intro-ticket { display: grid; gap: 4px; border: 1px solid rgba(10,125,115,.12); border-left: 4px solid #f2b84b; border-radius: 0 6px 6px 0; background: #fff; color: #17231f; box-shadow: 0 12px 28px rgba(28,50,42,.09); padding: 13px 15px; opacity: 0; }
 .intro-ticket span,.intro-ticket small { color: #6d7c76; font-size: 11px; }.intro-ticket strong { font-size: 18px; }
 .intro-copy { display: grid; gap: 4px; margin-top: 22px; text-align: center; }
-.intro-copy > * { opacity: 0; }.intro-copy strong { font-size: 22px; }.intro-copy span { color: #bcd1ce; font-size: 13px; }
+.intro-copy > * { opacity: 0; }.intro-copy strong { font-size: 22px; }.intro-copy span { color: #6d7c76; font-size: 13px; }
 </style>

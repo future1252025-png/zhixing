@@ -39,10 +39,10 @@ onMounted(loadBuilding)
         <div class="page-actions"><van-button type="primary" size="small" @click="loadBuilding">重试</van-button><van-button plain size="small" @click="router.push('/home')">返回首页</van-button></div>
       </van-empty>
       <template v-else-if="building">
-        <header class="building-heading"><span>{{ building.type }}</span><h1>{{ building.name }}</h1><p>{{ building.description }}</p></header>
+        <header v-reveal class="building-heading"><span>{{ building.type }}</span><h1>{{ building.name }}</h1><p>{{ building.description }}</p></header>
         <RealCampusMap title="所在位置" subtitle="地图已定位到当前建筑" :buildings="[building]" :active-building-id="building.id" height="285px" />
-        <section class="building-note"><span>步行提示</span><p>{{ building.walk_hint || '暂无步行提示，可从地图查看周边道路和入口。' }}</p></section>
-        <div class="building-actions"><button type="button" @click="openMessages"><van-icon name="chat-o" /><span><strong>建筑会话</strong><small>选择总聊或具体教室聊天室</small></span><van-icon name="arrow" /></button><button type="button" @click="openSchedule"><van-icon name="guide-o" /><span><strong>规划到这里</strong><small>作为路线终点打开出发建议</small></span><van-icon name="arrow" /></button></div>
+        <section v-reveal="{ delay: 50 }" class="building-note"><span>步行提示</span><p>{{ building.walk_hint || '暂无步行提示，可从地图查看周边道路和入口。' }}</p></section>
+        <div v-reveal="{ delay: 85 }" class="building-actions"><button type="button" @click="openMessages"><van-icon name="chat-o" /><span><strong>建筑会话</strong><small>选择总聊或具体教室聊天室</small></span><van-icon name="arrow" /></button><button type="button" @click="openSchedule"><van-icon name="guide-o" /><span><strong>规划到这里</strong><small>作为路线终点打开出发建议</small></span><van-icon name="arrow" /></button></div>
       </template>
     </div>
   </section>

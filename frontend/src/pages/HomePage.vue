@@ -219,7 +219,7 @@ onMounted(initializeHome)
         </button>
       </nav>
 
-      <section class="chat-search-panel home-motion-item">
+      <section v-reveal class="chat-search-panel">
         <div class="section-heading">
           <div>
             <h2 class="section-title">找会话</h2>
@@ -250,7 +250,7 @@ onMounted(initializeHome)
         </div>
       </section>
 
-      <section v-if="recentChats.length" class="chat-strip-section home-motion-item">
+      <section v-if="recentChats.length" v-reveal="{ delay: 45 }" class="chat-strip-section">
         <div class="section-heading">
           <div>
             <h2 class="section-title">最近访问</h2>
@@ -270,7 +270,7 @@ onMounted(initializeHome)
         </div>
       </section>
 
-      <section class="chat-strip-section home-motion-item">
+      <section v-reveal="{ delay: 70 }" class="chat-strip-section">
         <div class="section-heading">
           <div>
             <h2 class="section-title">热门会话</h2>
@@ -292,7 +292,7 @@ onMounted(initializeHome)
         </div>
       </section>
 
-      <section class="home-map-section home-motion-item">
+      <section v-reveal="{ delay: 90 }" class="home-map-section">
         <div class="section-heading">
           <div>
             <h2 class="section-title">会话地图</h2>
@@ -329,14 +329,14 @@ onMounted(initializeHome)
   overflow: hidden;
   display: grid;
   gap: 18px;
-  border: 1px solid rgba(255, 255, 255, 0.16);
+  border: 1px solid rgba(10, 125, 115, 0.18);
   border-radius: var(--cm-radius);
   background:
-    linear-gradient(90deg, rgba(255, 255, 255, 0.08) 1px, transparent 1px) 0 0 / 26px 26px,
-    linear-gradient(180deg, #17383d 0%, #10272c 100%);
-  color: #fff;
+    linear-gradient(90deg, rgba(10, 125, 115, 0.065) 1px, transparent 1px) 0 0 / 26px 26px,
+    linear-gradient(135deg, #f8fdf9 0%, #e8f5ee 58%, #e8f2fa 100%);
+  color: var(--cm-ink);
   padding: 20px;
-  box-shadow: 0 18px 42px rgba(13, 36, 39, 0.2);
+  box-shadow: 0 18px 42px rgba(30, 68, 55, 0.11);
 }
 
 .chat-hero::after {
@@ -345,7 +345,7 @@ onMounted(initializeHome)
   bottom: 20px;
   width: 118px;
   height: 1px;
-  background: linear-gradient(90deg, transparent, rgba(106, 219, 202, 0.75), rgba(242, 184, 75, 0.82));
+  background: linear-gradient(90deg, transparent, rgba(10, 125, 115, 0.66), rgba(67, 135, 199, 0.62), rgba(242, 184, 75, 0.82));
   content: "";
 }
 
@@ -357,7 +357,7 @@ onMounted(initializeHome)
 
 .chat-hero span,
 .next-chat-card span {
-  color: #80d8cb;
+  color: var(--cm-primary);
   font-size: 12px;
   font-weight: 800;
   letter-spacing: 0;
@@ -371,7 +371,7 @@ onMounted(initializeHome)
 
 .chat-hero p {
   margin: 0;
-  color: rgba(255, 255, 255, .78);
+  color: var(--cm-muted);
   font-size: 14px;
   line-height: 1.65;
 }
@@ -389,7 +389,7 @@ onMounted(initializeHome)
   display: block;
   height: 8px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.18);
+  background: rgba(10, 125, 115, 0.14);
 }
 
 .hero-channel-preview i:nth-child(1) {
@@ -398,7 +398,7 @@ onMounted(initializeHome)
 
 .hero-channel-preview i:nth-child(2) {
   width: 82px;
-  background: rgba(128, 216, 203, 0.34);
+  background: rgba(67, 135, 199, 0.24);
 }
 
 .hero-channel-preview i:nth-child(3) {
@@ -415,8 +415,9 @@ onMounted(initializeHome)
   gap: 8px;
   border: 0;
   border-radius: var(--cm-radius);
-  background: #fff;
-  color: var(--cm-primary);
+  background: var(--cm-primary);
+  color: #fff;
+  box-shadow: 0 10px 24px rgba(10, 125, 115, 0.18);
   cursor: pointer;
   font-size: 14px;
   font-weight: 800;
@@ -476,6 +477,7 @@ onMounted(initializeHome)
   border: 1px solid var(--cm-line);
   border-radius: var(--cm-radius);
   background: var(--cm-card);
+  box-shadow: 0 8px 24px rgba(28, 50, 42, 0.05);
 }
 
 .home-action-row button {

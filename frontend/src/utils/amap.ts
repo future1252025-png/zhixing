@@ -13,6 +13,15 @@ const amapKey = import.meta.env.VITE_AMAP_KEY?.trim()
 const amapSecurityCode = import.meta.env.VITE_AMAP_SECURITY_CODE?.trim()
 
 let amapPromise: Promise<any> | null = null
+const pluginPromises = new Map<string, Promise<void>>()
+
+const pluginConstructors: Record<string, string> = {
+  'AMap.Scale': 'Scale',
+  'AMap.ToolBar': 'ToolBar',
+  'AMap.PlaceSearch': 'PlaceSearch',
+  'AMap.Walking': 'Walking',
+  'AMap.Geolocation': 'Geolocation'
+}
 
 export function isAMapConfigured(): boolean {
   return Boolean(amapKey && amapSecurityCode)
@@ -30,16 +39,56 @@ export async function loadAMapSdk(): Promise<any> {
   amapPromise ??= loadAMap({
     key: amapKey,
     version: '2.0',
-    plugins: [
-      'AMap.Scale',
-      'AMap.ToolBar',
-      'AMap.PlaceSearch',
-      'AMap.Walking',
-      'AMap.Geolocation'
-    ]
+    plugins: []
   })
 
   return amapPromise
+}
+
+export function preloadAMapSdk(): void {
+  if (!isAMapConfigured() || amapPromise) {
+    return
+  }
+
+  window.setTimeout(() => {
+    void loadAMapSdk().catch(() => {
+      amapPromise = null
+    })
+  }, 450)
+}
+
+export async function loadAMapPlugin(pluginName: keyof typeof pluginConstructors): Promise<any> {
+  const AMap = await loadAMapSdk()
+  const constructorName = pluginConstructors[pluginName]
+
+  if (typeof AMap[constructorName] === 'function') {
+    return AMap
+  }
+
+  let pluginPromise = pluginPromises.get(pluginName)
+  if (!pluginPromise) {
+    pluginPromise = new Promise<void>((resolve, reject) => {
+      const timeoutId = window.setTimeout(() => {
+        reject(new Error(`${pluginName} plugin load timed out`))
+      }, 10_000)
+
+      AMap.plugin([pluginName], () => {
+        window.clearTimeout(timeoutId)
+        if (typeof AMap[constructorName] === 'function') {
+          resolve()
+          return
+        }
+        reject(new Error(`${pluginName} plugin is unavailable`))
+      })
+    }).catch((error) => {
+      pluginPromises.delete(pluginName)
+      throw error
+    })
+    pluginPromises.set(pluginName, pluginPromise)
+  }
+
+  await pluginPromise
+  return AMap
 }
 
 export type AMapCurrentPosition = {
@@ -63,7 +112,7 @@ function readAMapPosition(position: any): { latitude: number; longitude: number 
 }
 
 export async function requestAMapCurrentPosition(): Promise<AMapCurrentPosition> {
-  const AMap = await loadAMapSdk()
+  const AMap = await loadAMapPlugin('AMap.Geolocation')
 
   return new Promise((resolve, reject) => {
     const geolocation = new AMap.Geolocation({

@@ -159,12 +159,12 @@ onMounted(loadCourses)
   <section class="page">
     <van-nav-bar title="课表" />
     <div class="page-content courses-content">
-      <header class="course-toolbar">
+      <header v-reveal class="course-toolbar">
         <div><span>我的课表</span><h1>第 {{ selectedWeek }} 周</h1><p>{{ courseCountText }} · 点击课程可编辑或删除</p></div>
         <div class="toolbar-actions"><button type="button" aria-label="导入课表" @click="openImportPage"><van-icon name="description" /></button><button type="button" aria-label="新增课程" @click="openCreateForCurrentWeek"><van-icon name="plus" /></button></div>
       </header>
 
-      <section class="week-panel" aria-label="选择周次">
+      <section v-reveal="{ delay: 45 }" class="week-panel" aria-label="选择周次">
         <label class="week-select-label" for="courseWeekSelect">
           <span>当前周次</span>
           <select id="courseWeekSelect" v-model.number="selectedWeek">
@@ -187,7 +187,7 @@ onMounted(loadCourses)
           添加第一门课程
         </van-button>
       </van-empty>
-      <section v-else class="timetable-shell">
+      <section v-else v-reveal="{ delay: 85 }" class="timetable-shell">
         <div class="timetable-grid" aria-label="周课表">
           <div class="time-head"></div>
           <div v-for="weekday in WEEKDAYS" :key="weekday.value" class="weekday-head">

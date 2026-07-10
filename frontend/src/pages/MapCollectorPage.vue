@@ -2,7 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
 import { showFailToast, showSuccessToast, showToast } from 'vant'
 
-import { isAMapConfigured, loadAMapSdk } from '@/utils/amap'
+import { isAMapConfigured, loadAMapPlugin, loadAMapSdk } from '@/utils/amap'
 import {
   gcj02ToWgs84,
   isPointInPolygon,
@@ -618,6 +618,7 @@ async function initMap() {
   loading.value = true
   try {
     amap.value = await loadAMapSdk()
+    amap.value = await loadAMapPlugin('AMap.PlaceSearch')
     await nextTick()
     restoreCollectorDraft()
     map.value = new amap.value.Map(mapContainer.value, {
@@ -626,8 +627,16 @@ async function initMap() {
       viewMode: '2D',
       resizeEnable: true
     })
-    map.value.addControl(new amap.value.Scale())
-    map.value.addControl(new amap.value.ToolBar({ position: 'RB' }))
+    void Promise.all([
+      loadAMapPlugin('AMap.Scale'),
+      loadAMapPlugin('AMap.ToolBar')
+    ]).then(([scaleAMap, toolbarAMap]) => {
+      if (!map.value) return
+      map.value.addControl(new scaleAMap.Scale())
+      map.value.addControl(new toolbarAMap.ToolBar({ position: 'RB' }))
+    }).catch(() => {
+      // Point collection still works when optional controls fail to load.
+    })
     map.value.on('click', handleMapClick)
     renderMapOverlays()
   } catch {
