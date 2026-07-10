@@ -5,6 +5,7 @@ import { showFailToast, showSuccessToast } from 'vant'
 import { useRoute, useRouter } from 'vue-router'
 import { getBuildingDetail, type Building } from '@/api/buildings'
 import { createBuildingMessage, getBuildingMessages, validateMessageContent, type BuildingMessage, type MessageLocationSource } from '@/api/messages'
+import { parseApiDateTime } from '@/utils/dateTime'
 import { haversineDistanceMeters } from '@/utils/geo'
 import { MESSAGE_PAGE_SIZE, hasMoreMessagePages, mergeOlderMessages } from '@/utils/messagePagination'
 
@@ -67,7 +68,7 @@ function getErrorMessage(error: unknown): string {
   }
   return '留言请求失败，请稍后重试'
 }
-function formatTime(value: string): string { const date = new Date(value); return Number.isNaN(date.getTime()) ? '' : date.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) }
+function formatTime(value: string): string { const date = parseApiDateTime(value); return Number.isNaN(date.getTime()) ? '' : date.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) }
 function formatDistance(value: number | null): string { if (value === null) return ''; return value >= 1000 ? `${(value / 1000).toFixed(1)} km` : `${Math.round(value)} m` }
 async function scrollToBottom() { await nextTick(); if (messageListRef.value) messageListRef.value.scrollTop = messageListRef.value.scrollHeight }
 async function loadMessages() {

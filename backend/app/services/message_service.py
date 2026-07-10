@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -18,6 +20,12 @@ class MessageLocationTooFarError(ValueError):
     pass
 
 
+def normalize_utc_datetime(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
 def get_building(session: Session, building_id: int) -> Building | None:
     return session.get(Building, building_id)
 
@@ -29,7 +37,7 @@ def to_message_read(message: Message) -> MessageRead:
         content=message.content,
         display_name=ANONYMOUS_DISPLAY_NAME,
         room_name=message.room_name,
-        created_at=message.created_at,
+        created_at=normalize_utc_datetime(message.created_at),
         latitude=message.latitude,
         longitude=message.longitude,
         location_source=message.location_source,

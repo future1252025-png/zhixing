@@ -306,6 +306,7 @@ def test_create_message_with_token_returns_anonymous_message(
     assert data["longitude"] == building["longitude"]
     assert data["location_source"] == "manual"
     assert data["distance_to_building_meters"] == 0
+    assert datetime.fromisoformat(data["created_at"]).utcoffset() == timedelta(0)
     assert "password_hash" not in data
     assert "user" not in data
 
