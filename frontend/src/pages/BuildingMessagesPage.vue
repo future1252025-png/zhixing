@@ -5,6 +5,7 @@ import { showFailToast, showSuccessToast } from 'vant'
 import { useRoute, useRouter } from 'vue-router'
 import { getBuildingDetail, type Building } from '@/api/buildings'
 import { createBuildingMessage, getBuildingMessages, validateMessageContent, type BuildingMessage, type MessageLocationSource } from '@/api/messages'
+import TechIcon from '@/components/TechIcon.vue'
 import { parseApiDateTime } from '@/utils/dateTime'
 import { haversineDistanceMeters } from '@/utils/geo'
 import { MESSAGE_PAGE_SIZE, hasMoreMessagePages, mergeOlderMessages } from '@/utils/messagePagination'
@@ -28,7 +29,7 @@ const selectedRoomName = computed(() => {
   const value = route.query.room_name
   return typeof value === 'string' && value.trim() ? value.trim() : null
 })
-const roomTitle = computed(() => selectedRoomName.value || '建筑总聊')
+const roomTitle = computed(() => selectedRoomName.value || '建筑公共频道')
 const remainingCount = computed(() => Math.max(0, 200 - draft.value.length))
 const currentLocation = ref<{ latitude: number; longitude: number; location_source: MessageLocationSource; label: string } | null>(null)
 const distanceToBuildingMeters = computed(() => {
@@ -150,139 +151,429 @@ watch(() => route.query.room_name, () => { void loadPage() })
   <section class="page message-page">
     <van-nav-bar :title="roomTitle" left-arrow @click-left="router.push(`/buildings/${buildingId}/chats`)" />
     <div class="message-content">
-      <header v-reveal class="message-heading"><div><strong>{{ roomTitle }}</strong><span>{{ building?.name || '建筑会话' }} · HTTP 聊天 · 按时间顺序</span></div><span>{{ messages.length }} 条</span></header>
-      <section v-reveal="{ delay: 45 }" class="location-strip"><div><van-icon name="location-o" /><span>{{ locationText }}</span></div><div><button type="button" :disabled="locating" @click="requestBrowserLocation">{{ locating ? '定位中' : '定位' }}</button><button type="button" @click="useBuildingLocation">使用建筑位置</button></div></section>
-      <p v-if="loading" class="muted-text">正在加载留言...</p>
-      <van-empty v-else-if="errorMessage" image="error" :description="errorMessage"><van-button type="primary" size="small" @click="loadPage">重试</van-button></van-empty>
-      <van-empty v-else-if="messages.length === 0" description="还没有留言，发出第一条吧" />
-      <div v-else ref="messageListRef" v-reveal="{ delay: 80 }" class="message-list">
-        <button v-if="hasMoreMessages" type="button" class="load-more-button" :disabled="loadingOlder" @click="loadOlderMessages">
-          {{ loadingOlder ? '正在加载...' : '加载更早留言' }}
+      <header
+        v-reveal="{ from: 'left', distance: 38, stagger: 50 }"
+        class="message-heading"
+      >
+        <span class="message-sun" aria-hidden="true"></span>
+        <span class="message-leaves" aria-hidden="true"><i></i><i></i></span>
+        <span class="channel-icon"><van-icon name="chat-o" /></span>
+        <div class="heading-copy">
+          <small>{{ building?.name || '校园地点' }}</small>
+          <strong>{{ roomTitle }}</strong>
+          <span>这里的留言按时间慢慢排列</span>
+        </div>
+        <div class="message-count">
+          <strong>{{ messages.length }}</strong>
+          <small>条留言</small>
+        </div>
+      </header>
+
+      <section
+        v-reveal="{ from: 'right', distance: 36, stagger: 45 }"
+        class="location-card"
+        :class="{
+          verified: currentLocation && isLocationInsideBuildingRange,
+          denied: currentLocation && !isLocationInsideBuildingRange,
+          locating
+        }"
+        aria-live="polite"
+      >
+        <span class="location-mark">
+          <i></i>
+          <van-icon name="location-o" />
+        </span>
+        <div class="location-copy">
+          <small>
+            {{ locating ? '正在获取位置' : !currentLocation ? '还没有确认位置' : isLocationInsideBuildingRange ? '位置已确认' : '距离有点远' }}
+          </small>
+          <strong>
+            {{ locating ? '稍等一下' : !currentLocation ? '在附近才能发布留言' : isLocationInsideBuildingRange ? '现在可以留言了' : '请靠近这个地点' }}
+          </strong>
+          <p>{{ locationText }}</p>
+          <span v-if="distanceToBuildingMeters !== null">
+            距离 {{ formatDistance(distanceToBuildingMeters) }} · 限制 {{ MAX_MESSAGE_DISTANCE_METERS }} m
+          </span>
+        </div>
+        <div class="location-actions">
+          <button type="button" :disabled="locating" @click="requestBrowserLocation">
+            <van-icon name="aim" />
+            {{ locating ? '定位中' : '定位我' }}
+          </button>
+          <button type="button" @click="useBuildingLocation">
+            <van-icon name="wap-home-o" />
+            使用建筑位置
+          </button>
+        </div>
+      </section>
+
+      <div v-if="loading" class="messages-loading" role="status" aria-live="polite">
+        <div><span><i></i><i></i><i></i></span><strong>正在加载大家的留言...</strong></div>
+        <span v-for="item in 3" :key="item" class="message-skeleton" :class="`skeleton-${item}`"></span>
+      </div>
+
+      <van-empty v-else-if="errorMessage" image="error" :description="errorMessage">
+        <van-button type="primary" size="small" @click="loadPage">重新加载</van-button>
+      </van-empty>
+
+      <van-empty v-else-if="messages.length === 0" description="这里还没有留言">
+        <span class="empty-flower" aria-hidden="true"><TechIcon name="spark" :size="23" /></span>
+      </van-empty>
+
+      <div
+        v-else
+        ref="messageListRef"
+        v-reveal="{ from: 'left', distance: 40 }"
+        class="message-list"
+      >
+        <button
+          v-if="hasMoreMessages"
+          type="button"
+          class="load-more-button"
+          :disabled="loadingOlder"
+          @click="loadOlderMessages"
+        >
+          {{ loadingOlder ? '正在加载...' : '看看更早的留言' }}
         </button>
-        <article v-for="message in messages" :key="message.id" class="message-row"><div class="message-meta"><span>{{ message.display_name || '匿名同学' }}</span><span v-if="message.distance_to_building_meters !== null">距建筑约 {{ formatDistance(message.distance_to_building_meters) }}</span><time>{{ formatTime(message.created_at) }}</time></div><p class="message-bubble">{{ message.content }}</p></article>
+
+        <article v-for="(message, index) in messages" :key="message.id" class="message-row">
+          <div class="message-meta">
+            <span class="message-author"><i :style="{ '--author-hue': (index * 47) % 360 }"></i>{{ message.display_name || '匿名同学' }}</span>
+            <span v-if="message.distance_to_building_meters !== null">
+              距建筑 {{ formatDistance(message.distance_to_building_meters) }}
+            </span>
+            <time>{{ formatTime(message.created_at) }}</time>
+          </div>
+          <p>{{ message.content }}</p>
+        </article>
       </div>
     </div>
-    <form class="message-composer" :class="{ disabled: composerDisabled }" @click.capture="handleComposerClick" @submit.prevent="submitMessage"><van-field v-model="draft" type="textarea" rows="1" autosize maxlength="200" :disabled="composerDisabled" :placeholder="composerDisabled ? '确认在建筑附近后才能留言' : '写一条匿名留言'" :border="false" /><div class="composer-actions"><span>{{ remainingCount }}/200</span><van-button type="primary" size="small" native-type="submit" :loading="sending" :disabled="composerDisabled">发送</van-button></div></form>
+
+    <form
+      class="message-composer"
+      :class="{ disabled: composerDisabled }"
+      @click.capture="handleComposerClick"
+      @submit.prevent="submitMessage"
+    >
+      <div class="composer-status">
+        <span><i :class="{ ready: !composerDisabled }"></i>{{ composerDisabled ? '确认位置后可以留言' : '可以发布留言' }}</span>
+        <small>{{ remainingCount }} 字可用</small>
+      </div>
+      <van-field
+        v-model="draft"
+        type="textarea"
+        rows="1"
+        autosize
+        maxlength="200"
+        :disabled="composerDisabled"
+        :placeholder="composerDisabled ? '先确认你在这个地点附近' : '写下此刻想留在这里的话…'"
+        :border="false"
+      />
+      <div class="composer-actions">
+        <span><i :style="{ width: `${Math.max(2, remainingCount / 2)}%` }"></i></span>
+        <van-button
+          type="primary"
+          size="small"
+          native-type="submit"
+          :loading="sending"
+          loading-text="正在发送"
+          :disabled="composerDisabled"
+        >
+          发布留言
+          <TechIcon v-if="!sending" name="arrow" :size="16" />
+        </van-button>
+      </div>
+    </form>
   </section>
 </template>
 
 <style scoped>
 .message-page {
-  min-height: 100vh;
-  padding-bottom: 108px;
+  min-height: 100dvh;
+  padding-bottom: 166px;
+  background:
+    radial-gradient(circle at 103% 4%, rgba(183, 167, 200, 0.14), transparent 18rem),
+    radial-gradient(circle at -12% 55%, rgba(126, 166, 126, 0.1), transparent 19rem);
 }
 
 .message-content {
   display: grid;
-  gap: 12px;
-  width: min(100%, 520px);
+  gap: 14px;
+  width: min(100%, 590px);
   margin: 0 auto;
-  padding: 14px 14px 24px;
+  padding: 16px 16px 26px;
 }
 
 .message-heading {
-  display: flex;
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 11px;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  border: 1px solid var(--cm-line);
-  border-left: 5px solid var(--cm-chat);
-  border-radius: var(--cm-radius);
-  background: var(--cm-surface);
-  padding: 13px;
-  box-shadow: 0 8px 24px rgba(28, 50, 42, 0.05);
+  min-height: 132px;
+  overflow: hidden;
+  border-radius: 29px 29px 23px 29px;
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.43), transparent 45%),
+    #ebe5ee;
+  padding: 18px;
+  box-shadow: var(--fresh-shadow-soft);
 }
 
-.message-heading div {
+.message-heading::after {
+  position: absolute;
+  right: -43px;
+  bottom: -49px;
+  width: 160px;
+  height: 100px;
+  border-radius: 50%;
+  background: rgba(111, 159, 170, 0.1);
+  content: "";
+}
+
+.channel-icon {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  width: 47px;
+  height: 47px;
+  place-items: center;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.64);
+  color: #786c86;
+  font-size: 21px;
+}
+
+.heading-copy {
+  position: relative;
+  z-index: 2;
   display: grid;
   min-width: 0;
-  gap: 4px;
+  gap: 3px;
 }
 
-.message-heading strong {
-  overflow: hidden;
-  color: var(--cm-ink);
-  font-size: 18px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
+.heading-copy small { color: #82788d; font-size: 8px; }
+.heading-copy strong { overflow: hidden; color: var(--fresh-ink); font-size: 17px; text-overflow: ellipsis; white-space: nowrap; }
+.heading-copy span { color: var(--fresh-muted); font-size: 9px; }
 
-.message-heading span {
-  color: var(--cm-muted);
-  font-size: 11px;
-}
-
-.message-heading > span {
-  flex: 0 0 auto;
-  border-radius: var(--cm-radius-sm);
-  background: var(--cm-chat-soft);
-  color: var(--cm-chat-dark);
-  font-weight: 800;
-  padding: 6px 8px;
-}
-
-.location-strip {
+.message-count {
+  position: relative;
+  z-index: 2;
   display: grid;
-  gap: 9px;
-  border: 1px solid var(--cm-line);
-  border-radius: var(--cm-radius);
-  background: #fff;
-  padding: 11px 12px;
+  justify-items: end;
 }
 
-.location-strip > div {
+.message-count strong {
+  color: var(--fresh-ink);
+  font-family: "STKaiti", "KaiTi", serif;
+  font-size: 33px;
+  line-height: 1;
+}
+
+.message-count small { color: var(--fresh-muted); font-size: 8px; }
+
+.message-sun {
+  position: absolute;
+  top: 12px;
+  right: 15px;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: rgba(242, 200, 111, 0.8);
+  box-shadow: 0 0 0 7px rgba(242, 200, 111, 0.1);
+}
+
+.message-leaves {
+  position: absolute;
+  right: 38px;
+  bottom: 4px;
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
+}
+
+.message-leaves i {
+  width: 18px;
+  height: 34px;
+  border-radius: 100% 0 100% 0;
+  background: rgba(115, 141, 104, 0.2);
+  transform: rotate(-35deg);
+}
+
+.location-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 11px;
+  border: 1px solid var(--fresh-line);
+  border-radius: 24px;
+  background: var(--fresh-paper);
+  padding: 13px;
+  box-shadow: var(--fresh-shadow-soft);
+}
+
+.location-card.verified {
+  border-color: #b9cdb6;
+  background: #edf4e9;
+}
+
+.location-card.denied {
+  border-color: #e2c6bf;
+  background: #fbefea;
+}
+
+.location-mark {
+  position: relative;
+  display: grid;
+  width: 43px;
+  height: 43px;
+  place-items: center;
+  border-radius: 50% 50% 50% 14px;
+  background: var(--fresh-sky);
+  color: #5a858e;
+  transform: rotate(-45deg);
+}
+
+.location-mark > * {
+  transform: rotate(45deg);
+}
+
+.location-mark i {
+  position: absolute;
+  inset: -6px;
+  border: 1px solid rgba(111, 159, 170, 0.25);
+  border-radius: inherit;
+  animation: location-ring 2s ease-out infinite;
+}
+
+.verified .location-mark {
+  background: var(--fresh-mint);
+  color: var(--fresh-green-dark);
+}
+
+.location-copy {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.location-copy small { color: var(--fresh-green); font-size: 8px; }
+.location-copy strong { color: var(--fresh-ink); font-size: 12px; }
+.location-copy p { overflow: hidden; margin: 0; color: var(--fresh-muted); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.location-copy > span { color: var(--fresh-muted); font-size: 8px; }
+
+.location-actions {
+  display: flex;
+  grid-column: 1 / -1;
   gap: 7px;
+  padding-top: 5px;
 }
 
-.location-strip > div:first-child {
-  color: var(--cm-text);
-  font-size: 12px;
-  line-height: 1.5;
-}
-
-.location-strip .van-icon {
-  color: var(--cm-primary);
-  font-size: 16px;
-}
-
-.location-strip button {
-  border: 1px solid var(--cm-line);
-  border-radius: var(--cm-radius-sm);
-  background: #fff;
-  color: var(--cm-primary);
+.location-actions button {
+  display: flex;
+  flex: 1;
+  min-height: 37px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 1px solid var(--fresh-line);
+  border-radius: 13px;
+  background: #fafbf6;
+  color: var(--fresh-text);
   cursor: pointer;
-  font-size: 11px;
-  font-weight: 800;
-  padding: 6px 9px;
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.location-actions button:first-child {
+  border-color: #a9c1ad;
+  color: var(--fresh-green-dark);
+}
+
+.location-actions button:disabled {
+  border-color: #d8ded4;
+  background: #edf0e9;
+  color: #839085;
+  cursor: wait;
+  opacity: 1;
+}
+
+.messages-loading {
+  display: grid;
+  gap: 13px;
+  min-height: 260px;
+  align-content: center;
+  border-radius: 25px;
+  background: rgba(255, 253, 248, 0.72);
+  padding: 18px;
+}
+
+.messages-loading > div {
+  display: flex;
+  gap: 11px;
+  align-items: center;
+}
+
+.messages-loading > div > span {
+  display: flex;
+  gap: 3px;
+  align-items: flex-end;
+  height: 26px;
+}
+
+.messages-loading > div i {
+  width: 5px;
+  height: 11px;
+  border-radius: 999px;
+  background: var(--fresh-lilac);
+  animation: message-load 800ms ease-in-out infinite alternate;
+}
+
+.messages-loading > div i:nth-child(2) { height: 23px; animation-delay: 140ms; }
+.messages-loading > div i:nth-child(3) { height: 16px; animation-delay: 280ms; }
+.messages-loading strong { color: var(--fresh-ink); font-size: 11px; }
+
+.message-skeleton {
+  display: block;
+  width: 78%;
+  height: 51px;
+  border-radius: 18px;
+  background: linear-gradient(90deg, #eef1ea, #f9faf5, #eef1ea);
+  background-size: 200% 100%;
+  animation: skeleton-move 1.3s linear infinite;
+}
+
+.skeleton-2 { width: 64%; justify-self: end; }
+.skeleton-3 { width: 86%; }
+
+.empty-flower {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--fresh-mint);
+  color: var(--fresh-green);
 }
 
 .message-list {
   display: grid;
-  gap: 15px;
-  max-height: calc(100vh - 290px);
+  max-height: min(56dvh, 580px);
   overflow-y: auto;
-  padding: 4px 2px 18px;
+  gap: 13px;
+  border-radius: 25px;
+  background: rgba(255, 253, 248, 0.6);
+  padding: 13px;
+  scroll-behavior: smooth;
 }
 
 .load-more-button {
   justify-self: center;
-  min-height: 34px;
-  border: 1px solid var(--cm-line);
-  border-radius: var(--cm-radius-sm);
-  background: #fff;
-  color: var(--cm-primary);
+  min-height: 32px;
+  border: 1px solid var(--fresh-line);
+  border-radius: 999px;
+  background: #fafbf6;
+  color: var(--fresh-muted);
   cursor: pointer;
-  font-size: 12px;
-  font-weight: 800;
-  padding: 7px 12px;
-}
-
-.load-more-button:disabled {
-  color: var(--cm-muted);
-  cursor: wait;
+  font-size: 9px;
+  padding: 0 12px;
 }
 
 .message-row {
@@ -292,78 +583,140 @@ watch(() => route.query.room_name, () => { void loadPage() })
 
 .message-meta {
   display: flex;
-  flex-wrap: wrap;
+  align-items: center;
   gap: 8px;
-  color: var(--cm-muted);
-  font-size: 10px;
+  color: var(--fresh-muted);
+  font-size: 8px;
 }
 
-.message-meta span:first-child {
-  color: var(--cm-text);
-  font-weight: 800;
+.message-author {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-right: auto;
+  color: var(--fresh-text);
+  font-weight: 700;
 }
 
-.message-meta time {
-  margin-left: auto;
+.message-author i {
+  width: 9px;
+  height: 9px;
+  border-radius: 50% 50% 50% 20%;
+  background: hsl(var(--author-hue) 32% 63%);
 }
 
-.message-bubble {
-  width: fit-content;
-  max-width: 84%;
+.message-row p {
+  max-width: 90%;
   margin: 0;
-  border: 1px solid var(--cm-line);
-  border-left: 4px solid var(--cm-chat);
-  border-radius: 4px 8px 8px;
+  border-radius: 8px 19px 19px 19px;
   background: #fff;
-  box-shadow: 0 6px 18px rgba(24, 43, 37, 0.07);
-  color: var(--cm-ink);
-  font-size: 14px;
-  line-height: 1.6;
+  color: var(--fresh-ink);
+  font-size: 12px;
+  line-height: 1.7;
+  padding: 11px 13px;
+  box-shadow: 0 7px 19px rgba(49, 72, 49, 0.07);
   overflow-wrap: anywhere;
-  padding: 10px 12px;
 }
 
 .message-composer {
   position: fixed;
-  right: 0;
-  bottom: 0;
-  left: 0;
-  z-index: 110;
-  width: min(100%, 520px);
-  margin: 0 auto;
-  border: 1px solid var(--cm-line);
-  border-bottom: 0;
-  border-radius: var(--cm-radius) var(--cm-radius) 0 0;
-  background: rgba(255, 255, 255, 0.96);
-  padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
+  right: max(10px, calc((100vw - 580px) / 2));
+  bottom: max(10px, env(safe-area-inset-bottom));
+  left: max(10px, calc((100vw - 580px) / 2));
+  z-index: 500;
+  overflow: hidden;
+  border: 1px solid rgba(79, 125, 88, 0.13);
+  border-radius: 25px;
+  background: rgba(255, 253, 248, 0.96);
+  padding: 10px 12px 11px;
+  box-shadow: 0 18px 48px rgba(49, 72, 49, 0.16);
   backdrop-filter: blur(16px);
 }
 
-.message-composer :deep(.van-field) {
-  border: 1px solid var(--cm-line);
-  border-radius: var(--cm-radius);
-  background: #f8faf8;
-  padding: 9px 11px;
-}
-
 .message-composer.disabled {
-  cursor: not-allowed;
+  background: rgba(245, 247, 241, 0.97);
 }
 
-.message-composer.disabled :deep(.van-field) {
-  background: #eef3f1;
-  opacity: 1;
-}
-
-.composer-actions {
+.composer-status {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-top: 7px;
+  gap: 8px;
+  padding: 0 3px 5px;
+  color: var(--fresh-muted);
+  font-size: 8px;
 }
 
-.composer-actions span {
-  color: var(--cm-muted);
-  font-size: 10px;
+.composer-status > span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.composer-status i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #b9c1b7;
+}
+
+.composer-status i.ready {
+  background: var(--fresh-green);
+  box-shadow: 0 0 0 4px rgba(79, 125, 88, 0.1);
+}
+
+.message-composer :deep(.van-cell) {
+  min-height: 42px;
+  border-radius: 15px;
+  background: #f7f9f3;
+  padding: 8px 10px;
+}
+
+.composer-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding-top: 7px;
+}
+
+.composer-actions > span {
+  height: 3px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e5eae2;
+}
+
+.composer-actions > span i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--fresh-leaf);
+  transition: width 180ms ease;
+}
+
+.composer-actions :deep(.van-button) {
+  min-height: 36px;
+  padding: 0 13px;
+}
+
+@keyframes location-ring {
+  to { opacity: 0; transform: scale(1.28); }
+}
+
+@keyframes message-load {
+  to { transform: scaleY(1.4); }
+}
+
+@keyframes skeleton-move {
+  to { background-position: -200% 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .location-mark i,
+  .messages-loading i,
+  .message-skeleton {
+    animation: none;
+  }
 }
 </style>

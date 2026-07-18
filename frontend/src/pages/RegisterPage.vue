@@ -3,6 +3,8 @@ import { reactive, ref } from 'vue'
 import { isAxiosError } from 'axios'
 import { showFailToast, showSuccessToast } from 'vant'
 import { useRouter } from 'vue-router'
+
+import TechIcon from '@/components/TechIcon.vue'
 import { useAuthStore } from '@/stores/auth'
 
 const router = useRouter()
@@ -11,52 +13,328 @@ const submitting = ref(false)
 const form = reactive({ username: '', password: '', nickname: '', student_id: '' })
 
 function getErrorMessage(error: unknown): string {
-  if (isAxiosError(error) && typeof error.response?.data?.detail === 'string') return error.response.data.detail
+  if (isAxiosError(error) && typeof error.response?.data?.detail === 'string') {
+    return error.response.data.detail
+  }
   return '注册失败，请稍后重试'
 }
 
 async function handleSubmit() {
   submitting.value = true
   try {
-    await authStore.register({ username: form.username, password: form.password, nickname: form.nickname, student_id: form.student_id || null })
-    showSuccessToast('注册成功，请登录')
+    await authStore.register({
+      username: form.username,
+      password: form.password,
+      nickname: form.nickname,
+      student_id: form.student_id || null
+    })
+    showSuccessToast('账号创建成功，请登录')
     await router.replace('/login')
-  } catch (error) { showFailToast(getErrorMessage(error)) } finally { submitting.value = false }
+  } catch (error) {
+    showFailToast(getErrorMessage(error))
+  } finally {
+    submitting.value = false
+  }
 }
 </script>
 
 <template>
-  <section class="page auth-register-page">
+  <section class="page register-page">
     <van-nav-bar title="创建账号" left-arrow @click-left="router.push('/login')" />
+
     <div class="page-content register-content">
-      <header class="register-heading">
-        <span>01 / 创建账号</span>
-        <h1>先建立你的校园日程档案。</h1>
-        <p>第一版使用模拟校园账号，不会连接湖北大学统一身份认证。</p>
+      <header v-reveal="{ from: 'left', distance: 34 }" class="register-hero">
+        <div>
+          <span class="fresh-kicker">从今天开始记录</span>
+          <h1 class="fresh-heading">为你的校园日常<br />留一个位置。</h1>
+          <p class="fresh-copy">创建账号后，就可以保存课表、常去地点和每一次出发安排。</p>
+        </div>
+        <div class="seed-scene" aria-hidden="true">
+          <span class="seed-sun"></span>
+          <span class="stem"></span>
+          <span class="leaf leaf-a"></span>
+          <span class="leaf leaf-b"></span>
+          <span class="soil"></span>
+        </div>
       </header>
-      <div class="register-route" aria-hidden="true"><i></i><b></b><i></i><b></b><i></i></div>
-      <van-form class="register-form" @submit="handleSubmit">
+
+      <van-form
+        v-reveal="{ from: 'right', distance: 34, stagger: 45 }"
+        class="register-card"
+        @submit="handleSubmit"
+      >
+        <div class="form-heading">
+          <span>只需要一分钟</span>
+          <h2>填写基本信息</h2>
+        </div>
+
         <van-cell-group inset>
-          <van-field v-model="form.username" name="username" label="用户名" placeholder="3 到 64 个字符" autocomplete="username" :rules="[{ required: true, message: '请输入用户名' }]" />
-          <van-field v-model="form.nickname" name="nickname" label="昵称" placeholder="用于个人中心展示" :rules="[{ required: true, message: '请输入昵称' }]" />
-          <van-field v-model="form.student_id" name="student_id" label="学号" placeholder="可选" />
-          <van-field v-model="form.password" type="password" name="password" label="密码" placeholder="至少 6 位" autocomplete="new-password" :rules="[{ required: true, message: '请输入密码' }]" />
+          <van-field
+            v-model="form.nickname"
+            name="nickname"
+            label="昵称"
+            maxlength="50"
+            placeholder="大家怎么称呼你"
+            left-icon="smile-o"
+            :rules="[{ required: true, message: '请输入昵称' }]"
+          />
+          <van-field
+            v-model="form.username"
+            name="username"
+            label="账号"
+            maxlength="50"
+            placeholder="设置登录用户名"
+            autocomplete="username"
+            left-icon="contact"
+            :rules="[{ required: true, message: '请输入用户名' }]"
+          />
+          <van-field
+            v-model="form.student_id"
+            name="student_id"
+            label="学号"
+            maxlength="50"
+            placeholder="选填"
+            left-icon="notes-o"
+          />
+          <van-field
+            v-model="form.password"
+            type="password"
+            name="password"
+            label="密码"
+            placeholder="至少 6 位"
+            autocomplete="new-password"
+            left-icon="shield-o"
+            :rules="[
+              { required: true, message: '请输入密码' },
+              { validator: (value: string) => value.length >= 6, message: '密码至少 6 位' }
+            ]"
+          />
         </van-cell-group>
-        <div class="page-actions"><van-button type="primary" native-type="submit" block :loading="submitting">创建账号</van-button></div>
+
+        <div class="gentle-note">
+          <span><i></i><i></i></span>
+          <p>学号可以稍后补充，我们不会公开你的个人信息。</p>
+        </div>
+
+        <div class="page-actions">
+          <van-button
+            type="primary"
+            native-type="submit"
+            block
+            :loading="submitting"
+            loading-text="正在创建"
+          >
+            创建账号
+            <TechIcon v-if="!submitting" name="arrow" :size="18" />
+          </van-button>
+          <van-button plain block native-type="button" @click="router.push('/login')">
+            已有账号，返回登录
+          </van-button>
+        </div>
       </van-form>
     </div>
   </section>
 </template>
 
 <style scoped>
-.register-content { padding-top: 26px; }
-.register-heading span { color: var(--cm-primary); font-size: 12px; font-weight: 700; }
-.register-heading h1 { max-width: 340px; margin: 10px 0 8px; font-size: 28px; line-height: 1.2; }
-.register-heading p { margin: 0; color: var(--cm-muted); font-size: 14px; line-height: 1.6; }
-.register-route { display: flex; align-items: center; margin: 24px 3px; }
-.register-route i { width: 12px; height: 12px; border: 3px solid #fff; border-radius: 50%; background: var(--cm-primary); box-shadow: 0 0 0 1px var(--cm-primary); }
-.register-route i:nth-of-type(2) { background: var(--cm-blue); box-shadow: 0 0 0 1px var(--cm-blue); }
-.register-route i:nth-of-type(3) { background: var(--cm-amber); box-shadow: 0 0 0 1px var(--cm-amber); }
-.register-route b { height: 3px; flex: 1; background: var(--cm-line-strong); }
-.register-form { padding-bottom: 24px; }
+.register-page {
+  background:
+    radial-gradient(circle at 100% 9%, rgba(134, 170, 127, 0.19), transparent 17rem),
+    radial-gradient(circle at -5% 85%, rgba(111, 159, 170, 0.12), transparent 19rem);
+}
+
+.register-content {
+  display: grid;
+  gap: 18px;
+}
+
+.register-hero {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 118px;
+  min-height: 224px;
+  align-items: center;
+  overflow: hidden;
+  border-radius: 32px 32px 25px 32px;
+  background: #eef4e8;
+  padding: 25px 22px;
+}
+
+.register-hero::after {
+  position: absolute;
+  right: -24px;
+  bottom: -42px;
+  width: 170px;
+  height: 110px;
+  border-radius: 50%;
+  background: rgba(127, 161, 119, 0.12);
+  content: "";
+  transform: rotate(-9deg);
+}
+
+.register-hero .fresh-heading {
+  font-size: clamp(29px, 8vw, 39px);
+}
+
+.register-hero .fresh-copy {
+  max-width: 280px;
+}
+
+.seed-scene {
+  position: relative;
+  z-index: 1;
+  width: 112px;
+  height: 142px;
+  align-self: end;
+}
+
+.seed-sun {
+  position: absolute;
+  top: 2px;
+  right: 5px;
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: var(--fresh-sun);
+  box-shadow: 0 0 0 10px rgba(242, 200, 111, 0.13);
+  animation: sun-breathe 3.4s ease-in-out infinite;
+}
+
+.stem {
+  position: absolute;
+  bottom: 23px;
+  left: 54px;
+  width: 3px;
+  height: 77px;
+  border-radius: 999px;
+  background: #638568;
+  transform-origin: bottom;
+  animation: stem-grow 1s 200ms var(--fresh-spring) both;
+}
+
+.leaf {
+  position: absolute;
+  width: 34px;
+  height: 48px;
+  border-radius: 100% 0 100% 0;
+  background: #85a97e;
+  transform-origin: 100% 100%;
+  animation: leaf-open 720ms var(--fresh-spring) both;
+}
+
+.leaf-a {
+  top: 48px;
+  left: 20px;
+  transform: rotate(-25deg);
+  animation-delay: 620ms;
+}
+
+.leaf-b {
+  top: 29px;
+  right: 18px;
+  background: #a2ba8f;
+  transform: rotate(68deg);
+  animation-delay: 780ms;
+}
+
+.soil {
+  position: absolute;
+  right: 5px;
+  bottom: 13px;
+  left: 7px;
+  height: 24px;
+  border-radius: 50%;
+  background: #dce8d4;
+}
+
+.register-card {
+  border: 1px solid rgba(79, 125, 88, 0.11);
+  border-radius: 28px;
+  background: rgba(255, 253, 248, 0.93);
+  padding: 20px;
+  box-shadow: var(--fresh-shadow);
+}
+
+.form-heading {
+  margin-bottom: 15px;
+}
+
+.form-heading span {
+  color: var(--fresh-green);
+  font-size: 11px;
+  font-weight: 720;
+}
+
+.form-heading h2 {
+  margin: 4px 0 0;
+  color: var(--fresh-ink);
+  font-size: 21px;
+}
+
+.register-card :deep(.van-cell) {
+  min-height: 57px;
+}
+
+.register-card :deep(.van-field__label) {
+  width: 44px;
+}
+
+.gentle-note {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin: 13px 3px 0;
+}
+
+.gentle-note > span {
+  position: relative;
+  flex: 0 0 22px;
+  height: 22px;
+}
+
+.gentle-note i {
+  position: absolute;
+  width: 10px;
+  height: 16px;
+  border-radius: 100% 0 100% 0;
+  background: #a5bb9d;
+}
+
+.gentle-note i:last-child {
+  right: 0;
+  bottom: 0;
+  transform: rotate(85deg);
+}
+
+.gentle-note p {
+  margin: 0;
+  color: var(--fresh-muted);
+  font-size: 10px;
+  line-height: 1.55;
+}
+
+@keyframes stem-grow {
+  from { transform: scaleY(0); }
+  to { transform: scaleY(1); }
+}
+
+@keyframes leaf-open {
+  from { opacity: 0; transform: scale(0.2) rotate(10deg); }
+}
+
+@keyframes sun-breathe {
+  50% { transform: translateY(-4px) scale(1.04); }
+}
+
+@media (max-width: 370px) {
+  .register-hero {
+    grid-template-columns: 1fr 82px;
+    padding: 21px 18px;
+  }
+
+  .seed-scene {
+    transform: scale(0.78);
+    transform-origin: right bottom;
+  }
+}
 </style>

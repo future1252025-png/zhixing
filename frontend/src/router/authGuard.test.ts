@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
 
-import router, { resolveAuthRedirect, shouldLoadCurrentUser } from './index'
+import router, {
+  resolveAuthRedirect,
+  resolveRouteScrollPosition,
+  shouldLoadCurrentUser
+} from './index'
 
 describe('auth route guard decisions', () => {
   it('redirects anonymous users away from protected pages', () => {
@@ -71,6 +75,17 @@ describe('auth route guard decisions', () => {
     )
 
     expect(shouldLoad).toBe(false)
+  })
+
+  it('starts a newly opened route from the top', () => {
+    expect(resolveRouteScrollPosition(null)).toEqual({ left: 0, top: 0 })
+  })
+
+  it('restores saved scroll position for browser history navigation', () => {
+    expect(resolveRouteScrollPosition({ left: 0, top: 320 })).toEqual({
+      left: 0,
+      top: 320
+    })
   })
 
   it('registers building detail as a protected route', () => {

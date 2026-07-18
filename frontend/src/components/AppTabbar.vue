@@ -2,77 +2,131 @@
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 
+import TechIcon from '@/components/TechIcon.vue'
+
 const route = useRoute()
 const activePath = computed(() => route.path)
+
+const navItems = [
+  { path: '/home', label: '校园', icon: 'orbit' },
+  { path: '/courses', label: '课表', icon: 'calendar' },
+  { path: '/schedule', label: '出发', icon: 'route' },
+  { path: '/profile', label: '我的', icon: 'user' }
+] as const
+
+function handleTabClick(path: string) {
+  if (route.path === path) {
+    window.scrollTo({ left: 0, top: 0, behavior: 'auto' })
+  }
+}
 </script>
 
 <template>
-  <van-tabbar class="app-tabbar" :model-value="activePath" route safe-area-inset-bottom>
-    <van-tabbar-item to="/home" name="/home" icon="chat-o">会话</van-tabbar-item>
-    <van-tabbar-item to="/courses" name="/courses" icon="notes-o">课表</van-tabbar-item>
-    <van-tabbar-item to="/schedule" name="/schedule" icon="guide-o">建议</van-tabbar-item>
-    <van-tabbar-item to="/profile" name="/profile" icon="user-o">我的</van-tabbar-item>
-  </van-tabbar>
+  <nav class="app-tabbar" aria-label="主导航">
+    <router-link
+      v-for="item in navItems"
+      :key="item.path"
+      :to="item.path"
+      class="app-tabbar-item"
+      :class="{ active: activePath === item.path }"
+      @click="handleTabClick(item.path)"
+    >
+      <span class="nav-icon-wrap">
+        <TechIcon :name="item.icon" :size="21" />
+      </span>
+      <span>{{ item.label }}</span>
+    </router-link>
+  </nav>
 </template>
 
 <style scoped>
 .app-tabbar {
-  border-top: 1px solid var(--cm-line);
-  background: rgba(255, 255, 255, 0.9);
-  box-shadow: 0 -10px 28px rgba(28, 50, 42, 0.08);
-  backdrop-filter: blur(18px);
+  position: fixed;
+  right: max(14px, calc((100vw - 560px) / 2));
+  bottom: max(12px, env(safe-area-inset-bottom));
+  left: max(14px, calc((100vw - 560px) / 2));
+  z-index: 1000;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  height: 70px;
+  overflow: hidden;
+  border: 1px solid rgba(79, 125, 88, 0.13);
+  border-radius: 25px;
+  background: rgba(255, 254, 250, 0.94);
+  box-shadow:
+    0 16px 42px rgba(46, 70, 49, 0.13),
+    inset 0 1px rgba(255, 255, 255, 0.9);
+  backdrop-filter: blur(16px);
 }
 
-.app-tabbar :deep(.van-tabbar-item) {
+.app-tabbar-item {
   position: relative;
-  color: var(--cm-muted);
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 4px;
+  color: #879186;
   font-size: 11px;
-  font-weight: 700;
-  transition: color var(--cm-motion), transform var(--cm-motion);
+  font-weight: 680;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    color 380ms var(--fresh-spring),
+    transform 380ms var(--fresh-spring);
 }
 
-.app-tabbar :deep(.van-tabbar-item::before) {
+.app-tabbar-item::before {
   position: absolute;
-  top: 7px;
-  left: 50%;
-  width: 18px;
-  height: 3px;
-  border-radius: 999px;
+  inset: 7px 8px;
+  z-index: -1;
+  border-radius: 18px 18px 14px 18px;
   background: transparent;
-  transform: translateX(-50%);
   content: "";
-  transition: background var(--cm-motion), width var(--cm-motion);
+  transform: scale(0.7) translateY(7px);
+  transition:
+    background 480ms var(--fresh-spring),
+    transform 580ms var(--fresh-spring);
 }
 
-.app-tabbar :deep(.van-tabbar-item__icon) {
-  margin-bottom: 2px;
-  transition: transform 260ms cubic-bezier(0.16, 1, 0.3, 1);
+.app-tabbar-item.active {
+  color: #3f704a;
 }
 
-.app-tabbar :deep(.van-tabbar-item:active) {
-  transform: scale(0.94);
+.app-tabbar-item.active::before {
+  background: #e7f0e3;
+  transform: scale(1);
 }
 
-.app-tabbar :deep(.van-tabbar-item--active) {
-  background: transparent;
-  color: var(--cm-primary);
+.nav-icon-wrap {
+  display: grid;
+  width: 27px;
+  height: 27px;
+  place-items: center;
 }
 
-.app-tabbar :deep(.van-tabbar-item--active::before) {
-  width: 26px;
-  background: var(--cm-primary);
+.active .nav-icon-wrap {
+  animation: tab-pop 680ms var(--fresh-spring);
 }
 
-.app-tabbar :deep(.van-tabbar-item--active .van-tabbar-item__icon) {
-  transform: translateY(-1px);
+.app-tabbar-item:active {
+  transform: scale(0.92);
 }
 
-.app-tabbar :deep(.van-tabbar-item--active .van-tabbar-item__icon::before) {
-  animation: tab-icon-arrive 360ms cubic-bezier(0.16, 1, 0.3, 1);
+@keyframes tab-pop {
+  0% { transform: translateY(5px) scale(0.74) rotate(-7deg); }
+  65% { transform: translateY(-2px) scale(1.08) rotate(2deg); }
+  100% { transform: none; }
 }
 
-@keyframes tab-icon-arrive {
-  0% { opacity: 0.6; transform: translateY(3px) scale(0.82); }
-  100% { opacity: 1; transform: translateY(0) scale(1); }
+@media (max-width: 360px) {
+  .app-tabbar {
+    right: 8px;
+    left: 8px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .active .nav-icon-wrap {
+    animation: none;
+  }
 }
 </style>

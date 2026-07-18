@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { getBuildingDetail, type Building } from '@/api/buildings'
 import RealCampusMap from '@/components/RealCampusMap.vue'
+import TechIcon from '@/components/TechIcon.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -31,26 +32,343 @@ onMounted(loadBuilding)
 </script>
 
 <template>
-  <section class="page">
-    <van-nav-bar title="建筑详情" left-arrow @click-left="router.push('/home')" />
+  <section class="page building-detail-page">
+    <van-nav-bar title="校园地点" left-arrow @click-left="router.push('/home')" />
     <div class="page-content building-content">
-      <p v-if="loading" class="muted-text">正在加载建筑详情...</p>
+      <div v-if="loading" class="place-loading" role="status" aria-live="polite">
+        <span><i></i><i></i><i></i></span>
+        <div>
+          <strong>正在打开这个地点</strong>
+          <p>地图和地点信息很快就好...</p>
+        </div>
+      </div>
+
       <van-empty v-else-if="errorMessage" image="error" :description="errorMessage">
-        <div class="page-actions"><van-button type="primary" size="small" @click="loadBuilding">重试</van-button><van-button plain size="small" @click="router.push('/home')">返回首页</van-button></div>
+        <div class="page-actions">
+          <van-button type="primary" size="small" @click="loadBuilding">重新加载</van-button>
+          <van-button plain size="small" @click="router.push('/home')">回到首页</van-button>
+        </div>
       </van-empty>
+
       <template v-else-if="building">
-        <header v-reveal class="building-heading"><span>{{ building.type }}</span><h1>{{ building.name }}</h1><p>{{ building.description }}</p></header>
-        <RealCampusMap title="所在位置" subtitle="地图已定位到当前建筑" :buildings="[building]" :active-building-id="building.id" height="285px" />
-        <section v-reveal="{ delay: 50 }" class="building-note"><span>步行提示</span><p>{{ building.walk_hint || '暂无步行提示，可从地图查看周边道路和入口。' }}</p></section>
-        <div v-reveal="{ delay: 85 }" class="building-actions"><button type="button" @click="openMessages"><van-icon name="chat-o" /><span><strong>建筑会话</strong><small>选择总聊或具体教室聊天室</small></span><van-icon name="arrow" /></button><button type="button" @click="openSchedule"><van-icon name="guide-o" /><span><strong>规划到这里</strong><small>作为路线终点打开出发建议</small></span><van-icon name="arrow" /></button></div>
+        <header
+          v-reveal="{ from: 'left', distance: 40, stagger: 55 }"
+          class="place-hero"
+        >
+          <span class="place-sun" aria-hidden="true"></span>
+          <span class="place-leaves" aria-hidden="true"><i></i><i></i><i></i></span>
+          <span class="place-number">{{ String(building.id).padStart(2, '0') }}</span>
+          <div class="place-copy">
+            <span class="fresh-kicker">{{ building.type }}</span>
+            <h1>{{ building.name }}</h1>
+            <p>{{ building.description }}</p>
+          </div>
+          <div class="place-walk">
+            <span><van-icon name="guide-o" /></span>
+            <div><small>步行提示</small><strong>{{ building.walk_hint || '校园内步行可达' }}</strong></div>
+          </div>
+        </header>
+
+        <section v-reveal="{ from: 'right', distance: 40 }" class="place-map fresh-card">
+          <div class="fresh-section-heading">
+            <div><h2>它在校园的这里</h2><p>拖动和缩放地图查看更多</p></div>
+          </div>
+          <RealCampusMap
+            :buildings="[building]"
+            :selected-building-id="building.id"
+            title=""
+            subtitle=""
+            height="330px"
+            selected-action-text="打开频道"
+            @building-click="openMessages"
+          />
+        </section>
+
+        <section
+          v-reveal="{ from: 'left', distance: 38, stagger: 60 }"
+          class="place-facts"
+        >
+          <article>
+            <span><van-icon name="location-o" /></span>
+            <div><small>地点类型</small><strong>{{ building.type }}</strong></div>
+          </article>
+          <article>
+            <span><van-icon name="aim" /></span>
+            <div><small>校园坐标</small><strong>{{ building.latitude.toFixed(4) }}, {{ building.longitude.toFixed(4) }}</strong></div>
+          </article>
+        </section>
+
+        <section v-reveal="{ from: 'right', distance: 36 }" class="place-actions">
+          <button type="button" class="chat-action" @click="openMessages">
+            <span><van-icon name="chat-o" /></span>
+            <span><strong>看看地点频道</strong><small>找到同在这里的人和留言</small></span>
+            <TechIcon name="arrow" :size="19" />
+          </button>
+          <button type="button" class="route-action" @click="openSchedule">
+            <span><TechIcon name="route" :size="20" /></span>
+            <span><strong>准备去这里</strong><small>预览步行路线和出发时间</small></span>
+            <TechIcon name="arrow" :size="19" />
+          </button>
+        </section>
       </template>
     </div>
   </section>
 </template>
 
 <style scoped>
-.building-content { display: grid; gap: 16px; }
-.building-heading { padding: 8px 2px 2px; }.building-heading span { color: var(--cm-primary); font-size: 12px; font-weight: 700; }.building-heading h1 { margin: 7px 0 6px; font-size: 28px; line-height: 1.2; }.building-heading p { margin: 0; color: var(--cm-muted); font-size: 14px; line-height: 1.65; }
-.building-note { border-left: 4px solid var(--cm-amber); background: #fff; padding: 12px 14px; }.building-note span { color: var(--cm-muted); font-size: 11px; }.building-note p { margin: 5px 0 0; color: var(--cm-text); font-size: 14px; line-height: 1.6; }
-.building-actions { border-top: 1px solid var(--cm-line); border-bottom: 1px solid var(--cm-line); background: #fff; }.building-actions button { display: grid; grid-template-columns: 24px 1fr auto; width: 100%; align-items: center; gap: 10px; border: 0; background: #fff; color: var(--cm-ink); cursor: pointer; padding: 14px; text-align: left; }.building-actions button + button { border-top: 1px solid var(--cm-line); }.building-actions .van-icon:first-child { color: var(--cm-primary); font-size: 21px; }.building-actions span { display: grid; gap: 3px; }.building-actions strong { font-size: 14px; }.building-actions small { color: var(--cm-muted); font-size: 12px; }
+.building-detail-page {
+  background:
+    radial-gradient(circle at 105% 4%, rgba(242, 200, 111, 0.17), transparent 18rem),
+    radial-gradient(circle at -12% 58%, rgba(111, 159, 170, 0.11), transparent 19rem);
+}
+
+.building-content {
+  display: grid;
+  gap: 17px;
+}
+
+.place-loading {
+  display: flex;
+  min-height: 230px;
+  align-items: center;
+  justify-content: center;
+  gap: 15px;
+  border-radius: 28px;
+  background: rgba(255, 253, 248, 0.72);
+}
+
+.place-loading > span {
+  display: flex;
+  gap: 4px;
+  align-items: flex-end;
+  height: 31px;
+}
+
+.place-loading i {
+  width: 7px;
+  height: 13px;
+  border-radius: 999px;
+  background: var(--fresh-leaf);
+  animation: place-load 850ms ease-in-out infinite alternate;
+}
+
+.place-loading i:nth-child(2) { height: 27px; animation-delay: 150ms; }
+.place-loading i:nth-child(3) { height: 19px; animation-delay: 300ms; }
+.place-loading strong { display: block; color: var(--fresh-ink); font-size: 13px; }
+.place-loading p { margin: 4px 0 0; color: var(--fresh-muted); font-size: 10px; }
+
+.place-hero {
+  position: relative;
+  min-height: 285px;
+  overflow: hidden;
+  border-radius: 34px 34px 26px 34px;
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.46), transparent 43%),
+    #e5eee0;
+  padding: 25px 22px 20px;
+  box-shadow: var(--fresh-shadow-soft);
+}
+
+.place-hero::after {
+  position: absolute;
+  right: -50px;
+  bottom: -65px;
+  width: 220px;
+  height: 150px;
+  border-radius: 50%;
+  background: rgba(111, 159, 170, 0.1);
+  content: "";
+  transform: rotate(-11deg);
+}
+
+.place-number {
+  position: absolute;
+  top: 20px;
+  right: 25px;
+  color: rgba(38, 54, 42, 0.16);
+  font-family: "STKaiti", "KaiTi", serif;
+  font-size: 72px;
+  line-height: 1;
+}
+
+.place-copy {
+  position: relative;
+  z-index: 2;
+  max-width: 350px;
+}
+
+.place-copy h1 {
+  margin: 12px 0 0;
+  color: var(--fresh-ink);
+  font-family: "STKaiti", "KaiTi", "PingFang SC", sans-serif;
+  font-size: clamp(34px, 9vw, 46px);
+  line-height: 1.08;
+  letter-spacing: -0.05em;
+}
+
+.place-copy p {
+  max-width: 320px;
+  margin: 12px 0 0;
+  color: var(--fresh-text);
+  font-size: 12px;
+  line-height: 1.75;
+}
+
+.place-sun {
+  position: absolute;
+  right: 38px;
+  bottom: 64px;
+  width: 37px;
+  height: 37px;
+  border-radius: 50%;
+  background: var(--fresh-sun);
+  box-shadow: 0 0 0 10px rgba(242, 200, 111, 0.12);
+  animation: place-sun 4s ease-in-out infinite;
+}
+
+.place-leaves {
+  position: absolute;
+  right: 16px;
+  bottom: 19px;
+  z-index: 1;
+  display: flex;
+  gap: 1px;
+  transform: rotate(7deg);
+}
+
+.place-leaves i {
+  width: 22px;
+  height: 43px;
+  border-radius: 100% 0 100% 0;
+  background: rgba(91, 134, 91, 0.26);
+  transform: rotate(-37deg);
+}
+
+.place-walk {
+  position: absolute;
+  right: 19px;
+  bottom: 18px;
+  left: 19px;
+  z-index: 3;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 9px;
+  align-items: center;
+  max-width: 275px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.6);
+  padding: 9px;
+}
+
+.place-walk > span {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border-radius: 13px;
+  background: #fff;
+  color: var(--fresh-green-dark);
+}
+
+.place-walk > div { display: grid; min-width: 0; gap: 3px; }
+.place-walk small { color: var(--fresh-muted); font-size: 8px; }
+.place-walk strong { overflow: hidden; color: var(--fresh-ink); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+
+.place-map {
+  overflow: hidden;
+  padding: 18px;
+}
+
+.place-map .fresh-section-heading {
+  margin-bottom: 13px;
+}
+
+.place-facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+}
+
+.place-facts article {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 9px;
+  align-items: center;
+  min-height: 72px;
+  border-radius: 21px;
+  background: var(--fresh-paper);
+  padding: 10px;
+  box-shadow: var(--fresh-shadow-soft);
+}
+
+.place-facts article > span {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border-radius: 14px;
+  background: var(--fresh-mint);
+  color: var(--fresh-green-dark);
+}
+
+.place-facts article:nth-child(2) > span {
+  background: var(--fresh-sky);
+  color: #5b848c;
+}
+
+.place-facts article > div { display: grid; min-width: 0; gap: 3px; }
+.place-facts small { color: var(--fresh-muted); font-size: 8px; }
+.place-facts strong { overflow: hidden; color: var(--fresh-ink); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+
+.place-actions {
+  display: grid;
+  gap: 9px;
+}
+
+.place-actions button {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  min-height: 68px;
+  border: 0;
+  border-radius: 22px;
+  color: var(--fresh-ink);
+  cursor: pointer;
+  padding: 10px 14px 10px 10px;
+  text-align: left;
+}
+
+.chat-action { background: #e5eee0; }
+.route-action { background: #e1edef; }
+
+.place-actions button > span:first-child {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.62);
+  color: var(--fresh-green-dark);
+}
+
+.route-action > span:first-child { color: #5a838c; }
+.place-actions button > span:nth-child(2) { display: grid; gap: 3px; }
+.place-actions strong { font-size: 12px; }
+.place-actions small { color: var(--fresh-muted); font-size: 9px; }
+
+@keyframes place-load {
+  to { transform: scaleY(1.4); }
+}
+
+@keyframes place-sun {
+  50% { transform: translateY(-5px) scale(1.04); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .place-loading i,
+  .place-sun {
+    animation: none;
+  }
+}
 </style>

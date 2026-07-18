@@ -1,18 +1,23 @@
-import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
+import {
+  createRouter,
+  createWebHistory,
+  type RouteRecordRaw
+} from 'vue-router'
 
-import BuildingChatroomsPage from '@/pages/BuildingChatroomsPage.vue'
-import BuildingDetailPage from '@/pages/BuildingDetailPage.vue'
-import BuildingMessagesPage from '@/pages/BuildingMessagesPage.vue'
-import CourseFormPage from '@/pages/CourseFormPage.vue'
-import CourseImportPage from '@/pages/CourseImportPage.vue'
-import CoursesPage from '@/pages/CoursesPage.vue'
-import HomePage from '@/pages/HomePage.vue'
-import LoginPage from '@/pages/LoginPage.vue'
-import MapCollectorPage from '@/pages/MapCollectorPage.vue'
-import ProfilePage from '@/pages/ProfilePage.vue'
-import RegisterPage from '@/pages/RegisterPage.vue'
-import SchedulePage from '@/pages/SchedulePage.vue'
 import { useAuthStore } from '@/stores/auth'
+
+const LoginPage = () => import('@/pages/LoginPage.vue')
+const RegisterPage = () => import('@/pages/RegisterPage.vue')
+const HomePage = () => import('@/pages/HomePage.vue')
+const MapCollectorPage = () => import('@/pages/MapCollectorPage.vue')
+const BuildingDetailPage = () => import('@/pages/BuildingDetailPage.vue')
+const BuildingChatroomsPage = () => import('@/pages/BuildingChatroomsPage.vue')
+const BuildingMessagesPage = () => import('@/pages/BuildingMessagesPage.vue')
+const CoursesPage = () => import('@/pages/CoursesPage.vue')
+const CourseFormPage = () => import('@/pages/CourseFormPage.vue')
+const CourseImportPage = () => import('@/pages/CourseImportPage.vue')
+const SchedulePage = () => import('@/pages/SchedulePage.vue')
+const ProfilePage = () => import('@/pages/ProfilePage.vue')
 
 type AuthRouteTarget = {
   path: string
@@ -52,6 +57,12 @@ export function shouldLoadCurrentUser(
   hasCurrentUser: boolean
 ): boolean {
   return Boolean(to.meta.requiresAuth && hasToken && !hasCurrentUser)
+}
+
+export function resolveRouteScrollPosition(
+  savedPosition: { left: number; top: number } | null
+): { left: number; top: number } {
+  return savedPosition ?? { left: 0, top: 0 }
 }
 
 const routes: RouteRecordRaw[] = [
@@ -127,7 +138,10 @@ const routes: RouteRecordRaw[] = [
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
-  routes
+  routes,
+  scrollBehavior(_to, _from, savedPosition) {
+    return resolveRouteScrollPosition(savedPosition)
+  }
 })
 
 router.beforeEach(async (to) => {

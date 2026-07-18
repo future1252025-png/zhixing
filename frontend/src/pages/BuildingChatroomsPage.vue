@@ -6,6 +6,7 @@ import {
   getBuildingChatrooms,
   type BuildingChatRoom
 } from '@/api/messages'
+import TechIcon from '@/components/TechIcon.vue'
 import { rememberRecentChatEntry } from '@/utils/chat'
 
 const route = useRoute()
@@ -18,22 +19,18 @@ const roomQuery = ref('')
 const buildingId = computed(() => Number(route.params.id))
 const roomCountText = computed(() => {
   const specificRooms = rooms.value.filter((room) => !room.is_general).length
-  return specificRooms > 0 ? `${specificRooms} 个教室聊天室` : '可先进入建筑总聊'
+  return specificRooms > 0 ? `${specificRooms} 个教室频道` : '公共地点频道已就绪'
 })
 const filteredRooms = computed(() => {
   const query = roomQuery.value.trim().toLowerCase()
-  if (!query) {
-    return rooms.value
-  }
+  if (!query) return rooms.value
   return rooms.value.filter((room) =>
     `${room.name} ${room.room_name ?? ''}`.toLowerCase().includes(query)
   )
 })
 const canOpenCustomRoom = computed(() => {
   const query = roomQuery.value.trim()
-  if (!query) {
-    return false
-  }
+  if (!query) return false
   return !rooms.value.some((room) =>
     room.room_name === query || room.name === query
   )
@@ -55,9 +52,7 @@ function openRoom(room: BuildingChatRoom) {
 
 function openCustomRoom() {
   const roomName = roomQuery.value.trim()
-  if (!roomName || !building.value) {
-    return
-  }
+  if (!roomName || !building.value) return
   rememberRecentChatEntry(window.localStorage, {
     buildingId: buildingId.value,
     buildingName: building.value.name,
@@ -85,7 +80,7 @@ async function loadPage() {
     building.value = nextBuilding
     rooms.value = nextRooms
   } catch {
-    errorMessage.value = '聊天室加载失败，请稍后重试'
+    errorMessage.value = '地点频道加载失败，请稍后重试'
   } finally {
     loading.value = false
   }
@@ -96,252 +91,353 @@ onMounted(loadPage)
 
 <template>
   <section class="page chatrooms-page">
-    <van-nav-bar title="建筑会话" left-arrow @click-left="router.push(`/buildings/${buildingId}`)" />
+    <van-nav-bar title="地点频道" left-arrow @click-left="router.push(`/buildings/${buildingId}`)" />
     <div class="page-content chatrooms-content">
-      <p v-if="loading" class="muted-text">正在加载聊天室...</p>
+      <div v-if="loading" class="channel-loading" role="status" aria-live="polite">
+        <span><i></i><i></i><i></i></span>
+        <div><strong>正在看看这里有哪些频道</strong><p>很快就能加入大家的留言...</p></div>
+      </div>
+
       <van-empty v-else-if="errorMessage" image="error" :description="errorMessage">
-        <van-button type="primary" size="small" @click="loadPage">重试</van-button>
+        <van-button type="primary" size="small" @click="loadPage">重新加载</van-button>
       </van-empty>
 
       <template v-else>
-        <header v-reveal class="chatrooms-hero">
-          <span>建筑会话</span>
-          <h1>{{ building?.name || '校园建筑' }}</h1>
-          <p>先进入建筑总聊，也可以搜索或输入具体教室号。</p>
-          <strong>{{ roomCountText }}</strong>
+        <header
+          v-reveal="{ from: 'left', distance: 40, stagger: 55 }"
+          class="channel-hero"
+        >
+          <span class="channel-sun" aria-hidden="true"></span>
+          <span class="talk-bubbles" aria-hidden="true"><i></i><i></i><i></i></span>
+          <span class="fresh-kicker">{{ building?.type || '校园地点' }}</span>
+          <h1>{{ building?.name || '地点频道' }}</h1>
+          <p>{{ roomCountText }} · 选择一个频道，看看此刻留在这里的话。</p>
+          <div class="channel-count">
+            <span>可进入频道</span>
+            <strong>{{ rooms.length }}</strong>
+          </div>
         </header>
 
-        <section v-reveal="{ delay: 45 }" class="room-search">
+        <section v-reveal="{ from: 'right', distance: 36 }" class="room-search fresh-card">
+          <div class="fresh-section-heading">
+            <div><h2>找一个频道</h2><p>搜索教室名，也可以直接进入自定义教室</p></div>
+          </div>
           <van-search
             v-model="roomQuery"
-            placeholder="搜索或输入教室号，例如 教4-203"
             shape="round"
-            background="transparent"
+            placeholder="例如：A203、教4-302"
           />
-          <button v-if="canOpenCustomRoom" type="button" class="custom-room-card" @click="openCustomRoom">
-            <span class="room-icon"><van-icon name="plus" /></span>
-            <span class="room-copy">
-              <strong>进入 {{ roomQuery.trim() }}</strong>
-              <small>还没有历史消息，也可以先创建这个教室频道</small>
-            </span>
-            <van-icon name="arrow" />
-          </button>
-        </section>
-
-        <section v-reveal="{ delay: 80 }" class="room-list" aria-label="聊天室列表">
           <button
-            v-for="room in filteredRooms"
-            :key="room.room_name || 'general'"
+            v-if="canOpenCustomRoom"
             type="button"
-            class="room-card"
-            :class="{ 'is-general': room.is_general }"
-            @click="openRoom(room)"
+            class="custom-room"
+            @click="openCustomRoom"
           >
-            <span class="room-icon">
-              <van-icon :name="room.is_general ? 'friends-o' : 'chat-o'" />
-            </span>
-            <span class="room-copy">
-              <strong>{{ room.name }}</strong>
-              <small>
-                {{ room.is_general ? '整栋建筑公共讨论区' : '教室专属匿名聊天室' }}
-              </small>
-            </span>
-            <span class="room-count">{{ room.message_count }} 条</span>
-            <van-icon name="arrow" />
+            <span><van-icon name="plus" /></span>
+            <span><strong>进入“{{ roomQuery.trim() }}”</strong><small>这个教室还没有留言，也可以先进去</small></span>
+            <TechIcon name="arrow" :size="18" />
           </button>
         </section>
 
-        <van-empty
-          v-if="filteredRooms.length === 0 && !canOpenCustomRoom"
-          description="暂无匹配聊天室"
-        />
+        <section
+          v-reveal="{ from: 'left', distance: 40, stagger: 62 }"
+          class="room-list-section"
+        >
+          <div class="fresh-section-heading">
+            <div><h2>{{ roomQuery.trim() ? '搜索结果' : '这里的频道' }}</h2><p>公共频道和教室频道都在这里</p></div>
+          </div>
+
+          <div class="room-list">
+            <button
+              v-for="(room, index) in filteredRooms"
+              :key="room.room_name || 'general'"
+              type="button"
+              :class="{ general: room.is_general }"
+              @click="openRoom(room)"
+            >
+              <span class="room-icon">
+                <van-icon :name="room.is_general ? 'friends-o' : 'chat-o'" />
+              </span>
+              <span class="room-copy">
+                <small>{{ room.is_general ? '大家都在这里' : `教室频道 ${String(index + 1).padStart(2, '0')}` }}</small>
+                <strong>{{ room.name }}</strong>
+                <span>{{ room.message_count }} 条留言</span>
+              </span>
+              <span class="room-arrow"><TechIcon name="arrow" :size="18" /></span>
+            </button>
+
+            <van-empty v-if="filteredRooms.length === 0" description="没有找到相关频道" />
+          </div>
+        </section>
       </template>
     </div>
   </section>
 </template>
 
 <style scoped>
+.chatrooms-page {
+  background:
+    radial-gradient(circle at 105% 5%, rgba(183, 167, 200, 0.15), transparent 18rem),
+    radial-gradient(circle at -12% 58%, rgba(126, 166, 126, 0.11), transparent 19rem);
+}
+
 .chatrooms-content {
   display: grid;
-  gap: 16px;
+  gap: 17px;
 }
 
-.chatrooms-hero {
+.channel-loading {
+  display: flex;
+  min-height: 230px;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  border-radius: 28px;
+  background: rgba(255, 253, 248, 0.72);
+}
+
+.channel-loading > span {
+  display: flex;
+  gap: 4px;
+  align-items: flex-end;
+  height: 30px;
+}
+
+.channel-loading i {
+  width: 7px;
+  height: 12px;
+  border-radius: 999px;
+  background: var(--fresh-lilac);
+  animation: room-load 850ms ease-in-out infinite alternate;
+}
+
+.channel-loading i:nth-child(2) { height: 26px; animation-delay: 150ms; }
+.channel-loading i:nth-child(3) { height: 18px; animation-delay: 300ms; }
+.channel-loading strong { display: block; color: var(--fresh-ink); font-size: 13px; }
+.channel-loading p { margin: 4px 0 0; color: var(--fresh-muted); font-size: 10px; }
+
+.channel-hero {
   position: relative;
+  min-height: 250px;
   overflow: hidden;
-  border: 1px solid rgba(10, 125, 115, 0.18);
-  border-radius: var(--cm-radius);
+  border-radius: 34px 34px 26px 34px;
   background:
-    linear-gradient(90deg, rgba(10, 125, 115, 0.065) 1px, transparent 1px) 0 0 / 24px 24px,
-    linear-gradient(135deg, #f8fdf9 0%, #e7f4ed 60%, #e9f2fa 100%);
-  color: var(--cm-ink);
-  padding: 20px;
-  box-shadow: 0 18px 42px rgba(30, 68, 55, .11);
+    linear-gradient(145deg, rgba(255, 255, 255, 0.46), transparent 42%),
+    #ebe5ee;
+  padding: 25px 22px;
+  box-shadow: var(--fresh-shadow-soft);
 }
 
-.chatrooms-hero::after {
+.channel-hero::after {
   position: absolute;
-  right: 18px;
-  bottom: 18px;
-  width: 86px;
-  height: 1px;
-  background: linear-gradient(90deg, rgba(10, 125, 115, 0.22), rgba(67, 135, 199, 0.66), rgba(242, 184, 75, 0.85));
+  right: -58px;
+  bottom: -68px;
+  width: 230px;
+  height: 155px;
+  border-radius: 50%;
+  background: rgba(111, 159, 170, 0.11);
   content: "";
+  transform: rotate(-12deg);
 }
 
-.chatrooms-hero span {
-  color: var(--cm-primary);
-  font-size: 12px;
-  font-weight: 700;
+.channel-hero h1 {
+  position: relative;
+  z-index: 2;
+  max-width: 320px;
+  margin: 15px 0 0;
+  color: var(--fresh-ink);
+  font-family: "STKaiti", "KaiTi", "PingFang SC", sans-serif;
+  font-size: clamp(34px, 9vw, 46px);
+  line-height: 1.08;
+  letter-spacing: -0.05em;
 }
 
-.chatrooms-hero h1 {
-  margin: 8px 0 8px;
-  font-size: 26px;
-  line-height: 1.2;
+.channel-hero > p {
+  position: relative;
+  z-index: 2;
+  max-width: 310px;
+  margin: 12px 0 0;
+  color: var(--fresh-text);
+  font-size: 11px;
+  line-height: 1.7;
 }
 
-.chatrooms-hero p {
-  margin: 0 0 14px;
-  color: var(--cm-muted);
-  font-size: 14px;
-  line-height: 1.55;
+.channel-sun {
+  position: absolute;
+  top: 29px;
+  right: 28px;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--fresh-sun);
+  box-shadow: 0 0 0 9px rgba(242, 200, 111, 0.12);
+  animation: room-sun 4s ease-in-out infinite;
 }
 
-.chatrooms-hero strong {
-  display: inline-flex;
-  border-radius: var(--cm-radius-sm);
-  border: 1px solid rgba(10, 125, 115, .14);
-  background: rgba(255, 255, 255, .74);
-  color: var(--cm-primary-dark);
-  padding: 7px 11px;
-  font-size: 12px;
+.talk-bubbles {
+  position: absolute;
+  right: 19px;
+  bottom: 20px;
+  z-index: 2;
+  width: 106px;
+  height: 83px;
+}
+
+.talk-bubbles i {
+  position: absolute;
+  border-radius: 50% 50% 50% 15%;
+  background: rgba(255, 255, 255, 0.55);
+  animation: bubble-float 3s ease-in-out infinite alternate;
+}
+
+.talk-bubbles i:nth-child(1) { top: 4px; left: 3px; width: 38px; height: 32px; }
+.talk-bubbles i:nth-child(2) { right: 0; bottom: 2px; width: 52px; height: 43px; animation-delay: 500ms; }
+.talk-bubbles i:nth-child(3) { top: 0; right: 14px; width: 25px; height: 21px; animation-delay: 900ms; }
+
+.channel-count {
+  position: absolute;
+  bottom: 22px;
+  left: 22px;
+  z-index: 3;
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.channel-count span { color: var(--fresh-muted); font-size: 9px; }
+.channel-count strong { color: var(--fresh-ink); font-family: "STKaiti", "KaiTi", serif; font-size: 32px; line-height: 0.8; }
+
+.room-search {
+  padding: 18px;
+}
+
+.room-search :deep(.van-search) {
+  margin-top: 14px;
+}
+
+.custom-room {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 9px;
+  align-items: center;
+  width: 100%;
+  min-height: 60px;
+  margin-top: 9px;
+  border: 1px dashed #a9bfa9;
+  border-radius: 18px;
+  background: var(--fresh-mint);
+  color: var(--fresh-green-dark);
+  cursor: pointer;
+  padding: 9px 11px;
+  text-align: left;
+}
+
+.custom-room > span:first-child {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border-radius: 50%;
+  background: #fff;
+}
+
+.custom-room > span:nth-child(2) { display: grid; min-width: 0; gap: 3px; }
+.custom-room strong { overflow: hidden; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.custom-room small { color: var(--fresh-muted); font-size: 8px; }
+
+.room-list-section {
+  display: grid;
+  gap: 13px;
 }
 
 .room-list {
   display: grid;
-  gap: 10px;
+  gap: 9px;
 }
 
-.room-search {
+.room-list > button {
+  position: relative;
   display: grid;
-  gap: 10px;
-}
-
-.room-search :deep(.van-search) {
-  padding: 0;
-}
-
-.room-search :deep(.van-search__content) {
-  align-items: center;
-  min-height: 50px;
-  border: 1px solid var(--cm-line);
-  background: #fff;
-  padding: 0 12px;
-}
-
-.room-card {
-  display: grid;
-  grid-template-columns: 42px minmax(0, 1fr) auto 18px;
-  align-items: center;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 11px;
-  width: 100%;
-  border: 1px solid var(--cm-line);
-  border-left: 4px solid transparent;
-  border-radius: var(--cm-radius);
-  background: var(--cm-surface);
-  color: var(--cm-ink);
-  cursor: pointer;
-  padding: 14px;
-  text-align: left;
-  box-shadow: 0 8px 22px rgba(24, 43, 37, .06);
-  transition:
-    border-color var(--cm-motion),
-    box-shadow var(--cm-motion),
-    transform var(--cm-motion),
-    background var(--cm-motion);
-}
-
-.custom-room-card {
-  display: grid;
-  grid-template-columns: 42px minmax(0, 1fr) 18px;
   align-items: center;
-  gap: 11px;
-  width: 100%;
-  border: 1px dashed rgba(13, 133, 124, .42);
-  border-radius: var(--cm-radius);
-  background: rgba(13, 133, 124, .08);
-  color: var(--cm-ink);
+  min-height: 82px;
+  overflow: hidden;
+  border: 1px solid var(--fresh-line);
+  border-radius: 23px;
+  background: var(--fresh-paper);
+  color: var(--fresh-ink);
   cursor: pointer;
-  padding: 14px;
+  padding: 11px 13px 11px 11px;
   text-align: left;
-  transition:
-    border-color var(--cm-motion),
-    transform var(--cm-motion),
-    background var(--cm-motion);
+  box-shadow: var(--fresh-shadow-soft);
 }
 
-.room-card.is-general {
-  border-color: rgba(13, 133, 124, .28);
-  border-left-color: var(--cm-primary);
-  background: linear-gradient(135deg, rgba(13, 133, 124, .12), #fff);
+.room-list > button::after {
+  position: absolute;
+  top: -31px;
+  right: -28px;
+  width: 92px;
+  height: 92px;
+  border: 17px solid rgba(111, 159, 170, 0.07);
+  border-radius: 50%;
+  content: "";
 }
 
-.room-card:not(.is-general) {
-  border-left-color: var(--cm-chat);
-}
-
-.room-card:active,
-.custom-room-card:active {
-  transform: translateY(1px);
-}
-
-.room-card:hover,
-.custom-room-card:hover {
-  border-color: rgba(88, 101, 242, .28);
-  box-shadow: 0 12px 28px rgba(24, 43, 37, .08);
+.room-list > button.general {
+  border-color: rgba(79, 125, 88, 0.14);
+  background: #e8f0e4;
 }
 
 .room-icon {
   display: grid;
-  width: 42px;
-  height: 42px;
+  width: 48px;
+  height: 48px;
   place-items: center;
-  border-radius: var(--cm-radius);
-  background: var(--cm-chat-soft);
-  color: var(--cm-chat-dark);
+  border-radius: 18px;
+  background: var(--fresh-sky);
+  color: #5c858e;
   font-size: 20px;
 }
 
-.room-card.is-general .room-icon {
-  background: var(--cm-primary-soft);
-  color: var(--cm-primary);
+.general .room-icon {
+  background: rgba(255, 255, 255, 0.65);
+  color: var(--fresh-green-dark);
 }
 
 .room-copy {
   display: grid;
-  gap: 4px;
   min-width: 0;
+  gap: 3px;
 }
 
-.room-copy strong {
-  overflow: hidden;
-  font-size: 16px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.room-copy small { color: var(--fresh-muted); font-size: 8px; }
+.room-copy strong { overflow: hidden; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
+.room-copy > span { color: var(--fresh-green); font-size: 9px; }
+
+.room-arrow {
+  position: relative;
+  z-index: 2;
+  color: var(--fresh-muted);
 }
 
-.room-copy small {
-  color: var(--cm-muted);
-  font-size: 12px;
+@keyframes room-load {
+  to { transform: scaleY(1.4); }
 }
 
-.room-count {
-  border-radius: 999px;
-  background: var(--cm-surface-muted);
-  color: var(--cm-muted);
-  font-size: 12px;
-  padding: 5px 8px;
-  white-space: nowrap;
+@keyframes room-sun {
+  50% { transform: translateY(-5px) scale(1.04); }
+}
+
+@keyframes bubble-float {
+  to { transform: translateY(-6px) rotate(3deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .channel-loading i,
+  .channel-sun,
+  .talk-bubbles i {
+    animation: none;
+  }
 }
 </style>

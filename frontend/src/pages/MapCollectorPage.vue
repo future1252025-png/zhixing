@@ -678,7 +678,7 @@ onBeforeUnmount(() => {
 
       <section class="surface-panel controls-panel">
         <div class="boundary-tools">
-          <van-button block plain :loading="loading" @click="tryUseAmapCampusBoundary">
+          <van-button block plain :loading="loading" loading-text="正在读取校园范围" @click="tryUseAmapCampusBoundary">
             尝试读取高德校园范围
           </van-button>
           <van-button v-if="!drawingBoundary" block plain @click="startDrawingBoundary">
@@ -692,7 +692,7 @@ onBeforeUnmount(() => {
 
         <div class="search-row">
           <input v-model="keyword" class="collector-input" placeholder="输入地点关键词" />
-          <van-button type="primary" size="small" :loading="loading" @click="searchCurrentKeyword">
+          <van-button type="primary" size="small" :loading="loading" loading-text="搜索中" @click="searchCurrentKeyword">
             搜索
           </van-button>
         </div>
@@ -750,7 +750,7 @@ onBeforeUnmount(() => {
           </template>
         </div>
         <div class="collector-actions">
-          <van-button block plain :loading="loading" @click="autoCollectCampusPois">
+          <van-button block plain :loading="loading" loading-text="正在搜索全部地点" @click="autoCollectCampusPois">
             自动搜索全部地点
           </van-button>
           <van-button block plain @click="clearPoints">清空候选</van-button>
@@ -797,16 +797,19 @@ onBeforeUnmount(() => {
 
 .collector-layout {
   display: grid;
-  gap: 12px;
+  gap: 16px;
   width: min(100%, 980px);
   margin: 0 auto;
-  padding: 14px;
+  padding: 16px;
 }
 
 .map-panel,
 .controls-panel,
 .preview-panel {
-  padding: 12px;
+  border-radius: 26px;
+  background: rgba(255, 253, 247, .92);
+  box-shadow: 0 17px 42px rgba(70, 90, 66, .09);
+  padding: 16px;
 }
 
 .collector-heading {
@@ -847,8 +850,8 @@ onBeforeUnmount(() => {
   min-height: 420px;
   overflow: hidden;
   border: 1px solid var(--cm-line);
-  border-radius: 8px;
-  background: #eef4ff;
+  border-radius: 22px;
+  background: #e5eee1;
 }
 
 .map-mode-tip {
@@ -857,10 +860,11 @@ onBeforeUnmount(() => {
   left: 10px;
   z-index: 2;
   max-width: calc(100% - 20px);
-  border: 1px solid rgb(255 255 255 / 70%);
+  border: 1px solid rgba(88, 119, 84, .16);
   border-radius: 999px;
-  background: rgb(16 24 40 / 72%);
-  color: #fff;
+  background: rgba(255, 253, 247, .92);
+  box-shadow: 0 5px 16px rgba(54, 72, 52, .12);
+  color: #4b644d;
   font-size: 12px;
   font-weight: 800;
   padding: 7px 10px;
@@ -868,7 +872,9 @@ onBeforeUnmount(() => {
 }
 
 .map-mode-tip.active {
-  background: rgb(245 158 11 / 92%);
+  border-color: #e5bd72;
+  background: rgba(255, 238, 199, .95);
+  color: #825f27;
 }
 
 .collector-state {
@@ -877,11 +883,12 @@ onBeforeUnmount(() => {
   z-index: 3;
   display: grid;
   place-items: center;
-  background: rgb(255 255 255 / 80%);
-  color: var(--cm-muted);
+  background: rgba(248, 250, 241, .91);
+  color: #405443;
   font-size: 14px;
   text-align: center;
   padding: 20px;
+  backdrop-filter: blur(8px);
 }
 
 .collector-state.error {
@@ -904,7 +911,8 @@ onBeforeUnmount(() => {
 .collector-input {
   min-height: 36px;
   border: 1px solid var(--cm-line);
-  border-radius: 8px;
+  border-radius: 12px;
+  background: #fbfdf8;
   color: var(--cm-ink);
   font: inherit;
   padding: 0 10px;
@@ -919,9 +927,9 @@ onBeforeUnmount(() => {
   gap: 8px;
   margin-top: 12px;
   border: 1px solid var(--cm-line);
-  border-radius: 8px;
-  background: #f8fbff;
-  padding: 10px;
+  border-radius: 18px;
+  background: #f1f6eb;
+  padding: 13px;
 }
 
 .manual-point-card strong {
@@ -939,8 +947,8 @@ onBeforeUnmount(() => {
 
 .manual-empty {
   border: 1px dashed var(--cm-line);
-  border-radius: 8px;
-  background: #ffffff;
+  border-radius: 12px;
+  background: rgba(255, 253, 247, .8);
   padding: 8px;
 }
 
@@ -968,13 +976,25 @@ onBeforeUnmount(() => {
   gap: 5px;
   cursor: pointer;
   border: 1px solid var(--cm-line);
-  border-radius: 8px;
-  background: #f8fbff;
-  padding: 10px;
+  border-radius: 15px;
+  background: #fbfdf8;
+  padding: 11px;
+  transition: transform .2s ease, border-color .2s ease, background .2s ease;
 }
 
 .collector-item.disabled {
-  opacity: 0.48;
+  border-color: #e5e9e1;
+  background: #f3f4ef;
+  opacity: 1;
+}
+
+.collector-item.disabled strong {
+  color: #778178;
+}
+
+.collector-item.disabled span,
+.collector-item.disabled small {
+  color: #929a92;
 }
 
 .collector-item strong {
@@ -995,13 +1015,26 @@ onBeforeUnmount(() => {
   max-height: 360px;
   overflow: auto;
   margin: 0;
-  border-radius: 8px;
-  background: #101828;
-  color: #ecfdf3;
+  border: 1px solid #e3e9df;
+  border-radius: 16px;
+  background: #f4f6ef;
+  color: #3f5143;
   font-size: 12px;
   line-height: 1.55;
   padding: 12px;
   white-space: pre-wrap;
+}
+
+.collector-input:focus {
+  border-color: #7fa17a;
+  outline: 0;
+  box-shadow: 0 0 0 3px rgba(105, 146, 99, .13);
+}
+
+.collector-item:not(.disabled):hover {
+  border-color: #9bb896;
+  background: #f1f7eb;
+  transform: translateY(-2px);
 }
 
 :global(.collector-marker) {
