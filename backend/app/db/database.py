@@ -84,16 +84,25 @@ def _validate_unversioned_baseline(bind: Engine) -> bool:
             "检测到未版本化且无法识别的数据库结构。请先备份数据库，再修复为完整旧版结构后重试。"
         )
 
-    incomplete_tables = [
-        table_name
-        for table_name, required_columns in _BASELINE_COLUMNS.items()
-        if not required_columns
-        <= {column["name"] for column in inspector.get_columns(table_name)}
-    ]
-    if incomplete_tables:
-        tables = ", ".join(incomplete_tables)
+    column_mismatches = []
+    for table_name, required_columns in _BASELINE_COLUMNS.items():
+        actual_columns = {
+            column["name"] for column in inspector.get_columns(table_name)
+        }
+        missing_columns = sorted(required_columns - actual_columns)
+        extra_columns = sorted(actual_columns - required_columns)
+        if missing_columns or extra_columns:
+            details = []
+            if missing_columns:
+                details.append(f"缺少列：{', '.join(missing_columns)}")
+            if extra_columns:
+                details.append(f"额外列：{', '.join(extra_columns)}")
+            column_mismatches.append(f"{table_name}（{'；'.join(details)}）")
+
+    if column_mismatches:
+        tables = ", ".join(column_mismatches)
         raise RuntimeError(
-            f"检测到不完整的旧版数据库表（{tables}）。请先备份数据库，再修复表结构后重试。"
+            f"检测到不匹配的旧版数据库表结构（{tables}）。请先备份数据库，再修复表结构后重试。"
         )
     return True
 

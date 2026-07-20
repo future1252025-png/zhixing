@@ -13,9 +13,9 @@ class CourseImportSource(Base):
         unique=True,
         index=True,
     )
-    filename: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    file_sha256: Mapped[str | None] = mapped_column(String(64), index=True, nullable=True)
-    source_row: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    filename: Mapped[str] = mapped_column(String(255), nullable=False)
+    file_sha256: Mapped[str] = mapped_column(String(64), index=True, nullable=False)
+    source_row: Mapped[str] = mapped_column(String(80), nullable=False)
     raw_course_name: Mapped[str] = mapped_column(Text)
     raw_weekday: Mapped[str] = mapped_column(Text)
     raw_time_or_section: Mapped[str] = mapped_column(Text)

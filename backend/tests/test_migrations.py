@@ -77,6 +77,13 @@ def test_upgrade_on_empty_sqlite_creates_current_schema(tmp_path: Path) -> None:
         assert "source_kind" in {
             column["name"] for column in inspector.get_columns("courses")
         }
+        source_columns = {
+            column["name"]: column
+            for column in inspector.get_columns("course_import_sources")
+        }
+        assert not source_columns["filename"]["nullable"]
+        assert not source_columns["file_sha256"]["nullable"]
+        assert not source_columns["source_row"]["nullable"]
     finally:
         engine.dispose()
 
@@ -113,6 +120,29 @@ def test_upgrade_rejects_incomplete_unversioned_legacy_schema(tmp_path: Path) ->
         engine.dispose()
 
     with pytest.raises(RuntimeError, match="备份|backup"):
+        upgrade_database(database_url)
+
+    engine = create_engine(database_url)
+    try:
+        assert "alembic_version" not in inspect(engine).get_table_names()
+    finally:
+        engine.dispose()
+
+
+def test_upgrade_rejects_unversioned_legacy_schema_with_extra_columns(
+    tmp_path: Path,
+) -> None:
+    database_url = make_database_url(tmp_path / "extra-column.db")
+    upgrade_to_baseline(database_url)
+    engine = create_engine(database_url)
+    try:
+        with engine.begin() as connection:
+            connection.execute(text("DROP TABLE alembic_version"))
+            connection.execute(text("ALTER TABLE users ADD COLUMN unsupported TEXT"))
+    finally:
+        engine.dispose()
+
+    with pytest.raises(RuntimeError, match="额外列|extra"):
         upgrade_database(database_url)
 
     engine = create_engine(database_url)

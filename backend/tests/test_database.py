@@ -11,7 +11,7 @@ from app.db.seed import (
     load_map_points_seed,
     seed_demo_data,
 )
-from app.models import Building, Course, LocationPreset, Message, User
+from app.models import Building, Course, CourseImportSource, LocationPreset, Message, User
 
 
 def make_test_database_url(path: Path) -> str:
@@ -43,6 +43,16 @@ def test_database_tables_can_be_created(tmp_path: Path) -> None:
         index["unique"] and index["column_names"] == ["user_id"]
         for index in semester_indexes
     )
+    required_source_fields = {"filename", "file_sha256", "source_row"}
+    assert all(
+        not CourseImportSource.__table__.columns[field].nullable
+        for field in required_source_fields
+    )
+    source_columns = {
+        column["name"]: column
+        for column in inspect(engine).get_columns("course_import_sources")
+    }
+    assert all(not source_columns[field]["nullable"] for field in required_source_fields)
 
 
 def test_sqlite_file_engine_uses_wal_and_busy_timeout(tmp_path: Path) -> None:
