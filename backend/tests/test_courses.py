@@ -9,6 +9,7 @@ from unittest.mock import Mock
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import event, select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.api.courses import (
@@ -962,3 +963,69 @@ def test_concurrent_conflicting_updates_have_one_winner_and_one_business_conflic
             assert [course.weekday for course in list_courses(session, user_id)].count(3) == 1
     finally:
         event.remove(engine, "after_cursor_execute", synchronize_first_course_read)
+
+
+@pytest.mark.parametrize("operation", ["create", "update", "delete"])
+def test_real_flush_failure_rolls_back_once_and_session_recovers(
+    client_and_session: tuple[TestClient, sessionmaker],
+    operation: str,
+) -> None:
+    _, SessionLocal = client_and_session
+    with SessionLocal() as session:
+        building = session.query(Building).first()
+        assert building is not None
+        user = User(username=f"flush-{operation}", student_id=f"flush-{operation}", nickname="Flush", password_hash="unused", role="student")
+        session.add(user)
+        session.flush()
+        session.add(SemesterSetting(user_id=user.id, start_date=date(2026, 8, 31), total_weeks=20))
+        session.commit()
+        existing = create_current_user_course(CourseCreate.model_validate(course_payload(building.id)), session, user)
+        original_flush = session.flush
+        session.rollback = Mock(wraps=session.rollback)  # type: ignore[method-assign]
+        session.flush = Mock(side_effect=SQLAlchemyError("flush failed"))  # type: ignore[method-assign]
+
+        with pytest.raises(SQLAlchemyError):
+            if operation == "create":
+                create_current_user_course(CourseCreate.model_validate(course_payload(building.id, weekday=2)), session, user)
+            elif operation == "update":
+                update_current_user_course(existing.id, CourseUpdate(course_name="Changed"), session, user)
+            else:
+                delete_current_user_course(existing.id, session, user)
+
+        assert session.rollback.call_count == 1
+        session.flush = original_flush  # type: ignore[method-assign]
+        recovered = create_current_user_course(CourseCreate.model_validate(course_payload(building.id, weekday=3)), session, user)
+        assert recovered.id is not None
+
+
+@pytest.mark.parametrize("operation", ["create", "update", "delete"])
+def test_real_commit_failure_rolls_back_once_and_session_recovers(
+    client_and_session: tuple[TestClient, sessionmaker],
+    operation: str,
+) -> None:
+    _, SessionLocal = client_and_session
+    with SessionLocal() as session:
+        building = session.query(Building).first()
+        assert building is not None
+        user = User(username=f"commit-{operation}", student_id=f"commit-{operation}", nickname="Commit", password_hash="unused", role="student")
+        session.add(user)
+        session.flush()
+        session.add(SemesterSetting(user_id=user.id, start_date=date(2026, 8, 31), total_weeks=20))
+        session.commit()
+        existing = create_current_user_course(CourseCreate.model_validate(course_payload(building.id)), session, user)
+        original_commit = session.commit
+        session.rollback = Mock(wraps=session.rollback)  # type: ignore[method-assign]
+        session.commit = Mock(side_effect=SQLAlchemyError("commit failed"))  # type: ignore[method-assign]
+
+        with pytest.raises(SQLAlchemyError):
+            if operation == "create":
+                create_current_user_course(CourseCreate.model_validate(course_payload(building.id, weekday=2)), session, user)
+            elif operation == "update":
+                update_current_user_course(existing.id, CourseUpdate(course_name="Changed"), session, user)
+            else:
+                delete_current_user_course(existing.id, session, user)
+
+        assert session.rollback.call_count == 1
+        session.commit = original_commit  # type: ignore[method-assign]
+        recovered = create_current_user_course(CourseCreate.model_validate(course_payload(building.id, weekday=3)), session, user)
+        assert recovered.id is not None
