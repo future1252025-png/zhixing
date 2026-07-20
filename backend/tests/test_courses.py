@@ -2,7 +2,7 @@ from collections.abc import Generator
 from datetime import date
 from pathlib import Path
 from queue import Queue
-from threading import Barrier, BrokenBarrierError, Lock, Thread, get_ident
+from threading import Barrier, BrokenBarrierError, Event as ThreadEvent, Lock, Thread, get_ident
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -19,12 +19,14 @@ from app.api.courses import (
     update_current_user_course,
 )
 from app.core.errors import BusinessError
+from app.core.security import hash_password
 from app.db.database import Base, create_sqlite_engine, get_session, init_db
 from app.db.seed import seed_demo_data
 from app.main import app
 from app.models import Building, Course, SemesterSetting, User
 from app.schemas.course import CourseCreate, CourseRead, CourseUpdate
 from app.services.course_service import add_course, list_courses, update_course
+from app.api.semester import persist_semester_setting_with_retry
 
 
 def make_test_database_url(path: Path) -> str:
@@ -1029,3 +1031,135 @@ def test_real_commit_failure_rolls_back_once_and_session_recovers(
         session.commit = original_commit  # type: ignore[method-assign]
         recovered = create_current_user_course(CourseCreate.model_validate(course_payload(building.id, weekday=3)), session, user)
         assert recovered.id is not None
+
+
+def test_unconfigured_legacy_courses_can_be_repaired_through_the_api(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    client, SessionLocal = client_and_session
+    building_id = get_first_building_id(client)
+    with SessionLocal() as session:
+        user = User(
+            username="legacy-repair",
+            student_id="legacy-repair-2024",
+            nickname="Legacy Repair",
+            password_hash=hash_password("secret123"),
+            role="student",
+        )
+        session.add(user)
+        session.flush()
+        first = Course(
+            user_id=user.id, course_name="Broken A", weekday=1, start_time="bad", end_time="09:40",
+            building_id=building_id, room_name="A101", weeks="1-16",
+        )
+        second = Course(
+            user_id=user.id, course_name="Broken B", weekday=2, start_time="08:00", end_time="09:40",
+            building_id=building_id, room_name="A102", weeks="1-20",
+        )
+        session.add_all([first, second])
+        session.commit()
+        first_id, second_id = first.id, second.id
+
+    login = client.post("/api/auth/login", json={"username": "legacy-repair", "password": "secret123"})
+    headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+    configured = client.put("/api/semester", json={"start_date": "2026-08-31", "total_weeks": 16}, headers=headers)
+    blocked = client.post("/api/courses", json=course_payload(building_id, weekday=3), headers=headers)
+    bad_repair = client.put(f"/api/courses/{first_id}", json={"end_time": "07:00"}, headers=headers)
+    repaired_first = client.put(
+        f"/api/courses/{first_id}", json={"start_time": "08:00", "end_time": "09:40"}, headers=headers
+    )
+    conflicting_repair = client.put(f"/api/courses/{second_id}", json={"weeks": "1-16", "weekday": 1}, headers=headers)
+    repaired_second = client.put(f"/api/courses/{second_id}", json={"weeks": "1-16"}, headers=headers)
+    created = client.post("/api/courses", json=course_payload(building_id, weekday=3), headers=headers)
+
+    assert configured.status_code == 200
+    assert blocked.json()["code"] == "course_data_invalid"
+    assert bad_repair.status_code == 422
+    assert repaired_first.status_code == 200
+    assert conflicting_repair.json()["code"] == "course_conflict"
+    assert repaired_second.status_code == 200
+    assert created.status_code == 201
+
+
+@pytest.mark.parametrize("kind", ["create", "update"])
+@pytest.mark.parametrize("course_first", [True, False])
+def test_course_write_and_semester_shrink_share_one_guard(
+    client_and_session: tuple[TestClient, sessionmaker],
+    kind: str,
+    course_first: bool,
+) -> None:
+    _, SessionLocal = client_and_session
+    with SessionLocal() as session:
+        building = session.query(Building).first()
+        assert building is not None
+        user = User(username=f"race-{kind}-{course_first}", student_id=f"race-{kind}-{course_first}", nickname="Race", password_hash="unused", role="student")
+        session.add(user)
+        session.flush()
+        session.add(SemesterSetting(user_id=user.id, start_date=date(2026, 8, 31), total_weeks=20))
+        existing = Course(user_id=user.id, course_name="Existing", weekday=1, start_time="08:00", end_time="09:40", building_id=building.id, room_name="A101", weeks="1-16")
+        session.add(existing)
+        session.commit()
+        user_id, course_id, building_id = user.id, existing.id, building.id
+
+    engine = SessionLocal.kw["bind"]
+    first_guard = ThreadEvent()
+    release_guard = ThreadEvent()
+    second_finished = ThreadEvent()
+    results: Queue[str] = Queue()
+
+    def hold_first_guard(*args: object) -> None:
+        if "UPDATE semester_settings SET updated_at=semester_settings.updated_at" not in str(args[2]):
+            return
+        if not first_guard.is_set():
+            first_guard.set()
+            assert release_guard.wait(timeout=5)
+
+    event.listen(engine, "after_cursor_execute", hold_first_guard)
+
+    def course_write() -> None:
+        with SessionLocal() as session:
+            try:
+                if kind == "create":
+                    create_current_user_course(CourseCreate.model_validate(course_payload(building_id, weekday=2, weeks="20")), session, SimpleNamespace(id=user_id))
+                else:
+                    update_current_user_course(course_id, CourseUpdate(weeks="20"), session, SimpleNamespace(id=user_id))
+                results.put("course_ok")
+            except BusinessError as error:
+                results.put(error.code)
+            finally:
+                second_finished.set()
+
+    def shrink() -> None:
+        with SessionLocal() as session:
+            try:
+                persist_semester_setting_with_retry(session, user_id, date(2026, 8, 31), 16)
+                results.put("shrink_ok")
+            except BusinessError as error:
+                results.put(error.code)
+            finally:
+                second_finished.set()
+
+    first, second = (course_write, shrink) if course_first else (shrink, course_write)
+    try:
+        first_thread = Thread(target=first)
+        first_thread.start()
+        assert first_guard.wait(timeout=5)
+        second_finished.clear()
+        second_thread = Thread(target=second)
+        second_thread.start()
+        assert second_finished.wait(timeout=0.1) is False
+        release_guard.set()
+        first_thread.join(timeout=10)
+        second_thread.join(timeout=10)
+        assert not first_thread.is_alive() and not second_thread.is_alive()
+        actual = sorted(list(results.queue))
+        if course_first:
+            assert actual == ["course_ok", "semester_courses_out_of_range"]
+        else:
+            assert actual == ["invalid_course_weeks", "shrink_ok"]
+        with SessionLocal() as session:
+            setting = session.scalar(select(SemesterSetting).where(SemesterSetting.user_id == user_id))
+            assert setting is not None
+            assert setting.total_weeks == (20 if course_first else 16)
+    finally:
+        event.remove(engine, "after_cursor_execute", hold_first_guard)
