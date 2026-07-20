@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 from datetime import time
+from typing import get_type_hints
 
 import pytest
 
@@ -33,6 +34,18 @@ def course(course_id: int, **changes: object) -> CourseValue:
 
 def test_time_ranges_touching_at_an_endpoint_do_not_overlap() -> None:
     assert time_ranges_overlap(time(8, 0), time(9, 40), time(9, 40), time(11, 20)) is False
+
+
+def test_time_ranges_overlap_public_signature_uses_datetime_time() -> None:
+    hints = get_type_hints(time_ranges_overlap)
+
+    assert [hints[name] for name in ("a_start", "a_end", "b_start", "b_end")] == [
+        time,
+        time,
+        time,
+        time,
+    ]
+    assert hints["return"] is bool
 
 
 def test_pure_time_policy_requires_datetime_time_values() -> None:

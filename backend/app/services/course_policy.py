@@ -39,10 +39,10 @@ def location_requires_review(room_name: str) -> bool:
 
 
 def time_ranges_overlap(
-    a_start: str,
-    a_end: str,
-    b_start: str,
-    b_end: str,
+    a_start: time,
+    a_end: time,
+    b_start: time,
+    b_end: time,
 ) -> bool:
     return (
         _require_time(a_start) < _require_time(b_end)
