@@ -11,16 +11,11 @@ from pydantic import (
     model_validator,
 )
 
+from app.services.course_policy import location_requires_review
 from app.services.week_rule import normalize_weeks
 
 
 TIME_PATTERN = re.compile(r"^\d{2}:\d{2}$")
-LEGACY_LOCATION_PLACEHOLDERS = frozenset({"待确认教室", "待确认", "未知", "暂无"})
-_LEGACY_LOCATION_PLACEHOLDER_KEYS = frozenset(
-    placeholder.casefold() for placeholder in LEGACY_LOCATION_PLACEHOLDERS
-)
-
-
 def parse_course_time(value: str) -> time:
     if not TIME_PATTERN.match(value):
         raise ValueError("Time must use HH:MM format")
@@ -49,10 +44,6 @@ def normalize_optional_text(value: str | None) -> str | None:
         return None
     text = value.strip()
     return text or None
-
-
-def needs_location_review(room_name: str) -> bool:
-    return room_name.strip().casefold() in _LEGACY_LOCATION_PLACEHOLDER_KEYS
 
 
 class CourseBuildingRead(BaseModel):
@@ -187,4 +178,4 @@ class CourseRead(BaseModel):
     @computed_field(return_type=bool)
     @property
     def needs_location_review(self) -> bool:
-        return needs_location_review(self.room_name)
+        return location_requires_review(self.room_name)

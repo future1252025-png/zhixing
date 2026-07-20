@@ -1,15 +1,19 @@
 from collections.abc import Generator
+from datetime import date
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.db.database import Base, create_sqlite_engine, get_session, init_db
 from app.db.seed import seed_demo_data
 from app.main import app
-from app.models import Building, Course, User
+from app.models import Building, Course, SemesterSetting, User
 from app.schemas.course import CourseCreate, CourseRead, CourseUpdate
+from app.services.course_service import add_course, update_course
 
 
 def make_test_database_url(path: Path) -> str:
@@ -43,7 +47,13 @@ def client_and_session(
         engine.dispose()
 
 
-def auth_headers(client: TestClient, username: str = "alice") -> dict[str, str]:
+def auth_headers(
+    client: TestClient,
+    username: str = "alice",
+    *,
+    configure_semester: bool = True,
+    total_weeks: int = 20,
+) -> dict[str, str]:
     client.post(
         "/api/auth/register",
         json={
@@ -58,7 +68,15 @@ def auth_headers(client: TestClient, username: str = "alice") -> dict[str, str]:
         json={"username": username, "password": "secret123"},
     )
     assert login.status_code == 200
-    return {"Authorization": f"Bearer {login.json()['access_token']}"}
+    headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+    if configure_semester:
+        semester = client.put(
+            "/api/semester",
+            json={"start_date": "2026-08-31", "total_weeks": total_weeks},
+            headers=headers,
+        )
+        assert semester.status_code == 200
+    return headers
 
 
 def get_first_building_id(client: TestClient) -> int:
@@ -354,3 +372,248 @@ def test_user_cannot_access_another_users_course(
     assert all(course["id"] != bob_course_id for course in alice_courses.json())
     assert update_response.status_code == 404
     assert delete_response.status_code == 404
+    assert update_response.json()["code"] == "course_not_found"
+    assert delete_response.json()["code"] == "course_not_found"
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"building_id": None},
+        {"room_name": "   "},
+    ],
+)
+def test_create_course_rejects_missing_building_or_blank_room_with_pydantic_422(
+    client_and_session: tuple[TestClient, sessionmaker],
+    overrides: dict[str, object],
+) -> None:
+    client, _ = client_and_session
+    headers = auth_headers(client)
+    building_id = get_first_building_id(client)
+
+    payload = course_payload(building_id)
+    payload.update(overrides)
+    response = client.post("/api/courses", json=payload, headers=headers)
+
+    assert response.status_code == 422
+
+
+def test_course_writes_require_a_configured_semester(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    client, _ = client_and_session
+    headers = auth_headers(client, configure_semester=False)
+
+    response = client.post(
+        "/api/courses", json=course_payload(get_first_building_id(client)), headers=headers
+    )
+
+    assert response.status_code == 409
+    assert response.json() == {
+        "code": "semester_unconfigured",
+        "message": "Semester is not configured",
+        "fields": [],
+        "details": {},
+    }
+
+
+def test_course_writes_return_structured_business_errors(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    client, _ = client_and_session
+    headers = auth_headers(client, total_weeks=8)
+    building_id = get_first_building_id(client)
+
+    placeholder = client.post(
+        "/api/courses",
+        json=course_payload(building_id, room_name=" 待确认教室 "),
+        headers=headers,
+    )
+    missing_building = client.post(
+        "/api/courses", json=course_payload(999999), headers=headers
+    )
+    invalid_weeks = client.post(
+        "/api/courses", json=course_payload(building_id, weeks="1-9"), headers=headers
+    )
+
+    assert placeholder.status_code == 422
+    assert placeholder.json() == {
+        "code": "invalid_room_name",
+        "message": "Room name must be a confirmed location",
+        "fields": ["room_name"],
+        "details": {},
+    }
+    assert missing_building.status_code == 404
+    assert missing_building.json()["code"] == "building_not_found"
+    assert invalid_weeks.status_code == 422
+    assert invalid_weeks.json()["code"] == "invalid_course_weeks"
+    assert invalid_weeks.json()["fields"] == ["weeks"]
+
+
+def test_create_course_conflict_has_exact_contract_and_touching_times_are_allowed(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    client, _ = client_and_session
+    headers = auth_headers(client)
+    building_id = get_first_building_id(client)
+    first = client.post(
+        "/api/courses", json=course_payload(building_id, course_name="Physics", weeks="1-8"), headers=headers
+    )
+    assert first.status_code == 201
+
+    conflict = client.post(
+        "/api/courses", json=course_payload(building_id, course_name="Math", weeks="2-10"), headers=headers
+    )
+    touching = client.post(
+        "/api/courses",
+        json=course_payload(building_id, start_time="09:40", end_time="11:20", weeks="1-8"),
+        headers=headers,
+    )
+
+    assert conflict.status_code == 409
+    assert conflict.json() == {
+        "code": "course_conflict",
+        "message": "Course conflicts with an existing course",
+        "fields": ["weekday", "start_time", "end_time", "weeks"],
+        "details": {
+            "conflicts": [
+                {"course_id": first.json()["id"], "course_name": "Physics", "overlap_weeks": [2, 3, 4, 5, 6, 7, 8]}
+            ]
+        },
+    }
+    assert touching.status_code == 201
+
+
+def test_disjoint_weeks_and_another_users_course_do_not_conflict(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    client, _ = client_and_session
+    alice_headers = auth_headers(client, "alice")
+    bob_headers = auth_headers(client, "bob")
+    building_id = get_first_building_id(client)
+    assert client.post(
+        "/api/courses", json=course_payload(building_id, weeks="1-16(单)"), headers=bob_headers
+    ).status_code == 201
+    own = client.post(
+        "/api/courses", json=course_payload(building_id, weeks="1-16(双)"), headers=alice_headers
+    )
+
+    assert own.status_code == 201
+
+
+def test_conflicting_update_rolls_back_without_mutating_the_course(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    client, SessionLocal = client_and_session
+    headers = auth_headers(client)
+    building_id = get_first_building_id(client)
+    first = client.post(
+        "/api/courses", json=course_payload(building_id, course_name="First", weekday=1), headers=headers
+    )
+    second = client.post(
+        "/api/courses", json=course_payload(building_id, course_name="Second", weekday=2), headers=headers
+    )
+    assert first.status_code == second.status_code == 201
+
+    response = client.put(f"/api/courses/{second.json()['id']}", json={"weekday": 1}, headers=headers)
+
+    assert response.status_code == 409
+    with SessionLocal() as session:
+        persisted = session.get(Course, second.json()["id"])
+        assert persisted is not None
+        assert persisted.weekday == 2
+
+
+def test_legacy_placeholder_rows_serialize_for_review_but_cannot_be_updated(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    client, SessionLocal = client_and_session
+    headers = auth_headers(client)
+    building_id = get_first_building_id(client)
+    with SessionLocal() as session:
+        user = session.scalar(select(User).where(User.username == "alice"))
+        assert user is not None
+        legacy = Course(
+            user_id=user.id,
+            course_name="Legacy",
+            weekday=1,
+            start_time="08:00",
+            end_time="09:40",
+            building_id=building_id,
+            room_name="未知",
+            weeks="1-16",
+        )
+        session.add(legacy)
+        session.commit()
+        course_id = legacy.id
+
+    listed = client.get("/api/courses", headers=headers)
+    updated = client.put(f"/api/courses/{course_id}", json={"course_name": "Still legacy"}, headers=headers)
+
+    assert next(item for item in listed.json() if item["id"] == course_id)["needs_location_review"] is True
+    assert updated.status_code == 422
+    assert updated.json()["code"] == "invalid_room_name"
+
+
+def test_course_service_flushes_but_never_commits(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    _, SessionLocal = client_and_session
+    with SessionLocal() as session:
+        building = session.query(Building).first()
+        assert building is not None
+        user = User(username="service", student_id="service-2026", nickname="Service", password_hash="unused", role="student")
+        session.add(user)
+        session.flush()
+        session.add(SemesterSetting(user_id=user.id, start_date=date(2026, 8, 31), total_weeks=20))
+        session.flush()
+        session.commit = Mock(wraps=session.commit)  # type: ignore[method-assign]
+
+        created = add_course(session, user_id=user.id, payload=CourseCreate.model_validate(course_payload(building.id)))
+        updated = update_course(session, created, CourseUpdate(course_name="Updated"))
+
+        assert created.id is not None
+        assert updated.course_name == "Updated"
+        session.commit.assert_not_called()
+
+
+def test_course_write_api_commits_once_rolls_back_failures_and_remains_usable(
+    client_and_session: tuple[TestClient, sessionmaker],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, _ = client_and_session
+    headers = auth_headers(client)
+    building_id = get_first_building_id(client)
+    original_commit = Session.commit
+    original_rollback = Session.rollback
+    commit_calls = 0
+    rollback_calls = 0
+
+    def counted_commit(session: Session) -> None:
+        nonlocal commit_calls
+        commit_calls += 1
+        original_commit(session)
+
+    def counted_rollback(session: Session) -> None:
+        nonlocal rollback_calls
+        rollback_calls += 1
+        original_rollback(session)
+
+    monkeypatch.setattr(Session, "commit", counted_commit)
+    monkeypatch.setattr(Session, "rollback", counted_rollback)
+
+    created = client.post(
+        "/api/courses", json=course_payload(building_id, course_name="Committed"), headers=headers
+    )
+    rejected = client.post(
+        "/api/courses", json=course_payload(building_id, room_name="待确认"), headers=headers
+    )
+    usable = client.post(
+        "/api/courses", json=course_payload(building_id, weekday=2, course_name="Usable"), headers=headers
+    )
+
+    assert created.status_code == 201
+    assert rejected.status_code == 422
+    assert usable.status_code == 201
+    assert commit_calls == 2
+    assert rollback_calls == 1

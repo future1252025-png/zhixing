@@ -68,7 +68,14 @@ def auth_headers(client: TestClient, username: str = "schedule_user") -> dict[st
         json={"username": username, "password": "secret123"},
     )
     assert login.status_code == 200
-    return {"Authorization": f"Bearer {login.json()['access_token']}"}
+    headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+    semester = client.put(
+        "/api/semester",
+        json={"start_date": "2026-08-31", "total_weeks": 20},
+        headers=headers,
+    )
+    assert semester.status_code == 200
+    return headers
 
 
 def first_two_building_ids(client: TestClient) -> tuple[int, int]:
