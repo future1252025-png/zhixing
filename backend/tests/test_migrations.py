@@ -33,7 +33,7 @@ def upgrade_to_baseline(database_url: str) -> None:
     command.upgrade(migration_config(database_url), "20260720_00")
 
 
-def insert_legacy_course(database_url: str) -> None:
+def insert_legacy_course(database_url: str, *, drop_version: bool = True) -> None:
     engine = create_engine(database_url)
     try:
         with engine.begin() as connection:
@@ -58,7 +58,8 @@ def insert_legacy_course(database_url: str) -> None:
                     "VALUES (1, 1, 'Legacy course', 1, '08:00', '09:40', 1, '101', NULL, NULL, CURRENT_TIMESTAMP)"
                 )
             )
-            connection.execute(text("DROP TABLE alembic_version"))
+            if drop_version:
+                connection.execute(text("DROP TABLE alembic_version"))
     finally:
         engine.dispose()
 
@@ -148,6 +149,227 @@ def test_upgrade_rejects_unversioned_legacy_schema_with_extra_columns(
     engine = create_engine(database_url)
     try:
         assert "alembic_version" not in inspect(engine).get_table_names()
+    finally:
+        engine.dispose()
+
+
+def _replace_users_table(
+    database_url: str,
+    *,
+    username_definition: str = "username VARCHAR(64) NOT NULL",
+    primary_key_definition: str = "PRIMARY KEY (id)",
+) -> None:
+    primary_key_sql = f", {primary_key_definition}" if primary_key_definition else ""
+    engine = create_engine(database_url)
+    try:
+        with engine.begin() as connection:
+            connection.execute(text("PRAGMA foreign_keys=OFF"))
+            connection.execute(text("PRAGMA legacy_alter_table=ON"))
+            connection.execute(text("ALTER TABLE users RENAME TO users_legacy"))
+            connection.execute(
+                text(
+                    "CREATE TABLE users ("
+                    "id INTEGER NOT NULL, "
+                    "student_id VARCHAR(32), "
+                    f"{username_definition}, "
+                    "password_hash VARCHAR(255) NOT NULL, "
+                    "nickname VARCHAR(64) NOT NULL, "
+                    "avatar_text VARCHAR(4), "
+                    "avatar_color VARCHAR(16), "
+                    "role VARCHAR(32) NOT NULL, "
+                    f"created_at DATETIME NOT NULL{primary_key_sql}"
+                    ")"
+                )
+            )
+            connection.execute(text("DROP TABLE users_legacy"))
+            connection.execute(text("CREATE INDEX ix_users_id ON users (id)"))
+            connection.execute(
+                text("CREATE UNIQUE INDEX ix_users_student_id ON users (student_id)")
+            )
+            connection.execute(
+                text("CREATE UNIQUE INDEX ix_users_username ON users (username)")
+            )
+    finally:
+        engine.dispose()
+
+
+def _replace_courses_table_without_user_foreign_key(database_url: str) -> None:
+    engine = create_engine(database_url)
+    try:
+        with engine.begin() as connection:
+            connection.execute(text("PRAGMA foreign_keys=OFF"))
+            connection.execute(text("PRAGMA legacy_alter_table=ON"))
+            connection.execute(text("ALTER TABLE courses RENAME TO courses_legacy"))
+            connection.execute(
+                text(
+                    "CREATE TABLE courses ("
+                    "id INTEGER NOT NULL, user_id INTEGER NOT NULL, "
+                    "course_name VARCHAR(100) NOT NULL, weekday INTEGER NOT NULL, "
+                    "start_time VARCHAR(5) NOT NULL, end_time VARCHAR(5) NOT NULL, "
+                    "building_id INTEGER NOT NULL, room_name VARCHAR(64) NOT NULL, "
+                    "teacher VARCHAR(64), weeks VARCHAR(64), created_at DATETIME NOT NULL, "
+                    "FOREIGN KEY(building_id) REFERENCES buildings (id), PRIMARY KEY (id)"
+                    ")"
+                )
+            )
+            connection.execute(text("DROP TABLE courses_legacy"))
+            for index_name, column_name in (
+                ("ix_courses_building_id", "building_id"),
+                ("ix_courses_course_name", "course_name"),
+                ("ix_courses_id", "id"),
+                ("ix_courses_user_id", "user_id"),
+                ("ix_courses_weekday", "weekday"),
+            ):
+                connection.execute(
+                    text(f"CREATE INDEX {index_name} ON courses ({column_name})")
+                )
+    finally:
+        engine.dispose()
+
+
+def _assert_unversioned_schema_is_rejected(database_url: str, match: str) -> None:
+    with pytest.raises(RuntimeError, match=match):
+        upgrade_database(database_url)
+
+    engine = create_engine(database_url)
+    try:
+        assert "alembic_version" not in inspect(engine).get_table_names()
+    finally:
+        engine.dispose()
+
+
+def test_upgrade_rejects_unversioned_legacy_schema_without_username_unique_index(
+    tmp_path: Path,
+) -> None:
+    database_url = make_database_url(tmp_path / "missing-unique-index.db")
+    upgrade_to_baseline(database_url)
+    engine = create_engine(database_url)
+    try:
+        with engine.begin() as connection:
+            connection.execute(text("DROP TABLE alembic_version"))
+            connection.execute(text("DROP INDEX ix_users_username"))
+    finally:
+        engine.dispose()
+
+    _assert_unversioned_schema_is_rejected(database_url, "unique indexes")
+
+
+@pytest.mark.parametrize(
+    ("filename", "username_definition", "primary_key_definition", "match"),
+    [
+        ("wrong-type.db", "username INTEGER NOT NULL", "PRIMARY KEY (id)", "type affinity"),
+        ("wrong-nullability.db", "username VARCHAR(64)", "PRIMARY KEY (id)", "nullability"),
+        ("wrong-primary-key.db", "username VARCHAR(64) NOT NULL", "", "primary key"),
+    ],
+)
+def test_upgrade_rejects_unversioned_legacy_schema_with_column_signature_mismatch(
+    tmp_path: Path,
+    filename: str,
+    username_definition: str,
+    primary_key_definition: str,
+    match: str,
+) -> None:
+    database_url = make_database_url(tmp_path / filename)
+    upgrade_to_baseline(database_url)
+    engine = create_engine(database_url)
+    try:
+        with engine.begin() as connection:
+            connection.execute(text("DROP TABLE alembic_version"))
+    finally:
+        engine.dispose()
+    _replace_users_table(
+        database_url,
+        username_definition=username_definition,
+        primary_key_definition=primary_key_definition,
+    )
+
+    _assert_unversioned_schema_is_rejected(database_url, match)
+
+
+def test_upgrade_rejects_unversioned_legacy_schema_without_expected_foreign_key(
+    tmp_path: Path,
+) -> None:
+    database_url = make_database_url(tmp_path / "missing-foreign-key.db")
+    upgrade_to_baseline(database_url)
+    engine = create_engine(database_url)
+    try:
+        with engine.begin() as connection:
+            connection.execute(text("DROP TABLE alembic_version"))
+    finally:
+        engine.dispose()
+    _replace_courses_table_without_user_foreign_key(database_url)
+
+    _assert_unversioned_schema_is_rejected(database_url, "foreign keys")
+
+
+def test_migration_round_trip_preserves_legacy_course_and_recreates_current_schema(
+    tmp_path: Path,
+) -> None:
+    database_url = make_database_url(tmp_path / "round-trip.db")
+    config = migration_config(database_url)
+    upgrade_to_baseline(database_url)
+    insert_legacy_course(database_url, drop_version=False)
+
+    command.upgrade(config, "head")
+    command.downgrade(config, "20260720_00")
+
+    engine = create_engine(database_url)
+    try:
+        inspector = inspect(engine)
+        with engine.connect() as connection:
+            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260720_00"
+            assert connection.scalar(text("SELECT COUNT(*) FROM courses")) == 1
+        legacy_course_columns = {
+            column["name"]: column for column in inspector.get_columns("courses")
+        }
+        assert legacy_course_columns["weeks"]["nullable"]
+        assert "source_kind" not in legacy_course_columns
+        assert "semester_settings" not in inspector.get_table_names()
+        assert "course_import_sources" not in inspector.get_table_names()
+    finally:
+        engine.dispose()
+
+    command.upgrade(config, "head")
+
+    engine = create_engine(database_url)
+    try:
+        inspector = inspect(engine)
+        with engine.connect() as connection:
+            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260720_01"
+            assert connection.scalar(text("SELECT COUNT(*) FROM courses")) == 1
+        assert "source_kind" in {
+            column["name"] for column in inspector.get_columns("courses")
+        }
+        assert {"semester_settings", "course_import_sources"} <= set(
+            inspector.get_table_names()
+        )
+        assert any(
+            index["unique"] and index["column_names"] == ["user_id"]
+            for index in inspector.get_indexes("semester_settings")
+        )
+        source_foreign_keys = inspector.get_foreign_keys("course_import_sources")
+        assert source_foreign_keys == [
+            {
+                "name": None,
+                "constrained_columns": ["course_id"],
+                "referred_schema": None,
+                "referred_table": "courses",
+                "referred_columns": ["id"],
+                "options": {"ondelete": "CASCADE"},
+            }
+        ]
+    finally:
+        engine.dispose()
+
+
+def test_upgrade_database_supports_percent_in_sqlite_path(tmp_path: Path) -> None:
+    database_url = make_database_url(tmp_path / "100%complete.db")
+
+    upgrade_database(database_url)
+
+    engine = create_engine(database_url)
+    try:
+        assert "alembic_version" in inspect(engine).get_table_names()
     finally:
         engine.dispose()
 

@@ -1,6 +1,9 @@
+from datetime import date
 from pathlib import Path
 
+import pytest
 from sqlalchemy import inspect, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
 from app.db.database import Base, create_sqlite_engine, init_db
@@ -11,7 +14,15 @@ from app.db.seed import (
     load_map_points_seed,
     seed_demo_data,
 )
-from app.models import Building, Course, CourseImportSource, LocationPreset, Message, User
+from app.models import (
+    Building,
+    Course,
+    CourseImportSource,
+    LocationPreset,
+    Message,
+    SemesterSetting,
+    User,
+)
 
 
 def make_test_database_url(path: Path) -> str:
@@ -53,6 +64,11 @@ def test_database_tables_can_be_created(tmp_path: Path) -> None:
         for column in inspect(engine).get_columns("course_import_sources")
     }
     assert all(not source_columns[field]["nullable"] for field in required_source_fields)
+    assert SemesterSetting.__table__.columns["total_weeks"].server_default is not None
+    assert (
+        str(SemesterSetting.__table__.columns["total_weeks"].server_default.arg)
+        == "20"
+    )
 
 
 def test_sqlite_file_engine_uses_wal_and_busy_timeout(tmp_path: Path) -> None:
@@ -141,3 +157,99 @@ def test_model_relationships_are_available(tmp_path: Path) -> None:
         assert preset.building is not None
         assert user is not None
         assert len(user.courses) >= 1
+
+
+def test_core_journey_one_to_one_relationships_persist_and_delete_orphans(
+    tmp_path: Path,
+) -> None:
+    engine = create_sqlite_engine(make_test_database_url(tmp_path / "core-relations.db"))
+    init_db(engine)
+    SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+
+    with SessionLocal() as session:
+        user = User(
+            student_id="20240002",
+            username="core-relations",
+            password_hash="hash",
+            nickname="Core relations",
+        )
+        building = Building(
+            name="Core relation building",
+            type="teaching",
+            description="test",
+            latitude=0,
+            longitude=0,
+            map_x=0,
+            map_y=0,
+        )
+        session.add_all([user, building])
+        session.flush()
+        course = Course(
+            user_id=user.id,
+            building_id=building.id,
+            course_name="Core relation course",
+            weekday=1,
+            start_time="08:00",
+            end_time="09:40",
+            room_name="101",
+        )
+        semester_setting = SemesterSetting(user=user, start_date=date(2026, 9, 1))
+        import_source = CourseImportSource(
+            course=course,
+            filename="courses.xlsx",
+            file_sha256="a" * 64,
+            source_row="2",
+            raw_course_name="Core relation course",
+            raw_weekday="Monday",
+            raw_time_or_section="08:00-09:40",
+            raw_teacher="Teacher",
+            raw_weeks="1-20",
+            raw_location="101",
+        )
+        session.add_all([course, semester_setting, import_source])
+        session.commit()
+        user_id = user.id
+        course_id = course.id
+        session.expunge_all()
+
+        persisted_user = session.get(User, user_id)
+        persisted_course = session.get(Course, course_id)
+        assert persisted_user is not None
+        assert persisted_course is not None
+        assert persisted_user.semester_setting is not None
+        assert persisted_user.semester_setting.user is persisted_user
+        assert persisted_course.import_source is not None
+        assert persisted_course.import_source.course is persisted_course
+
+        session.add(SemesterSetting(user_id=user_id, start_date=date(2027, 2, 1)))
+        with pytest.raises(IntegrityError):
+            session.commit()
+        session.rollback()
+
+        session.add(
+            CourseImportSource(
+                course_id=course_id,
+                filename="duplicate.xlsx",
+                file_sha256="b" * 64,
+                source_row="3",
+                raw_course_name="Duplicate",
+                raw_weekday="Tuesday",
+                raw_time_or_section="10:00-11:40",
+                raw_teacher="Teacher",
+                raw_weeks="1-20",
+                raw_location="102",
+            )
+        )
+        with pytest.raises(IntegrityError):
+            session.commit()
+        session.rollback()
+
+        persisted_user.semester_setting = None
+        persisted_course.import_source = None
+        session.flush()
+        assert session.scalar(
+            select(SemesterSetting).where(SemesterSetting.user_id == user_id)
+        ) is None
+        assert session.scalar(
+            select(CourseImportSource).where(CourseImportSource.course_id == course_id)
+        ) is None
