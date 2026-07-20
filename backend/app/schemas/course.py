@@ -1,10 +1,24 @@
 from datetime import datetime, time
+from typing import Literal
 import re
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    computed_field,
+    field_validator,
+    model_validator,
+)
+
+from app.services.week_rule import normalize_weeks
 
 
 TIME_PATTERN = re.compile(r"^\d{2}:\d{2}$")
+LEGACY_LOCATION_PLACEHOLDERS = frozenset({"待确认教室", "待确认", "未知", "暂无"})
+_LEGACY_LOCATION_PLACEHOLDER_KEYS = frozenset(
+    placeholder.casefold() for placeholder in LEGACY_LOCATION_PLACEHOLDERS
+)
 
 
 def parse_course_time(value: str) -> time:
@@ -37,6 +51,10 @@ def normalize_optional_text(value: str | None) -> str | None:
     return text or None
 
 
+def needs_location_review(room_name: str) -> bool:
+    return room_name.strip().casefold() in _LEGACY_LOCATION_PLACEHOLDER_KEYS
+
+
 class CourseBuildingRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -53,17 +71,22 @@ class CourseBase(BaseModel):
     building_id: int
     room_name: str = Field(min_length=1, max_length=64)
     teacher: str | None = Field(default=None, max_length=64)
-    weeks: str | None = Field(default=None, max_length=64)
+    weeks: str = Field(min_length=1, max_length=64)
 
     @field_validator("course_name", "room_name")
     @classmethod
     def normalize_required_fields(cls, value: str) -> str:
         return normalize_required_text(value)
 
-    @field_validator("teacher", "weeks")
+    @field_validator("teacher")
     @classmethod
     def normalize_optional_fields(cls, value: str | None) -> str | None:
         return normalize_optional_text(value)
+
+    @field_validator("weeks")
+    @classmethod
+    def normalize_weeks_field(cls, value: str) -> str:
+        return normalize_weeks(value, max_week=30)
 
     @field_validator("start_time", "end_time")
     @classmethod
@@ -112,10 +135,24 @@ class CourseUpdate(BaseModel):
             return None
         return normalize_required_text(value)
 
-    @field_validator("teacher", "weeks")
+    @field_validator("teacher")
     @classmethod
     def normalize_optional_fields(cls, value: str | None) -> str | None:
         return normalize_optional_text(value)
+
+    @field_validator("weeks", mode="before")
+    @classmethod
+    def reject_null_weeks(cls, value: object) -> object:
+        if value is None:
+            raise ValueError("Field cannot be null")
+        return value
+
+    @field_validator("weeks")
+    @classmethod
+    def normalize_weeks_field(cls, value: str | None) -> str:
+        if value is None:
+            raise ValueError("Field cannot be null")
+        return normalize_weeks(value, max_week=30)
 
     @field_validator("start_time", "end_time")
     @classmethod
@@ -142,6 +179,12 @@ class CourseRead(BaseModel):
     building_id: int
     room_name: str
     teacher: str | None = None
-    weeks: str | None = None
+    weeks: str
+    source_kind: Literal["manual", "import"]
     created_at: datetime
     building: CourseBuildingRead
+
+    @computed_field(return_type=bool)
+    @property
+    def needs_location_review(self) -> bool:
+        return needs_location_review(self.room_name)

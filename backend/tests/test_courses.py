@@ -9,6 +9,7 @@ from app.db.database import Base, create_sqlite_engine, get_session, init_db
 from app.db.seed import seed_demo_data
 from app.main import app
 from app.models import Building, Course, User
+from app.schemas.course import CourseCreate, CourseRead, CourseUpdate
 
 
 def make_test_database_url(path: Path) -> str:
@@ -157,6 +158,48 @@ def test_create_course_success(
     assert data["room_name"] == "A101"
     assert data["building"]["id"] == building_id
     assert "password_hash" not in data
+
+
+def test_course_schema_requires_and_normalizes_weeks() -> None:
+    payload = course_payload(1, weeks=" 第1-16（双）周 ")
+
+    course = CourseCreate.model_validate(payload)
+
+    assert course.weeks == "2-16(双)"
+    with pytest.raises(ValueError):
+        CourseCreate.model_validate(course_payload(1, weeks="   "))
+    with pytest.raises(ValueError):
+        CourseCreate.model_validate({key: value for key, value in payload.items() if key != "weeks"})
+
+
+def test_course_update_rejects_explicit_null_or_blank_weeks_and_normalizes_provided_value() -> None:
+    assert CourseUpdate.model_validate({}).weeks is None
+    assert CourseUpdate.model_validate({"weeks": "第1-4周"}).weeks == "1-4"
+    with pytest.raises(ValueError):
+        CourseUpdate.model_validate({"weeks": None})
+    with pytest.raises(ValueError):
+        CourseUpdate.model_validate({"weeks": "  "})
+
+
+def test_course_read_exposes_source_and_location_review_status() -> None:
+    course = CourseRead.model_validate(
+        {
+            "id": 1,
+            "course_name": "Databases",
+            "weekday": 1,
+            "start_time": "08:00",
+            "end_time": "09:40",
+            "building_id": 1,
+            "room_name": " 待确认教室 ",
+            "weeks": "1-16",
+            "source_kind": "import",
+            "created_at": "2026-01-01T00:00:00Z",
+            "building": {"id": 1, "name": "Library", "type": "study"},
+        }
+    )
+
+    assert course.source_kind == "import"
+    assert course.needs_location_review is True
 
 
 def test_create_course_with_missing_building_returns_404(
