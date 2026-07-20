@@ -3,7 +3,9 @@ uvicorn
 pytest
 httpx
 sqlalchemy
+alembic
 PyJWT
 bcrypt
 python-multipart
 openpyxl
+xlrd

@@ -30,7 +30,19 @@ def test_database_tables_can_be_created(tmp_path: Path) -> None:
         "courses",
         "messages",
         "location_presets",
+        "semester_settings",
+        "course_import_sources",
     }.issubset(table_names)
+
+    course_columns = {
+        column["name"] for column in inspect(engine).get_columns("courses")
+    }
+    semester_indexes = inspect(engine).get_indexes("semester_settings")
+    assert "source_kind" in course_columns
+    assert any(
+        index["unique"] and index["column_names"] == ["user_id"]
+        for index in semester_indexes
+    )
 
 
 def test_sqlite_file_engine_uses_wal_and_busy_timeout(tmp_path: Path) -> None:

@@ -29,3 +29,10 @@ class User(Base):
 
     courses = relationship("Course", back_populates="user")
     messages = relationship("Message", back_populates="user")
+    semester_setting = relationship(
+        "SemesterSetting",
+        back_populates="user",
+        uselist=False,
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )

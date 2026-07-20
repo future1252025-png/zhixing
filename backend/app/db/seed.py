@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import DEFAULT_DATABASE_PATH, settings
-from app.db.database import create_sqlite_engine, init_db
+from app.db.database import create_sqlite_engine, upgrade_database
 from app.models import Building, Course, LocationPreset, Message, User
 
 
@@ -264,8 +264,8 @@ def seed_demo_data(session: Session) -> dict[str, int]:
 
 def initialize_database(database_url: str = settings.database_url) -> dict[str, int]:
     DEFAULT_DATABASE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    upgrade_database(database_url)
     engine = create_sqlite_engine(database_url)
-    init_db(engine)
     SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
     try:
         with SessionLocal() as session:

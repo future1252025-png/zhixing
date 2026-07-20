@@ -1,9 +1,10 @@
 from collections.abc import Generator
+from pathlib import Path
 
 from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine
 from sqlalchemy import event
-from sqlalchemy import inspect, text
+from sqlalchemy import inspect
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from app.core.config import settings
@@ -43,53 +44,78 @@ def init_db(bind: Engine | None = None) -> None:
 
     target_engine = bind or engine
     Base.metadata.create_all(bind=target_engine)
-    ensure_sqlite_schema_compatibility(target_engine)
 
 
-def ensure_sqlite_schema_compatibility(bind: Engine) -> None:
-    if bind.dialect.name != "sqlite":
-        return
+_BASELINE_COLUMNS = {
+    "users": {
+        "id", "student_id", "username", "password_hash", "nickname", "avatar_text",
+        "avatar_color", "role", "created_at",
+    },
+    "buildings": {
+        "id", "name", "type", "description", "latitude", "longitude", "map_x",
+        "map_y", "walk_hint", "created_at",
+    },
+    "courses": {
+        "id", "user_id", "course_name", "weekday", "start_time", "end_time",
+        "building_id", "room_name", "teacher", "weeks", "created_at",
+    },
+    "messages": {
+        "id", "building_id", "user_id", "content", "display_name", "room_name",
+        "latitude", "longitude", "location_source", "distance_to_building_meters",
+        "status", "created_at",
+    },
+    "location_presets": {
+        "id", "name", "building_id", "latitude", "longitude", "description",
+    },
+}
 
+
+def _validate_unversioned_baseline(bind: Engine) -> bool:
     inspector = inspect(bind)
-    table_names = inspector.get_table_names()
-    if "users" in table_names:
-        existing_user_columns = {
-            column["name"]
-            for column in inspector.get_columns("users")
-        }
-        user_columns = {
-            "avatar_text": "VARCHAR(4)",
-            "avatar_color": "VARCHAR(16)",
-        }
+    table_names = set(inspector.get_table_names())
+    baseline_tables = set(_BASELINE_COLUMNS)
 
-        with bind.begin() as connection:
-            for column_name, column_type in user_columns.items():
-                if column_name not in existing_user_columns:
-                    connection.execute(
-                        text(f"ALTER TABLE users ADD COLUMN {column_name} {column_type}")
-                    )
+    if "alembic_version" in table_names:
+        return False
+    if not table_names:
+        return False
+    if table_names != baseline_tables:
+        raise RuntimeError(
+            "检测到未版本化且无法识别的数据库结构。请先备份数据库，再修复为完整旧版结构后重试。"
+        )
 
-    if "messages" not in table_names:
-        return
+    incomplete_tables = [
+        table_name
+        for table_name, required_columns in _BASELINE_COLUMNS.items()
+        if not required_columns
+        <= {column["name"] for column in inspector.get_columns(table_name)}
+    ]
+    if incomplete_tables:
+        tables = ", ".join(incomplete_tables)
+        raise RuntimeError(
+            f"检测到不完整的旧版数据库表（{tables}）。请先备份数据库，再修复表结构后重试。"
+        )
+    return True
 
-    existing_columns = {
-        column["name"]
-        for column in inspector.get_columns("messages")
-    }
-    message_columns = {
-        "room_name": "VARCHAR(64)",
-        "latitude": "FLOAT",
-        "longitude": "FLOAT",
-        "location_source": "VARCHAR(32)",
-        "distance_to_building_meters": "FLOAT",
-    }
 
-    with bind.begin() as connection:
-        for column_name, column_type in message_columns.items():
-            if column_name not in existing_columns:
-                connection.execute(
-                    text(f"ALTER TABLE messages ADD COLUMN {column_name} {column_type}")
-                )
+def upgrade_database(database_url: str = settings.database_url) -> None:
+    """Upgrade a versioned database, or safely adopt a complete legacy baseline."""
+    from alembic import command
+    from alembic.config import Config
+
+    inspection_engine = create_sqlite_engine(database_url)
+    try:
+        is_unversioned_baseline = _validate_unversioned_baseline(inspection_engine)
+    finally:
+        inspection_engine.dispose()
+
+    backend_dir = Path(__file__).resolve().parents[2]
+    config = Config(str(backend_dir / "alembic.ini"))
+    config.set_main_option("script_location", str(backend_dir / "migrations"))
+    config.set_main_option("sqlalchemy.url", database_url)
+    if is_unversioned_baseline:
+        command.stamp(config, "20260720_00")
+    command.upgrade(config, "head")
 
 
 def get_session() -> Generator[Session, None, None]:

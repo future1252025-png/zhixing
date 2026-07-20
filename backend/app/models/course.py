@@ -18,7 +18,18 @@ class Course(Base):
     building_id: Mapped[int] = mapped_column(ForeignKey("buildings.id"), index=True)
     room_name: Mapped[str] = mapped_column(String(64))
     teacher: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    weeks: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    weeks: Mapped[str] = mapped_column(
+        String(64),
+        nullable=False,
+        default="1-20",
+        server_default="1-20",
+    )
+    source_kind: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        default="manual",
+        server_default="manual",
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
@@ -26,3 +37,10 @@ class Course(Base):
 
     user = relationship("User", back_populates="courses")
     building = relationship("Building", back_populates="courses")
+    import_source = relationship(
+        "CourseImportSource",
+        back_populates="course",
+        uselist=False,
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
