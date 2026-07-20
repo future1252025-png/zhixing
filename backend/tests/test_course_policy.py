@@ -63,7 +63,7 @@ def test_detect_conflicts_returns_sorted_intersection_weeks() -> None:
     )
 
     assert [conflict.course_id for conflict in conflicts] == [2]
-    assert conflicts[0].overlap_weeks == [2, 3, 4, 5, 6, 7, 8]
+    assert conflicts[0].overlap_weeks == (2, 3, 4, 5, 6, 7, 8)
 
 
 def test_detect_conflicts_ignores_disjoint_parity_weeks() -> None:

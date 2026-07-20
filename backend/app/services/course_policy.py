@@ -31,7 +31,7 @@ class CourseValue:
 class CourseConflict:
     course_id: int
     course_name: str
-    overlap_weeks: list[int]
+    overlap_weeks: tuple[int, ...]
 
 
 def location_requires_review(room_name: str) -> bool:
@@ -78,7 +78,7 @@ def detect_conflicts(
             course.end_time,
         ):
             continue
-        overlap_weeks = sorted(candidate_weeks & parse_weeks(course.weeks, max_week=max_week))
+        overlap_weeks = tuple(sorted(candidate_weeks & parse_weeks(course.weeks, max_week=max_week)))
         if overlap_weeks:
             conflicts.append(
                 CourseConflict(

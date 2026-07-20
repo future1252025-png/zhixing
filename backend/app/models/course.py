@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String
+from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.database import Base
@@ -8,6 +8,9 @@ from app.db.database import Base
 
 class Course(Base):
     __tablename__ = "courses"
+    __table_args__ = (
+        CheckConstraint("source_kind IN ('manual', 'import')", name="ck_courses_source_kind"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)

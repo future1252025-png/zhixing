@@ -1,29 +1,29 @@
+import sqlite3
+from collections.abc import Callable
+from typing import TypeVar
+
 from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile, status
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
-from app.core.errors import BusinessError
 from app.core.security import get_current_user
 from app.db.database import get_session
-from app.models import User
+from app.models import Course, User
 from app.schemas.course import CourseCreate, CourseRead, CourseUpdate
 from app.schemas.course_import import CourseImportPreviewResponse
 from app.schemas.error import BusinessErrorResponse
 from app.services.course_import_service import build_course_import_preview
-from app.services.course_service import (
-    add_course,
-    delete_course,
-    get_course_for_user,
-    list_courses,
-    update_course,
-)
+from app.services.course_service import add_course, delete_course, list_courses, update_course
 
 
 router = APIRouter(prefix="/api/courses", tags=["courses"])
+SQLITE_BUSY_RETRY_ATTEMPTS = 3
 _BUSINESS_ERROR_RESPONSES = {
     404: {"model": BusinessErrorResponse},
     409: {"model": BusinessErrorResponse},
     422: {"model": BusinessErrorResponse},
 }
+T = TypeVar("T")
 
 
 @router.get("", response_model=list[CourseRead])
@@ -34,25 +34,18 @@ def read_courses(
     return list_courses(session, current_user.id)
 
 
-@router.post(
-    "",
-    response_model=CourseRead,
-    status_code=status.HTTP_201_CREATED,
-    responses=_BUSINESS_ERROR_RESPONSES,
-)
+@router.post("", response_model=CourseRead, status_code=status.HTTP_201_CREATED, responses=_BUSINESS_ERROR_RESPONSES)
 def create_current_user_course(
     payload: CourseCreate,
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ) -> CourseRead:
-    try:
-        course = add_course(session, user_id=current_user.id, payload=payload)
-        session.commit()
-        session.refresh(course)
-        return course
-    except BaseException:
-        session.rollback()
-        raise
+    course = _write_with_retry(
+        session,
+        lambda: add_course(session, user_id=current_user.id, payload=payload),
+    )
+    session.refresh(course)
+    return course
 
 
 @router.post("/import/preview", response_model=CourseImportPreviewResponse)
@@ -76,17 +69,12 @@ def update_current_user_course(
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ) -> CourseRead:
-    try:
-        course = get_course_for_user(session, course_id, current_user.id)
-        if course is None:
-            raise BusinessError(404, "course_not_found", "Course not found")
-        course = update_course(session, course, payload)
-        session.commit()
-        session.refresh(course)
-        return course
-    except BaseException:
-        session.rollback()
-        raise
+    course = _write_with_retry(
+        session,
+        lambda: update_course(session, user_id=current_user.id, course_id=course_id, payload=payload),
+    )
+    session.refresh(course)
+    return course
 
 
 @router.delete("/{course_id}", status_code=status.HTTP_204_NO_CONTENT, responses=_BUSINESS_ERROR_RESPONSES)
@@ -95,13 +83,33 @@ def delete_current_user_course(
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ) -> Response:
-    try:
-        course = get_course_for_user(session, course_id, current_user.id)
-        if course is None:
-            raise BusinessError(404, "course_not_found", "Course not found")
-        delete_course(session, course)
-        session.commit()
-        return Response(status_code=status.HTTP_204_NO_CONTENT)
-    except BaseException:
-        session.rollback()
-        raise
+    _write_with_retry(
+        session,
+        lambda: delete_course(session, user_id=current_user.id, course_id=course_id),
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+def _write_with_retry(session: Session, operation: Callable[[], T]) -> T:
+    for attempt in range(SQLITE_BUSY_RETRY_ATTEMPTS):
+        try:
+            result = operation()
+            session.commit()
+            return result
+        except OperationalError as error:
+            session.rollback()
+            if not _is_retryable_sqlite_lock(error) or attempt == SQLITE_BUSY_RETRY_ATTEMPTS - 1:
+                raise
+        except Exception:
+            session.rollback()
+            raise
+    raise RuntimeError("unreachable sqlite retry state")
+
+
+def _is_retryable_sqlite_lock(error: OperationalError) -> bool:
+    original = error.orig
+    code = getattr(original, "sqlite_errorcode", None)
+    if isinstance(code, int):
+        return (code & 0xFF) in (sqlite3.SQLITE_BUSY, sqlite3.SQLITE_LOCKED)
+    name = getattr(original, "sqlite_errorname", None)
+    return isinstance(name, str) and name.startswith(("SQLITE_BUSY", "SQLITE_LOCKED"))

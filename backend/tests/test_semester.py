@@ -17,7 +17,8 @@ import app.api.semester as semester_api
 from app.core.clock import SHANGHAI_TZ, get_current_time, shanghai_today
 from app.db.database import Base, create_sqlite_engine, get_session, init_db
 from app.main import app
-from app.models import SemesterSetting, User
+from app.core.errors import BusinessError
+from app.models import Building, Course, SemesterSetting, User
 from app.schemas.semester import SemesterUpdate
 from app.services.semester_service import (
     get_semester_response,
@@ -172,6 +173,43 @@ def test_upsert_setting_rejects_invalid_domain_values_before_writing(
 
         assert session.scalar(select(func.count()).select_from(SemesterSetting)) == 0
         session.rollback()
+
+
+def test_semester_shrink_rejects_existing_courses_outside_the_new_range(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    _, SessionLocal = client_and_session
+    with SessionLocal() as session:
+        user = User(username="shrink", student_id="shrink-2026", nickname="Shrink", password_hash="unused", role="student")
+        building = Building(
+            name="Shrink building",
+            type="teaching",
+            description="test",
+            latitude=0,
+            longitude=0,
+            map_x=0,
+            map_y=0,
+        )
+        session.add_all([user, building])
+        session.flush()
+        upsert_setting(session, user.id, date(2026, 8, 31), 20)
+        session.add(Course(
+            user_id=user.id,
+            course_name="Long course",
+            weekday=1,
+            start_time="08:00",
+            end_time="09:40",
+            building_id=building.id,
+            room_name="A101",
+            weeks="1-20",
+        ))
+        session.flush()
+
+        with pytest.raises(BusinessError) as raised:
+            upsert_setting(session, user.id, date(2026, 8, 31), 16)
+
+        assert raised.value.code == "semester_courses_out_of_range"
+        assert raised.value.details["courses"][0]["weeks"] == "1-20"
 
 
 def test_get_unconfigured_semester_returns_exact_json(

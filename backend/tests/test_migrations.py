@@ -78,6 +78,10 @@ def test_upgrade_on_empty_sqlite_creates_current_schema(tmp_path: Path) -> None:
         assert "source_kind" in {
             column["name"] for column in inspector.get_columns("courses")
         }
+        assert any(
+            "source_kind IN ('manual', 'import')" in constraint["sqltext"]
+            for constraint in inspector.get_check_constraints("courses")
+        )
         source_columns = {
             column["name"]: column
             for column in inspector.get_columns("course_import_sources")

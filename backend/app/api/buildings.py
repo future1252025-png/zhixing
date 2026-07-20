@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from app.core.errors import BusinessError
 from app.db.database import get_session
 from app.schemas.building import BuildingRead
+from app.schemas.error import BusinessErrorResponse
 from app.schemas.location_preset import LocationPresetRead
 from app.services.building_service import (
     get_building,
@@ -19,7 +20,11 @@ def read_buildings(session: Session = Depends(get_session)) -> list[BuildingRead
     return list_buildings(session)
 
 
-@router.get("/api/buildings/{building_id}", response_model=BuildingRead)
+@router.get(
+    "/api/buildings/{building_id}",
+    response_model=BuildingRead,
+    responses={404: {"model": BusinessErrorResponse}},
+)
 def read_building(
     building_id: int,
     session: Session = Depends(get_session),

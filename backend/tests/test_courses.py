@@ -1,11 +1,14 @@
 from collections.abc import Generator
 from datetime import date
 from pathlib import Path
+from queue import Queue
+from threading import Barrier, BrokenBarrierError, Lock, Thread, get_ident
+from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import select
+from sqlalchemy import event, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.api.courses import (
@@ -20,7 +23,7 @@ from app.db.seed import seed_demo_data
 from app.main import app
 from app.models import Building, Course, SemesterSetting, User
 from app.schemas.course import CourseCreate, CourseRead, CourseUpdate
-from app.services.course_service import add_course, update_course
+from app.services.course_service import add_course, list_courses, update_course
 
 
 def make_test_database_url(path: Path) -> str:
@@ -471,8 +474,16 @@ def test_week_31_is_a_standard_schema_validation_error(
     )
 
     assert response.status_code == 422
-    assert "detail" in response.json()
-    assert "code" not in response.json()
+    assert response.json()["code"] == "validation_error"
+    assert response.json()["fields"] == ["weeks"]
+    assert response.json()["message"] == "请求参数校验失败"
+    assert response.json()["details"]["errors"] == [
+        {
+            "loc": ["body", "weeks"],
+            "msg": "Value error, Week must be between 1 and 30",
+            "type": "value_error",
+        }
+    ]
 
 
 def test_create_course_conflict_has_exact_contract_and_touching_times_are_allowed(
@@ -570,6 +581,7 @@ def test_legacy_placeholder_rows_serialize_for_review_but_cannot_be_updated(
         )
         session.add(legacy)
         session.commit()
+        legacy_id = legacy.id
         course_id = legacy.id
 
     listed = client.get("/api/courses", headers=headers)
@@ -578,6 +590,73 @@ def test_legacy_placeholder_rows_serialize_for_review_but_cannot_be_updated(
     assert next(item for item in listed.json() if item["id"] == course_id)["needs_location_review"] is True
     assert updated.status_code == 422
     assert updated.json()["code"] == "invalid_room_name"
+
+
+def test_malformed_stored_course_returns_course_data_invalid_not_a_candidate_error(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    client, SessionLocal = client_and_session
+    headers = auth_headers(client)
+    building_id = get_first_building_id(client)
+    with SessionLocal() as session:
+        user = session.scalar(select(User).where(User.username == "alice"))
+        assert user is not None
+        legacy = Course(
+            user_id=user.id,
+            course_name="Broken time",
+            weekday=1,
+            start_time="bad",
+            end_time="09:40",
+            building_id=building_id,
+            room_name="A101",
+            weeks="1-16",
+        )
+        session.add(legacy)
+        session.commit()
+        legacy_id = legacy.id
+
+    response = client.post("/api/courses", json=course_payload(building_id), headers=headers)
+
+    assert response.status_code == 409
+    assert response.json()["code"] == "course_data_invalid"
+    assert response.json()["details"] == {
+        "course_id": legacy_id,
+        "course_name": "Broken time",
+        "issues": [{"field": "time", "code": "invalid_time_range"}],
+    }
+
+
+def test_legacy_weeks_outside_semester_block_others_but_can_be_repaired(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    client, SessionLocal = client_and_session
+    headers = auth_headers(client, total_weeks=16)
+    building_id = get_first_building_id(client)
+    with SessionLocal() as session:
+        user = session.scalar(select(User).where(User.username == "alice"))
+        assert user is not None
+        legacy = Course(
+            user_id=user.id,
+            course_name="Long legacy",
+            weekday=1,
+            start_time="08:00",
+            end_time="09:40",
+            building_id=building_id,
+            room_name="A101",
+            weeks="1-20",
+        )
+        session.add(legacy)
+        session.commit()
+        legacy_id = legacy.id
+
+    blocked = client.post("/api/courses", json=course_payload(building_id, weekday=2), headers=headers)
+    repaired = client.put(f"/api/courses/{legacy_id}", json={"weeks": "1-16"}, headers=headers)
+
+    assert blocked.status_code == 409
+    assert blocked.json()["code"] == "course_data_invalid"
+    assert blocked.json()["details"]["course_id"] == legacy_id
+    assert repaired.status_code == 200
+    assert repaired.json()["weeks"] == "1-16"
 
 
 def test_course_service_flushes_but_never_commits(
@@ -596,10 +675,15 @@ def test_course_service_flushes_but_never_commits(
         session.rollback = Mock(wraps=session.rollback)  # type: ignore[method-assign]
 
         created = add_course(session, user_id=user.id, payload=CourseCreate.model_validate(course_payload(building.id)))
-        updated = update_course(session, created, CourseUpdate(course_name="Updated"))
+        updated = update_course(
+            session,
+            user_id=user.id,
+            course_id=created.id,
+            payload=CourseUpdate(course_name="Updated"),
+        )
         from app.services.course_service import delete_course
 
-        delete_course(session, updated)
+        delete_course(session, user_id=user.id, course_id=updated.id)
 
         assert created.id is not None
         assert updated.course_name == "Updated"
@@ -747,3 +831,134 @@ def test_failed_route_update_rolls_back_and_keeps_the_same_session_usable(
             CourseCreate.model_validate(course_payload(building.id, course_name="Usable", weekday=3)), session, user
         )
         assert usable.id is not None
+
+
+def test_concurrent_conflicting_creates_have_one_winner_and_one_business_conflict(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    client, SessionLocal = client_and_session
+    auth_headers(client)
+    building_id = get_first_building_id(client)
+    with SessionLocal() as session:
+        user = session.scalar(select(User).where(User.username == "alice"))
+        assert user is not None
+        user_id = user.id
+
+    start = Barrier(2)
+    read_barrier = Barrier(2)
+    seen_threads: set[int] = set()
+    seen_lock = Lock()
+    engine = SessionLocal.kw["bind"]
+    results: Queue[str] = Queue()
+
+    def synchronize_first_course_read(*args: object) -> None:
+        statement = str(args[2])
+        if "FROM courses" not in statement:
+            return
+        thread_id = get_ident()
+        with seen_lock:
+            if thread_id in seen_threads:
+                return
+            seen_threads.add(thread_id)
+        try:
+            read_barrier.wait(timeout=1)
+        except BrokenBarrierError:
+            pass
+
+    event.listen(engine, "after_cursor_execute", synchronize_first_course_read)
+
+    def create_in_own_session(name: str) -> None:
+        with SessionLocal() as session:
+            try:
+                start.wait(timeout=10)
+                create_current_user_course(
+                    CourseCreate.model_validate(course_payload(building_id, course_name=name)),
+                    session,
+                    SimpleNamespace(id=user_id),
+                )
+                results.put("created")
+            except BusinessError as error:
+                results.put(error.code)
+
+    try:
+        workers = [Thread(target=create_in_own_session, args=(name,)) for name in ("A", "B")]
+        for worker in workers:
+            worker.start()
+        for worker in workers:
+            worker.join(timeout=15)
+
+        assert all(not worker.is_alive() for worker in workers)
+        assert sorted(list(results.queue)) == ["course_conflict", "created"]
+        with SessionLocal() as session:
+            assert len(list_courses(session, user_id)) == 1
+    finally:
+        event.remove(engine, "after_cursor_execute", synchronize_first_course_read)
+
+
+def test_concurrent_conflicting_updates_have_one_winner_and_one_business_conflict(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    client, SessionLocal = client_and_session
+    headers = auth_headers(client)
+    building_id = get_first_building_id(client)
+    first = client.post("/api/courses", json=course_payload(building_id, weekday=1, course_name="First"), headers=headers)
+    second = client.post("/api/courses", json=course_payload(building_id, weekday=2, course_name="Second"), headers=headers)
+    assert first.status_code == second.status_code == 201
+    with SessionLocal() as session:
+        user = session.scalar(select(User).where(User.username == "alice"))
+        assert user is not None
+        user_id = user.id
+
+    start = Barrier(2)
+    read_barrier = Barrier(2)
+    seen_threads: set[int] = set()
+    seen_lock = Lock()
+    engine = SessionLocal.kw["bind"]
+    results: Queue[str] = Queue()
+
+    def synchronize_first_course_read(*args: object) -> None:
+        statement = str(args[2])
+        if "FROM courses" not in statement:
+            return
+        thread_id = get_ident()
+        with seen_lock:
+            if thread_id in seen_threads:
+                return
+            seen_threads.add(thread_id)
+        try:
+            read_barrier.wait(timeout=1)
+        except BrokenBarrierError:
+            pass
+
+    event.listen(engine, "after_cursor_execute", synchronize_first_course_read)
+
+    def update_in_own_session(course_id: int) -> None:
+        with SessionLocal() as session:
+            try:
+                start.wait(timeout=10)
+                update_current_user_course(
+                    course_id,
+                    CourseUpdate(weekday=3),
+                    session,
+                    SimpleNamespace(id=user_id),
+                )
+                results.put("updated")
+            except BusinessError as error:
+                results.put(error.code)
+
+    try:
+        workers = [
+            Thread(target=update_in_own_session, args=(first.json()["id"],)),
+            Thread(target=update_in_own_session, args=(second.json()["id"],)),
+        ]
+        for worker in workers:
+            worker.start()
+        for worker in workers:
+            worker.join(timeout=15)
+
+        assert all(not worker.is_alive() for worker in workers)
+        assert sorted(list(results.queue)) == ["course_conflict", "updated"]
+        with SessionLocal() as session:
+            assert [course.weekday for course in list_courses(session, user_id)].count(3) == 1
+    finally:
+        event.remove(engine, "after_cursor_execute", synchronize_first_course_read)

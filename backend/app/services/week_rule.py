@@ -140,3 +140,12 @@ def weeks_overlap(left: str, right: str, *, max_week: int) -> set[int]:
     """Return the weeks selected by both expressions."""
 
     return parse_weeks(left, max_week=max_week) & parse_weeks(right, max_week=max_week)
+
+
+def weeks_fit_max_week(value: str, *, max_week: int) -> bool:
+    """Whether a stored expression is valid within a proposed semester length."""
+    try:
+        parse_weeks(value, max_week=max_week)
+    except WeekExpressionError:
+        return False
+    return True

@@ -1,4 +1,5 @@
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -23,6 +24,32 @@ async def business_error_handler(
 ) -> JSONResponse:
     _ = request
     return JSONResponse(status_code=error.status_code, content=error.as_response())
+
+
+@app.exception_handler(RequestValidationError)
+async def request_validation_error_handler(
+    request: Request,
+    error: RequestValidationError,
+) -> JSONResponse:
+    _ = request
+    errors = [
+        {
+            "loc": list(item["loc"]),
+            "msg": str(item["msg"]),
+            "type": str(item["type"]),
+        }
+        for item in error.errors()
+    ]
+    fields = list(dict.fromkeys(str(item["loc"][-1]) for item in errors if item["loc"]))
+    return JSONResponse(
+        status_code=422,
+        content={
+            "code": "validation_error",
+            "message": "请求参数校验失败",
+            "fields": fields,
+            "details": {"errors": errors},
+        },
+    )
 
 app.add_middleware(
     CORSMiddleware,
