@@ -253,3 +253,82 @@ def test_core_journey_one_to_one_relationships_persist_and_delete_orphans(
         assert session.scalar(
             select(CourseImportSource).where(CourseImportSource.course_id == course_id)
         ) is None
+
+
+def test_database_cascades_delete_unloaded_core_journey_children(tmp_path: Path) -> None:
+    engine = create_sqlite_engine(make_test_database_url(tmp_path / "database-cascade.db"))
+    init_db(engine)
+    SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+
+    with SessionLocal() as session:
+        semester_user = User(
+            student_id="20240003",
+            username="semester-cascade",
+            password_hash="hash",
+            nickname="Semester cascade",
+        )
+        course_user = User(
+            student_id="20240004",
+            username="course-cascade",
+            password_hash="hash",
+            nickname="Course cascade",
+        )
+        building = Building(
+            name="Cascade building",
+            type="teaching",
+            description="test",
+            latitude=0,
+            longitude=0,
+            map_x=0,
+            map_y=0,
+        )
+        session.add_all([semester_user, course_user, building])
+        session.flush()
+        semester_setting = SemesterSetting(
+            user=semester_user,
+            start_date=date(2026, 9, 1),
+        )
+        course = Course(
+            user_id=course_user.id,
+            building_id=building.id,
+            course_name="Cascade course",
+            weekday=1,
+            start_time="08:00",
+            end_time="09:40",
+            room_name="101",
+        )
+        import_source = CourseImportSource(
+            course=course,
+            filename="cascade.xlsx",
+            file_sha256="c" * 64,
+            source_row="2",
+            raw_course_name="Cascade course",
+            raw_weekday="Monday",
+            raw_time_or_section="08:00-09:40",
+            raw_teacher="Teacher",
+            raw_weeks="1-20",
+            raw_location="101",
+        )
+        session.add_all([semester_setting, course, import_source])
+        session.commit()
+        semester_user_id = semester_user.id
+        semester_setting_id = semester_setting.id
+        course_id = course.id
+        import_source_id = import_source.id
+        session.expunge_all()
+
+    with SessionLocal() as session:
+        assert session.connection().exec_driver_sql("PRAGMA foreign_keys").scalar() == 1
+        semester_user = session.get(User, semester_user_id)
+        course = session.get(Course, course_id)
+        assert semester_user is not None
+        assert course is not None
+        assert "semester_setting" in inspect(semester_user).unloaded
+        assert "import_source" in inspect(course).unloaded
+        session.delete(semester_user)
+        session.delete(course)
+        session.commit()
+
+    with SessionLocal() as session:
+        assert session.get(SemesterSetting, semester_setting_id) is None
+        assert session.get(CourseImportSource, import_source_id) is None

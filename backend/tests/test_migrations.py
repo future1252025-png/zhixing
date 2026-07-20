@@ -158,8 +158,10 @@ def _replace_users_table(
     *,
     username_definition: str = "username VARCHAR(64) NOT NULL",
     primary_key_definition: str = "PRIMARY KEY (id)",
+    extra_constraints: str = "",
 ) -> None:
     primary_key_sql = f", {primary_key_definition}" if primary_key_definition else ""
+    extra_constraints_sql = f", {extra_constraints}" if extra_constraints else ""
     engine = create_engine(database_url)
     try:
         with engine.begin() as connection:
@@ -177,7 +179,7 @@ def _replace_users_table(
                     "avatar_text VARCHAR(4), "
                     "avatar_color VARCHAR(16), "
                     "role VARCHAR(32) NOT NULL, "
-                    f"created_at DATETIME NOT NULL{primary_key_sql}"
+                    f"created_at DATETIME NOT NULL{extra_constraints_sql}{primary_key_sql}"
                     ")"
                 )
             )
@@ -193,7 +195,12 @@ def _replace_users_table(
         engine.dispose()
 
 
-def _replace_courses_table_without_user_foreign_key(database_url: str) -> None:
+def _replace_courses_table(
+    database_url: str,
+    *,
+    user_foreign_key: str = "",
+) -> None:
+    user_foreign_key_sql = f", {user_foreign_key}" if user_foreign_key else ""
     engine = create_engine(database_url)
     try:
         with engine.begin() as connection:
@@ -208,7 +215,8 @@ def _replace_courses_table_without_user_foreign_key(database_url: str) -> None:
                     "start_time VARCHAR(5) NOT NULL, end_time VARCHAR(5) NOT NULL, "
                     "building_id INTEGER NOT NULL, room_name VARCHAR(64) NOT NULL, "
                     "teacher VARCHAR(64), weeks VARCHAR(64), created_at DATETIME NOT NULL, "
-                    "FOREIGN KEY(building_id) REFERENCES buildings (id), PRIMARY KEY (id)"
+                    "FOREIGN KEY(building_id) REFERENCES buildings (id)"
+                    f"{user_foreign_key_sql}, PRIMARY KEY (id)"
                     ")"
                 )
             )
@@ -297,7 +305,83 @@ def test_upgrade_rejects_unversioned_legacy_schema_without_expected_foreign_key(
             connection.execute(text("DROP TABLE alembic_version"))
     finally:
         engine.dispose()
-    _replace_courses_table_without_user_foreign_key(database_url)
+    _replace_courses_table(database_url)
+
+    _assert_unversioned_schema_is_rejected(database_url, "foreign keys")
+
+
+def test_upgrade_rejects_unversioned_legacy_schema_with_partial_unique_index(
+    tmp_path: Path,
+) -> None:
+    database_url = make_database_url(tmp_path / "partial-index.db")
+    upgrade_to_baseline(database_url)
+    engine = create_engine(database_url)
+    try:
+        with engine.begin() as connection:
+            connection.execute(text("DROP TABLE alembic_version"))
+            connection.execute(text("DROP INDEX ix_users_username"))
+            connection.execute(
+                text(
+                    "CREATE UNIQUE INDEX ix_users_username ON users (username) "
+                    "WHERE username LIKE 'a%'"
+                )
+            )
+    finally:
+        engine.dispose()
+
+    _assert_unversioned_schema_is_rejected(database_url, "index predicates")
+
+
+def test_upgrade_rejects_unversioned_legacy_schema_with_server_default(
+    tmp_path: Path,
+) -> None:
+    database_url = make_database_url(tmp_path / "server-default.db")
+    upgrade_to_baseline(database_url)
+    engine = create_engine(database_url)
+    try:
+        with engine.begin() as connection:
+            connection.execute(text("DROP TABLE alembic_version"))
+    finally:
+        engine.dispose()
+    _replace_users_table(
+        database_url,
+        username_definition="username VARCHAR(64) NOT NULL DEFAULT 'legacy'",
+    )
+
+    _assert_unversioned_schema_is_rejected(database_url, "server defaults")
+
+
+def test_upgrade_rejects_unversioned_legacy_schema_with_extra_check_constraint(
+    tmp_path: Path,
+) -> None:
+    database_url = make_database_url(tmp_path / "check-constraint.db")
+    upgrade_to_baseline(database_url)
+    engine = create_engine(database_url)
+    try:
+        with engine.begin() as connection:
+            connection.execute(text("DROP TABLE alembic_version"))
+    finally:
+        engine.dispose()
+    _replace_users_table(database_url, extra_constraints="CHECK (username <> '')")
+
+    _assert_unversioned_schema_is_rejected(database_url, "check constraints")
+
+
+def test_upgrade_rejects_unversioned_legacy_schema_with_foreign_key_options(
+    tmp_path: Path,
+) -> None:
+    database_url = make_database_url(tmp_path / "foreign-key-options.db")
+    upgrade_to_baseline(database_url)
+    engine = create_engine(database_url)
+    try:
+        with engine.begin() as connection:
+            connection.execute(text("DROP TABLE alembic_version"))
+    finally:
+        engine.dispose()
+    _replace_courses_table(
+        database_url,
+        user_foreign_key="FOREIGN KEY(user_id) REFERENCES users (id) ON UPDATE CASCADE",
+    )
 
     _assert_unversioned_schema_is_rejected(database_url, "foreign keys")
 

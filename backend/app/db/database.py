@@ -54,6 +54,7 @@ class _ColumnSignature:
     affinity: str
     nullable: bool
     primary_key: bool
+    server_default: str | None
 
 
 @dataclass(frozen=True)
@@ -61,13 +62,20 @@ class _ForeignKeySignature:
     constrained_columns: tuple[str, ...]
     referred_table: str
     referred_columns: tuple[str, ...]
-    ondelete: str | None
+    options: tuple[tuple[str, str], ...]
 
 
 @dataclass(frozen=True)
 class _IndexSignature:
     name: str
     columns: tuple[str, ...]
+    dialect_options: tuple[tuple[str, str], ...]
+
+
+@dataclass(frozen=True)
+class _CheckConstraintSignature:
+    name: str | None
+    sqltext: str
 
 
 @dataclass(frozen=True)
@@ -77,28 +85,35 @@ class _TableSignature:
     unique_indexes: frozenset[_IndexSignature]
     nonunique_indexes: frozenset[_IndexSignature]
     unique_constraints: frozenset[tuple[str, ...]]
+    check_constraints: frozenset[_CheckConstraintSignature]
 
 
-def _column(name: str, affinity: str, nullable: bool, primary_key: bool = False) -> _ColumnSignature:
-    return _ColumnSignature(name, affinity, nullable, primary_key)
+def _column(
+    name: str,
+    affinity: str,
+    nullable: bool,
+    primary_key: bool = False,
+    server_default: str | None = None,
+) -> _ColumnSignature:
+    return _ColumnSignature(name, affinity, nullable, primary_key, server_default)
 
 
 def _foreign_key(
     constrained_columns: tuple[str, ...],
     referred_table: str,
     referred_columns: tuple[str, ...],
-    ondelete: str | None = None,
+    options: tuple[tuple[str, str], ...] = (),
 ) -> _ForeignKeySignature:
     return _ForeignKeySignature(
         constrained_columns,
         referred_table,
         referred_columns,
-        ondelete,
+        options,
     )
 
 
 def _index(name: str, *columns: str) -> _IndexSignature:
-    return _IndexSignature(name, columns)
+    return _IndexSignature(name, columns, ())
 
 
 def _table_signature(
@@ -108,6 +123,7 @@ def _table_signature(
     unique_indexes: tuple[_IndexSignature, ...] = (),
     nonunique_indexes: tuple[_IndexSignature, ...] = (),
     unique_constraints: tuple[tuple[str, ...], ...] = (),
+    check_constraints: tuple[_CheckConstraintSignature, ...] = (),
 ) -> _TableSignature:
     return _TableSignature(
         columns=frozenset(columns),
@@ -115,6 +131,7 @@ def _table_signature(
         unique_indexes=frozenset(unique_indexes),
         nonunique_indexes=frozenset(nonunique_indexes),
         unique_constraints=frozenset(unique_constraints),
+        check_constraints=frozenset(check_constraints),
     )
 
 
@@ -243,6 +260,17 @@ def _sqlite_affinity(type_name: str) -> str:
     return "NUMERIC"
 
 
+def _normalize_sqlite_sql(value: object) -> str:
+    return " ".join(str(value).strip().split())
+
+
+def _normalize_reflected_options(options: dict[str, object]) -> tuple[tuple[str, str], ...]:
+    return tuple(
+        (str(key), _normalize_sqlite_sql(value))
+        for key, value in sorted(options.items())
+    )
+
+
 def _actual_table_signature(inspector, table_name: str) -> _TableSignature:
     primary_key_columns = frozenset(
         inspector.get_pk_constraint(table_name).get("constrained_columns") or ()
@@ -253,6 +281,11 @@ def _actual_table_signature(inspector, table_name: str) -> _TableSignature:
             affinity=_sqlite_affinity(str(column["type"])),
             nullable=bool(column["nullable"]),
             primary_key=column["name"] in primary_key_columns,
+            server_default=(
+                _normalize_sqlite_sql(column["default"])
+                if column.get("default") is not None
+                else None
+            ),
         )
         for column in inspector.get_columns(table_name)
     )
@@ -261,18 +294,26 @@ def _actual_table_signature(inspector, table_name: str) -> _TableSignature:
             constrained_columns=tuple(foreign_key["constrained_columns"]),
             referred_table=foreign_key["referred_table"],
             referred_columns=tuple(foreign_key["referred_columns"]),
-            ondelete=(foreign_key.get("options", {}).get("ondelete") or None),
+            options=_normalize_reflected_options(foreign_key.get("options", {})),
         )
         for foreign_key in inspector.get_foreign_keys(table_name)
     )
     indexes = inspector.get_indexes(table_name)
     unique_indexes = frozenset(
-        _IndexSignature(index["name"], tuple(index["column_names"]))
+        _IndexSignature(
+            index["name"],
+            tuple(index["column_names"]),
+            _normalize_reflected_options(index.get("dialect_options", {})),
+        )
         for index in indexes
         if bool(index["unique"])
     )
     nonunique_indexes = frozenset(
-        _IndexSignature(index["name"], tuple(index["column_names"]))
+        _IndexSignature(
+            index["name"],
+            tuple(index["column_names"]),
+            _normalize_reflected_options(index.get("dialect_options", {})),
+        )
         for index in indexes
         if not bool(index["unique"])
     )
@@ -281,12 +322,20 @@ def _actual_table_signature(inspector, table_name: str) -> _TableSignature:
         for constraint in inspector.get_unique_constraints(table_name)
         if constraint.get("column_names")
     )
+    check_constraints = frozenset(
+        _CheckConstraintSignature(
+            name=constraint.get("name"),
+            sqltext=_normalize_sqlite_sql(constraint["sqltext"]),
+        )
+        for constraint in inspector.get_check_constraints(table_name)
+    )
     return _TableSignature(
         columns=columns,
         foreign_keys=foreign_keys,
         unique_indexes=unique_indexes,
         nonunique_indexes=nonunique_indexes,
         unique_constraints=unique_constraints,
+        check_constraints=check_constraints,
     )
 
 
@@ -332,14 +381,39 @@ def _validate_unversioned_baseline(bind: Engine) -> bool:
             for name in common_columns
         ):
             details.append("主键（primary key）")
+        if any(
+            expected_columns[name].server_default != actual_columns[name].server_default
+            for name in common_columns
+        ):
+            details.append("服务端默认值（server defaults）")
         if expected.foreign_keys != actual.foreign_keys:
-            details.append("外键（foreign keys）")
+            details.append("外键及选项（foreign keys/options）")
         if expected.unique_constraints != actual.unique_constraints:
             details.append("唯一约束（unique constraints）")
+        if expected.check_constraints != actual.check_constraints:
+            details.append("检查约束（check constraints）")
         if expected.unique_indexes != actual.unique_indexes:
-            details.append("唯一索引（unique indexes）")
+            expected_keys = {
+                (index.name, index.columns) for index in expected.unique_indexes
+            }
+            actual_keys = {
+                (index.name, index.columns) for index in actual.unique_indexes
+            }
+            if expected_keys == actual_keys:
+                details.append("索引谓词或方言选项（index predicates/dialect options）")
+            else:
+                details.append("唯一索引（unique indexes）")
         if expected.nonunique_indexes != actual.nonunique_indexes:
-            details.append("普通索引（nonunique indexes）")
+            expected_keys = {
+                (index.name, index.columns) for index in expected.nonunique_indexes
+            }
+            actual_keys = {
+                (index.name, index.columns) for index in actual.nonunique_indexes
+            }
+            if expected_keys == actual_keys:
+                details.append("索引谓词或方言选项（index predicates/dialect options）")
+            else:
+                details.append("普通索引（nonunique indexes）")
         if details:
             table_mismatches.append(f"{table_name}（{'；'.join(details)}）")
 
