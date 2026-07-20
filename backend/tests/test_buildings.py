@@ -76,6 +76,12 @@ def test_get_missing_building_returns_404(seeded_client: TestClient) -> None:
     response = seeded_client.get("/api/buildings/999999")
 
     assert response.status_code == 404
+    assert response.json() == {
+        "code": "building_not_found",
+        "message": "Building not found",
+        "fields": [],
+        "details": {},
+    }
 
 
 def test_get_location_presets_returns_seeded_presets(

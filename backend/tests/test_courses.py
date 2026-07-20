@@ -8,6 +8,13 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
+from app.api.courses import (
+    create_current_user_course,
+    delete_current_user_course,
+    read_courses,
+    update_current_user_course,
+)
+from app.core.errors import BusinessError
 from app.db.database import Base, create_sqlite_engine, get_session, init_db
 from app.db.seed import seed_demo_data
 from app.main import app
@@ -421,7 +428,7 @@ def test_course_writes_return_structured_business_errors(
     client_and_session: tuple[TestClient, sessionmaker],
 ) -> None:
     client, _ = client_and_session
-    headers = auth_headers(client, total_weeks=8)
+    headers = auth_headers(client, total_weeks=16)
     building_id = get_first_building_id(client)
 
     placeholder = client.post(
@@ -433,7 +440,7 @@ def test_course_writes_return_structured_business_errors(
         "/api/courses", json=course_payload(999999), headers=headers
     )
     invalid_weeks = client.post(
-        "/api/courses", json=course_payload(building_id, weeks="1-9"), headers=headers
+        "/api/courses", json=course_payload(building_id, weeks="20"), headers=headers
     )
 
     assert placeholder.status_code == 422
@@ -448,6 +455,24 @@ def test_course_writes_return_structured_business_errors(
     assert invalid_weeks.status_code == 422
     assert invalid_weeks.json()["code"] == "invalid_course_weeks"
     assert invalid_weeks.json()["fields"] == ["weeks"]
+    assert invalid_weeks.json()["details"] == {"max_week": 16}
+
+
+def test_week_31_is_a_standard_schema_validation_error(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    client, _ = client_and_session
+    headers = auth_headers(client)
+
+    response = client.post(
+        "/api/courses",
+        json=course_payload(get_first_building_id(client), weeks="31"),
+        headers=headers,
+    )
+
+    assert response.status_code == 422
+    assert "detail" in response.json()
+    assert "code" not in response.json()
 
 
 def test_create_course_conflict_has_exact_contract_and_touching_times_are_allowed(
@@ -473,7 +498,7 @@ def test_create_course_conflict_has_exact_contract_and_touching_times_are_allowe
     assert conflict.status_code == 409
     assert conflict.json() == {
         "code": "course_conflict",
-        "message": "Course conflicts with an existing course",
+        "message": "该时间与已有课程冲突",
         "fields": ["weekday", "start_time", "end_time", "weeks"],
         "details": {
             "conflicts": [
@@ -568,13 +593,19 @@ def test_course_service_flushes_but_never_commits(
         session.add(SemesterSetting(user_id=user.id, start_date=date(2026, 8, 31), total_weeks=20))
         session.flush()
         session.commit = Mock(wraps=session.commit)  # type: ignore[method-assign]
+        session.rollback = Mock(wraps=session.rollback)  # type: ignore[method-assign]
 
         created = add_course(session, user_id=user.id, payload=CourseCreate.model_validate(course_payload(building.id)))
         updated = update_course(session, created, CourseUpdate(course_name="Updated"))
+        from app.services.course_service import delete_course
+
+        delete_course(session, updated)
 
         assert created.id is not None
         assert updated.course_name == "Updated"
+        assert session.get(Course, created.id) is None
         session.commit.assert_not_called()
+        session.rollback.assert_not_called()
 
 
 def test_course_write_api_commits_once_rolls_back_failures_and_remains_usable(
@@ -617,3 +648,102 @@ def test_course_write_api_commits_once_rolls_back_failures_and_remains_usable(
     assert usable.status_code == 201
     assert commit_calls == 2
     assert rollback_calls == 1
+
+
+def test_course_routes_own_each_real_session_transaction_boundary(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    _, SessionLocal = client_and_session
+    with SessionLocal() as session:
+        building = session.query(Building).first()
+        assert building is not None
+        user = User(
+            username="route-service",
+            student_id="route-service-2026",
+            nickname="Route Service",
+            password_hash="unused",
+            role="student",
+        )
+        session.add(user)
+        session.flush()
+        session.add(SemesterSetting(user_id=user.id, start_date=date(2026, 8, 31), total_weeks=20))
+        session.commit()
+        session.commit = Mock(wraps=session.commit)  # type: ignore[method-assign]
+        session.rollback = Mock(wraps=session.rollback)  # type: ignore[method-assign]
+
+        created = create_current_user_course(
+            CourseCreate.model_validate(course_payload(building.id, course_name="First")), session, user
+        )
+        assert session.commit.call_count == 1
+        session.commit.reset_mock()
+
+        read_courses(session, user)
+        session.commit.assert_not_called()
+        session.rollback.assert_not_called()
+
+        updated = update_current_user_course(
+            created.id,
+            CourseUpdate(course_name="Renamed"),
+            session,
+            user,
+        )
+        assert updated.course_name == "Renamed"
+        assert session.commit.call_count == 1
+        session.commit.reset_mock()
+
+        deleted = delete_current_user_course(created.id, session, user)
+        assert deleted.status_code == 204
+        assert session.commit.call_count == 1
+        assert session.get(Course, created.id) is None
+        session.commit.reset_mock()
+
+        for operation in (
+            lambda: create_current_user_course(
+                CourseCreate.model_validate(course_payload(building.id, room_name="待确认")), session, user
+            ),
+            lambda: update_current_user_course(999999, CourseUpdate(course_name="Missing"), session, user),
+            lambda: delete_current_user_course(999999, session, user),
+        ):
+            with pytest.raises(BusinessError):
+                operation()
+            assert session.rollback.call_count == 1
+            session.rollback.reset_mock()
+            session.commit.assert_not_called()
+
+
+def test_failed_route_update_rolls_back_and_keeps_the_same_session_usable(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    _, SessionLocal = client_and_session
+    with SessionLocal() as session:
+        building = session.query(Building).first()
+        assert building is not None
+        user = User(
+            username="rollback-service",
+            student_id="rollback-service-2026",
+            nickname="Rollback Service",
+            password_hash="unused",
+            role="student",
+        )
+        session.add(user)
+        session.flush()
+        session.add(SemesterSetting(user_id=user.id, start_date=date(2026, 8, 31), total_weeks=20))
+        session.commit()
+        first = create_current_user_course(
+            CourseCreate.model_validate(course_payload(building.id, course_name="First", weekday=1)), session, user
+        )
+        second = create_current_user_course(
+            CourseCreate.model_validate(course_payload(building.id, course_name="Second", weekday=2)), session, user
+        )
+        session.rollback = Mock(wraps=session.rollback)  # type: ignore[method-assign]
+
+        with pytest.raises(BusinessError) as raised:
+            update_current_user_course(second.id, CourseUpdate(weekday=1), session, user)
+
+        assert raised.value.code == "course_conflict"
+        assert session.rollback.call_count == 1
+        assert session.get(Course, second.id).weekday == 2  # type: ignore[union-attr]
+        usable = create_current_user_course(
+            CourseCreate.model_validate(course_payload(building.id, course_name="Usable", weekday=3)), session, user
+        )
+        assert usable.id is not None

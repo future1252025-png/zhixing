@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import time
 
 import pytest
 
@@ -22,8 +23,8 @@ def course(course_id: int, **changes: object) -> CourseValue:
         "id": course_id,
         "course_name": f"Course {course_id}",
         "weekday": 1,
-        "start_time": "08:00",
-        "end_time": "09:40",
+        "start_time": time(8, 0),
+        "end_time": time(9, 40),
         "weeks": "1-16",
     }
     values.update(changes)
@@ -31,7 +32,14 @@ def course(course_id: int, **changes: object) -> CourseValue:
 
 
 def test_time_ranges_touching_at_an_endpoint_do_not_overlap() -> None:
-    assert time_ranges_overlap("08:00", "09:40", "09:40", "11:20") is False
+    assert time_ranges_overlap(time(8, 0), time(9, 40), time(9, 40), time(11, 20)) is False
+
+
+def test_pure_time_policy_requires_datetime_time_values() -> None:
+    with pytest.raises(TypeError):
+        CourseValue(1, "Course", 1, "08:00", "09:40", "1-16")  # type: ignore[arg-type]
+    with pytest.raises(TypeError):
+        time_ranges_overlap("08:00", "09:40", "09:40", "11:20")  # type: ignore[arg-type]
 
 
 def test_detect_conflicts_returns_sorted_intersection_weeks() -> None:
@@ -88,7 +96,7 @@ def test_business_error_handler_uses_the_top_level_contract() -> None:
     error = BusinessError(
         409,
         "course_conflict",
-        "Course conflicts with an existing course",
+        "该时间与已有课程冲突",
         fields=["weekday", "start_time", "end_time", "weeks"],
         details={"conflicts": [{"course_id": 7, "course_name": "Physics", "overlap_weeks": [2]}]},
     )
@@ -98,7 +106,7 @@ def test_business_error_handler_uses_the_top_level_contract() -> None:
     assert response.status_code == 409
     assert json.loads(response.body) == BusinessErrorResponse(
         code="course_conflict",
-        message="Course conflicts with an existing course",
+        message="该时间与已有课程冲突",
         fields=["weekday", "start_time", "end_time", "weeks"],
         details={"conflicts": [{"course_id": 7, "course_name": "Physics", "overlap_weeks": [2]}]},
     ).model_dump()

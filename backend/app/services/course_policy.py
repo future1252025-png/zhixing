@@ -18,9 +18,13 @@ class CourseValue:
     id: int | None
     course_name: str
     weekday: int
-    start_time: str
-    end_time: str
+    start_time: time
+    end_time: time
     weeks: str
+
+    def __post_init__(self) -> None:
+        _require_time(self.start_time)
+        _require_time(self.end_time)
 
 
 @dataclass(frozen=True)
@@ -41,13 +45,13 @@ def time_ranges_overlap(
     b_end: str,
 ) -> bool:
     return (
-        _parse_time(a_start) < _parse_time(b_end)
-        and _parse_time(b_start) < _parse_time(a_end)
+        _require_time(a_start) < _require_time(b_end)
+        and _require_time(b_start) < _require_time(a_end)
     )
 
 
-def validate_time_range(start_time: str, end_time: str) -> None:
-    if _parse_time(start_time) >= _parse_time(end_time):
+def validate_time_range(start_time: time, end_time: time) -> None:
+    if _require_time(start_time) >= _require_time(end_time):
         raise ValueError("end_time must be later than start_time")
 
 
@@ -87,16 +91,10 @@ def detect_conflicts(
     return sorted(conflicts, key=lambda conflict: (conflict.course_id, conflict.course_name))
 
 
-def _parse_time(value: str) -> time:
-    try:
-        hour_text, minute_text = value.split(":")
-        hour = int(hour_text)
-        minute = int(minute_text)
-    except (AttributeError, TypeError, ValueError) as exc:
-        raise ValueError("Time must use HH:MM format") from exc
-    if len(value) != 5 or not 0 <= hour <= 23 or not 0 <= minute <= 59:
-        raise ValueError("Time must use HH:MM format")
-    return time(hour=hour, minute=minute)
+def _require_time(value: time) -> time:
+    if not isinstance(value, time):
+        raise TypeError("course policy time values must be datetime.time")
+    return value
 
 
 def _required_course_id(course: CourseValue) -> int:

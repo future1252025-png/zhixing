@@ -7,8 +7,13 @@ from sqlalchemy.orm import Session
 
 from app.core.errors import BusinessError
 from app.models import Building, Course
-from app.schemas.course import CourseCreate, CourseUpdate
-from app.services.course_policy import CourseValue, detect_conflicts, location_requires_review, validate_time_range
+from app.schemas.course import CourseCreate, CourseUpdate, parse_course_time
+from app.services.course_policy import (
+    CourseValue,
+    detect_conflicts,
+    location_requires_review,
+    validate_time_range,
+)
 from app.services.semester_service import get_setting
 from app.services.week_rule import WeekExpressionError, normalize_weeks
 
@@ -79,7 +84,9 @@ def _validate_course_values(session: Session, user_id: int, values: dict[str, ob
     if location_requires_review(room_name):
         raise BusinessError(422, "invalid_room_name", "Room name must be a confirmed location", fields=["room_name"])
     try:
-        validate_time_range(_required_str(values, "start_time"), _required_str(values, "end_time"))
+        start_time = parse_course_time(_required_str(values, "start_time"))
+        end_time = parse_course_time(_required_str(values, "end_time"))
+        validate_time_range(start_time, end_time)
     except ValueError as exc:
         raise BusinessError(422, "invalid_course_time", str(exc), fields=["start_time", "end_time"]) from exc
     try:
@@ -88,8 +95,8 @@ def _validate_course_values(session: Session, user_id: int, values: dict[str, ob
             id=course_id,
             course_name=_required_str(values, "course_name"),
             weekday=_required_int(values, "weekday"),
-            start_time=_required_str(values, "start_time"),
-            end_time=_required_str(values, "end_time"),
+            start_time=start_time,
+            end_time=end_time,
             weeks=normalized_weeks,
         )
         conflicts = detect_conflicts(candidate, [_course_value(item) for item in list_courses(session, user_id)], max_week=setting.total_weeks)
@@ -99,7 +106,7 @@ def _validate_course_values(session: Session, user_id: int, values: dict[str, ob
         raise BusinessError(
             409,
             "course_conflict",
-            "Course conflicts with an existing course",
+            "该时间与已有课程冲突",
             fields=["weekday", "start_time", "end_time", "weeks"],
             details={"conflicts": [{"course_id": conflict.course_id, "course_name": conflict.course_name, "overlap_weeks": conflict.overlap_weeks} for conflict in conflicts]},
         )
@@ -107,7 +114,14 @@ def _validate_course_values(session: Session, user_id: int, values: dict[str, ob
 
 
 def _course_value(course: Course) -> CourseValue:
-    return CourseValue(id=course.id, course_name=course.course_name, weekday=course.weekday, start_time=course.start_time, end_time=course.end_time, weeks=course.weeks)
+    return CourseValue(
+        id=course.id,
+        course_name=course.course_name,
+        weekday=course.weekday,
+        start_time=parse_course_time(course.start_time),
+        end_time=parse_course_time(course.end_time),
+        weeks=course.weeks,
+    )
 
 
 def _required_str(values: dict[str, object], field: str) -> str:
