@@ -200,6 +200,9 @@ def test_course_read_exposes_source_and_location_review_status() -> None:
 
     assert course.source_kind == "import"
     assert course.needs_location_review is True
+    serialized = course.model_dump()
+    assert serialized["source_kind"] == "import"
+    assert serialized["needs_location_review"] is True
 
 
 def test_create_course_with_missing_building_returns_404(

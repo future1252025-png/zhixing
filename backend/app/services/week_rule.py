@@ -11,7 +11,7 @@ class WeekExpressionError(ValueError):
 
 
 _TOKEN_RE = re.compile(
-    r"(?P<start>\d+)(?:-(?P<end>\d+))?(?:\((?P<parity>[单双])\))?"
+    r"(?P<start>[0-9]{1,2})(?:-(?P<end>[0-9]{1,2}))?(?:\((?P<parity>[单双])\))?"
 )
 _CHARACTER_NORMALIZATION = str.maketrans(
     {
@@ -29,7 +29,7 @@ _CHARACTER_NORMALIZATION = str.maketrans(
 @dataclass(frozen=True)
 class _WeekToken:
     weeks: frozenset[int]
-    normalized: str
+    parity: str | None
 
 
 def _validate_max_week(max_week: int) -> None:
@@ -41,11 +41,12 @@ def _prepare_expression(value: str) -> list[str]:
     if not isinstance(value, str):
         raise WeekExpressionError("Week expression must be a string")
 
-    text = re.sub(r"\s+", "", value.translate(_CHARACTER_NORMALIZATION))
+    text = value.translate(_CHARACTER_NORMALIZATION).strip()
     if text.startswith("第"):
-        text = text[1:]
+        text = text[1:].lstrip()
     if text.endswith("周"):
-        text = text[:-1]
+        text = text[:-1].rstrip()
+    text = re.sub(r"\s*(?=[,()\-])|(?<=[,()\-])\s*", "", text)
     if not text:
         raise WeekExpressionError("Week expression cannot be empty")
 
@@ -74,15 +75,13 @@ def _parse_token(token: str, max_week: int) -> _WeekToken:
 
     if parity is None:
         weeks = frozenset(range(start, end + 1))
-        normalized = str(start) if end_text is None else f"{start}-{end}"
-        return _WeekToken(weeks=weeks, normalized=normalized)
+        return _WeekToken(weeks=weeks, parity=None)
 
     expected_parity = 1 if parity == "单" else 0
     weeks = frozenset(week for week in range(start, end + 1) if week % 2 == expected_parity)
     if not weeks:
         raise WeekExpressionError("Parity range does not include any matching week")
-    normalized = f"{min(weeks)}-{max(weeks)}({parity})"
-    return _WeekToken(weeks=weeks, normalized=normalized)
+    return _WeekToken(weeks=weeks, parity=parity)
 
 
 def _parse_expression(value: str, max_week: int) -> list[_WeekToken]:
@@ -99,13 +98,42 @@ def parse_weeks(value: str, *, max_week: int) -> set[int]:
 def normalize_weeks(value: str, *, max_week: int) -> str:
     """Return a stable, parse-equivalent canonical week expression."""
 
-    normalized_tokens: list[str] = []
-    seen: set[str] = set()
-    for token in _parse_expression(value, max_week):
-        if token.normalized not in seen:
-            seen.add(token.normalized)
-            normalized_tokens.append(token.normalized)
-    return ",".join(normalized_tokens)
+    tokens = _parse_expression(value, max_week)
+    weeks = set().union(*(token.weeks for token in tokens))
+    if any(token.parity is not None for token in tokens) and _is_long_parity_progression(weeks):
+        parity = "单" if min(weeks) % 2 else "双"
+        return f"{min(weeks)}-{max(weeks)}({parity})"
+    return _format_week_union(weeks)
+
+
+def _is_long_parity_progression(weeks: set[int]) -> bool:
+    ordered = sorted(weeks)
+    return len(ordered) >= 3 and all(
+        current == previous + 2 for previous, current in zip(ordered, ordered[1:])
+    )
+
+
+def _format_week_union(weeks: set[int]) -> str:
+    ordered = sorted(weeks)
+    pieces: list[str] = []
+    run_start = ordered[0]
+    previous = ordered[0]
+
+    for week in ordered[1:]:
+        if week == previous + 1:
+            previous = week
+            continue
+        _append_run(pieces, run_start, previous)
+        run_start = previous = week
+    _append_run(pieces, run_start, previous)
+    return ",".join(pieces)
+
+
+def _append_run(pieces: list[str], start: int, end: int) -> None:
+    if end - start >= 2:
+        pieces.append(f"{start}-{end}")
+    else:
+        pieces.extend(str(week) for week in range(start, end + 1))
 
 
 def weeks_overlap(left: str, right: str, *, max_week: int) -> set[int]:
