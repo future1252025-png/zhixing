@@ -3,13 +3,17 @@ from datetime import date, datetime, timezone
 from queue import Queue
 from pathlib import Path
 from threading import Barrier, Thread
+from time import sleep
 from unittest.mock import Mock
+import sqlite3
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
+import app.api.semester as semester_api
 from app.core.clock import SHANGHAI_TZ, get_current_time, shanghai_today
 from app.db.database import Base, create_sqlite_engine, get_session, init_db
 from app.main import app
@@ -351,6 +355,7 @@ def test_semester_service_flushes_without_committing(
         session.add(user)
         session.flush()
         session.commit = Mock(wraps=session.commit)  # type: ignore[method-assign]
+        session.rollback = Mock(wraps=session.rollback)  # type: ignore[method-assign]
 
         setting = upsert_setting(
             session,
@@ -361,9 +366,161 @@ def test_semester_service_flushes_without_committing(
 
         assert setting.id is not None
         session.commit.assert_not_called()
+        session.rollback.assert_not_called()
         response = get_semester_response(session, user.id, fixed_now())
         assert response.current_week == 4
-        session.rollback()
+
+
+class CodedSqliteError(sqlite3.OperationalError):
+    def __init__(self, errorcode: int, errorname: str) -> None:
+        super().__init__("database is locked")
+        self.sqlite_errorcode = errorcode
+        self.sqlite_errorname = errorname
+
+
+def make_operational_error(errorcode: int, errorname: str) -> OperationalError:
+    return OperationalError(
+        "INSERT INTO semester_settings ...",
+        {},
+        CodedSqliteError(errorcode, errorname),
+    )
+
+
+def test_upsert_operational_error_preserves_caller_transaction(
+    client_and_session: tuple[TestClient, sessionmaker],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, SessionLocal = client_and_session
+    error = make_operational_error(sqlite3.SQLITE_BUSY, "SQLITE_BUSY")
+    with SessionLocal() as session:
+        pending_user = User(
+            username="pending-user",
+            student_id="pending-user-2026",
+            nickname="Pending User",
+            password_hash="not-used",
+            role="student",
+        )
+        session.add(pending_user)
+        commit = Mock(wraps=session.commit)
+        rollback = Mock(wraps=session.rollback)
+        execute = Mock(side_effect=error)
+        monkeypatch.setattr(session, "commit", commit)
+        monkeypatch.setattr(session, "rollback", rollback)
+        monkeypatch.setattr(session, "execute", execute)
+
+        with pytest.raises(OperationalError) as raised:
+            upsert_setting(session, 1, date(2026, 8, 31), 20)
+
+        assert raised.value is error
+        assert execute.call_count == 1
+        commit.assert_not_called()
+        rollback.assert_not_called()
+        assert pending_user in session.new
+
+
+def test_api_retry_busy_once_then_commits_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = Mock()
+    busy = make_operational_error(sqlite3.SQLITE_BUSY, "SQLITE_BUSY")
+    attempts = 0
+
+    def fail_once(*args: object, **kwargs: object) -> object:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise busy
+        return Mock()
+
+    monkeypatch.setattr(semester_api, "upsert_setting", fail_once)
+
+    semester_api.persist_semester_setting_with_retry(
+        session,
+        user_id=17,
+        start_date=date(2026, 8, 31),
+        total_weeks=20,
+    )
+
+    assert attempts == 2
+    assert session.rollback.call_count == 1
+    assert session.commit.call_count == 1
+
+
+def test_api_retry_stops_after_bounded_busy_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = Mock()
+    busy = make_operational_error(sqlite3.SQLITE_LOCKED, "SQLITE_LOCKED")
+    attempts = 0
+
+    def always_busy(*args: object, **kwargs: object) -> None:
+        nonlocal attempts
+        attempts += 1
+        raise busy
+
+    monkeypatch.setattr(semester_api, "upsert_setting", always_busy)
+
+    with pytest.raises(OperationalError) as raised:
+        semester_api.persist_semester_setting_with_retry(
+            session,
+            user_id=17,
+            start_date=date(2026, 8, 31),
+            total_weeks=20,
+        )
+
+    assert raised.value is busy
+    assert attempts == semester_api.SQLITE_BUSY_RETRY_ATTEMPTS
+    assert session.rollback.call_count == semester_api.SQLITE_BUSY_RETRY_ATTEMPTS
+    session.commit.assert_not_called()
+
+
+def test_api_does_not_retry_non_busy_operational_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = Mock()
+    non_busy = make_operational_error(sqlite3.SQLITE_CONSTRAINT, "SQLITE_CONSTRAINT")
+    upsert = Mock(side_effect=non_busy)
+    monkeypatch.setattr(semester_api, "upsert_setting", upsert)
+
+    with pytest.raises(OperationalError) as raised:
+        semester_api.persist_semester_setting_with_retry(
+            session,
+            user_id=17,
+            start_date=date(2026, 8, 31),
+            total_weeks=20,
+        )
+
+    assert raised.value is non_busy
+    assert upsert.call_count == 1
+    assert session.rollback.call_count == 1
+    session.commit.assert_not_called()
+
+
+def test_upsert_update_preserves_created_at_and_advances_updated_at(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    _, SessionLocal = client_and_session
+    with SessionLocal() as session:
+        user = User(
+            username="timestamp-user",
+            student_id="timestamp-user-2026",
+            nickname="Timestamp User",
+            password_hash="not-used",
+            role="student",
+        )
+        session.add(user)
+        session.commit()
+        first = upsert_setting(session, user.id, date(2026, 8, 31), 20)
+        session.commit()
+        created_at = first.created_at
+        updated_at = first.updated_at
+
+        sleep(0.01)
+        second = upsert_setting(session, user.id, date(2026, 9, 7), 18)
+        session.commit()
+
+        assert second.created_at == created_at
+        assert second.updated_at > updated_at
 
 
 def test_concurrent_first_upserts_are_atomic_and_keep_a_complete_submission(

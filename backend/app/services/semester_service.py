@@ -1,11 +1,9 @@
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
-from time import sleep
 from typing import Literal
 
 from sqlalchemy import select
 from sqlalchemy.dialects.sqlite import insert
-from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from app.core.clock import shanghai_today
@@ -15,7 +13,6 @@ from app.schemas.semester import SemesterResponse
 
 
 SemesterStatus = Literal["unconfigured", "before_term", "active", "after_term"]
-_SQLITE_BUSY_RETRIES = 3
 
 
 @dataclass(frozen=True)
@@ -98,24 +95,11 @@ def upsert_setting(
         )
     )
 
-    for attempt in range(_SQLITE_BUSY_RETRIES):
-        try:
-            session.execute(statement)
-            session.flush()
-            break
-        except OperationalError as error:
-            if not _is_sqlite_busy(error) or attempt == _SQLITE_BUSY_RETRIES - 1:
-                raise
-            session.rollback()
-            sleep(0.05 * (attempt + 1))
+    session.execute(statement)
+    session.flush()
 
     session.expire_all()
     setting = get_setting(session, user_id)
     if setting is None:
         raise RuntimeError("semester setting upsert did not return a row")
     return setting
-
-
-def _is_sqlite_busy(error: OperationalError) -> bool:
-    message = str(error.orig).lower()
-    return "database is locked" in message or "database is busy" in message
