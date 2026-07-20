@@ -12,6 +12,7 @@ from app.core.errors import BusinessError
 from app.models import Course, SemesterSetting
 from app.schemas.semester import SemesterResponse
 from app.services.week_rule import weeks_fit_max_week
+from app.services.user_mutation_guard import acquire_user_mutation_guard
 
 
 SemesterStatus = Literal["unconfigured", "before_term", "active", "after_term"]
@@ -77,23 +78,25 @@ def upsert_setting(
     total_weeks: int,
 ) -> SemesterSetting:
     validate_semester_setting(start_date, total_weeks)
-    invalid_courses = [
-        course
-        for course in session.scalars(select(Course).where(Course.user_id == user_id)).all()
-        if not weeks_fit_max_week(course.weeks, max_week=total_weeks)
-    ]
-    if invalid_courses:
-        raise BusinessError(
-            409,
-            "semester_courses_out_of_range",
-            "请先修正超出新学期周数的课程，再保存学期设置",
-            details={
-                "courses": [
-                    {"course_id": course.id, "weeks": course.weeks}
-                    for course in invalid_courses
-                ]
-            },
-        )
+    if get_setting(session, user_id) is not None:
+        acquire_user_mutation_guard(session, user_id)
+        invalid_courses = [
+            course
+            for course in session.scalars(select(Course).where(Course.user_id == user_id)).all()
+            if not weeks_fit_max_week(course.weeks, max_week=total_weeks)
+        ]
+        if invalid_courses:
+            raise BusinessError(
+                409,
+                "semester_courses_out_of_range",
+                "请先修正超出新学期周数的课程，再保存学期设置",
+                details={
+                    "courses": [
+                        {"course_id": course.id, "weeks": course.weeks}
+                        for course in invalid_courses
+                    ]
+                },
+            )
     now = datetime.now(timezone.utc)
     statement = (
         insert(SemesterSetting)

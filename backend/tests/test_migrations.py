@@ -423,7 +423,7 @@ def test_migration_round_trip_preserves_legacy_course_and_recreates_current_sche
     try:
         inspector = inspect(engine)
         with engine.connect() as connection:
-            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260720_01"
+            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260720_02"
             assert connection.scalar(text("SELECT COUNT(*) FROM courses")) == 1
         assert "source_kind" in {
             column["name"] for column in inspector.get_columns("courses")
@@ -472,6 +472,6 @@ def test_alembic_upgrade_is_idempotent(tmp_path: Path) -> None:
     engine = create_engine(database_url)
     try:
         with engine.connect() as connection:
-            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260720_01"
+            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260720_02"
     finally:
         engine.dispose()

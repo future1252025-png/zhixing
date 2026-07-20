@@ -1,6 +1,7 @@
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.openapi.utils import get_openapi
 from fastapi.responses import JSONResponse
 
 from app.api.auth import router as auth_router
@@ -12,6 +13,7 @@ from app.api.schedule import router as schedule_router
 from app.api.semester import router as semester_router
 from app.core.config import settings
 from app.core.errors import BusinessError
+from app.schemas.error import BusinessErrorResponse
 
 
 app = FastAPI(title=settings.app_name)
@@ -66,3 +68,27 @@ app.include_router(messages_router)
 app.include_router(courses_router)
 app.include_router(schedule_router)
 app.include_router(semester_router)
+
+
+def custom_openapi() -> dict[str, object]:
+    if app.openapi_schema is not None:
+        return app.openapi_schema
+    schema = get_openapi(title=app.title, version=app.version, routes=app.routes)
+    components = schema.setdefault("components", {}).setdefault("schemas", {})
+    components["BusinessErrorResponse"] = BusinessErrorResponse.model_json_schema()
+    for path in schema["paths"].values():
+        for operation in path.values():
+            if not isinstance(operation, dict) or "responses" not in operation:
+                continue
+            response = operation["responses"].get("422")
+            if response is not None:
+                response["content"] = {
+                    "application/json": {
+                        "schema": {"$ref": "#/components/schemas/BusinessErrorResponse"}
+                    }
+                }
+    app.openapi_schema = schema
+    return schema
+
+
+app.openapi = custom_openapi

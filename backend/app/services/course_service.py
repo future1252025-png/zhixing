@@ -2,11 +2,11 @@ from __future__ import annotations
 
 from typing import Literal
 
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from app.core.errors import BusinessError
-from app.models import Building, Course, SemesterSetting
+from app.models import Building, Course
 from app.schemas.course import CourseCreate, CourseUpdate, parse_course_time
 from app.services.course_policy import (
     CourseConflict,
@@ -16,25 +16,15 @@ from app.services.course_policy import (
     validate_time_range,
 )
 from app.services.semester_service import get_setting
+from app.services.user_mutation_guard import (
+    UserMutationGuard,
+    acquire_user_mutation_guard,
+    require_user_mutation_guard,
+)
 from app.services.week_rule import WeekExpressionError, normalize_weeks
 
 
 CourseSourceKind = Literal["manual", "import"]
-
-
-def acquire_course_write_guard(session: Session, user_id: int) -> SemesterSetting:
-    """Serialize one user's course decisions with a no-op SQLite write."""
-    result = session.execute(
-        update(SemesterSetting)
-        .where(SemesterSetting.user_id == user_id)
-        .values(updated_at=SemesterSetting.updated_at)
-    )
-    if result.rowcount != 1:
-        raise BusinessError(409, "semester_unconfigured", "Semester is not configured")
-    setting = get_setting(session, user_id)
-    if setting is None:
-        raise RuntimeError("course write guard lost the semester setting")
-    return setting
 
 
 def building_exists(session: Session, building_id: int) -> bool:
@@ -65,11 +55,15 @@ def add_course(
     user_id: int,
     payload: CourseCreate,
     source_kind: CourseSourceKind = "manual",
-    guard_acquired: bool = False,
+    guard: UserMutationGuard | None = None,
 ) -> Course:
     if source_kind not in {"manual", "import"}:
         raise ValueError("source_kind must be manual or import")
-    setting = get_setting(session, user_id) if guard_acquired else acquire_course_write_guard(session, user_id)
+    if guard is None:
+        guard = acquire_user_mutation_guard(session, user_id)
+    else:
+        require_user_mutation_guard(session, user_id, guard)
+    setting = get_setting(session, user_id)
     if setting is None:
         raise BusinessError(409, "semester_unconfigured", "Semester is not configured")
     values = payload.model_dump()
@@ -90,14 +84,19 @@ def update_course(
     user_id: int,
     course_id: int,
     payload: CourseUpdate,
-    guard_acquired: bool = False,
+    guard: UserMutationGuard | None = None,
 ) -> Course:
-    setting = get_setting(session, user_id) if guard_acquired else acquire_course_write_guard(session, user_id)
+    if guard is None:
+        guard = acquire_user_mutation_guard(session, user_id)
+    else:
+        require_user_mutation_guard(session, user_id, guard)
+    setting = get_setting(session, user_id)
     if setting is None:
         raise BusinessError(409, "semester_unconfigured", "Semester is not configured")
     course = get_course_for_user(session, course_id, user_id)
     if course is None:
         raise BusinessError(404, "course_not_found", "Course not found")
+    repairing_legacy_course = _course_has_integrity_issues(course, setting.total_weeks)
     changes = payload.model_dump(exclude_unset=True)
     values = {
         "course_name": changes.get("course_name", course.course_name),
@@ -115,6 +114,7 @@ def update_course(
         values,
         setting.total_weeks,
         excluded_course_id=course.id,
+        allow_other_invalid=repairing_legacy_course,
     )
     for field, value in values.items():
         setattr(course, field, value)
@@ -128,10 +128,12 @@ def delete_course(
     *,
     user_id: int,
     course_id: int,
-    guard_acquired: bool = False,
+    guard: UserMutationGuard | None = None,
 ) -> None:
-    if not guard_acquired:
-        acquire_course_write_guard(session, user_id)
+    if guard is None:
+        acquire_user_mutation_guard(session, user_id)
+    else:
+        require_user_mutation_guard(session, user_id, guard)
     course = get_course_for_user(session, course_id, user_id)
     if course is None:
         raise BusinessError(404, "course_not_found", "Course not found")
@@ -146,6 +148,7 @@ def _validate_course_values(
     max_week: int,
     *,
     excluded_course_id: int | None = None,
+    allow_other_invalid: bool = False,
 ) -> str:
     if not building_exists(session, _required_int(values, "building_id")):
         raise BusinessError(404, "building_not_found", "Building not found", fields=["building_id"])
@@ -172,7 +175,7 @@ def _validate_course_values(
     )
     conflicts = detect_conflicts(
         candidate,
-        _existing_course_values(session, user_id, max_week, excluded_course_id),
+        _existing_course_values(session, user_id, max_week, excluded_course_id, allow_other_invalid),
         max_week=max_week,
     )
     if conflicts:
@@ -185,9 +188,15 @@ def _existing_course_values(
     user_id: int,
     max_week: int,
     excluded_course_id: int | None,
+    allow_other_invalid: bool,
 ) -> list[CourseValue]:
     values: list[CourseValue] = []
-    for course in list_courses(session, user_id):
+    courses = session.scalars(
+        select(Course)
+        .where(Course.user_id == user_id)
+        .order_by(Course.weekday.asc(), Course.start_time.asc(), Course.id.asc())
+    ).all()
+    for course in courses:
         if course.id == excluded_course_id:
             continue
         issues: list[dict[str, str]] = []
@@ -202,6 +211,8 @@ def _existing_course_values(
         except WeekExpressionError:
             issues.append({"field": "weeks", "code": "invalid_weeks"})
         if issues:
+            if allow_other_invalid:
+                continue
             raise BusinessError(
                 409,
                 "course_data_invalid",
@@ -219,6 +230,15 @@ def _existing_course_values(
             )
         )
     return values
+
+
+def _course_has_integrity_issues(course: Course, max_week: int) -> bool:
+    try:
+        validate_time_range(parse_course_time(course.start_time), parse_course_time(course.end_time))
+        normalize_weeks(course.weeks, max_week=max_week)
+    except (ValueError, WeekExpressionError):
+        return True
+    return False
 
 
 def _conflict_error(conflicts: list[CourseConflict]) -> BusinessError:

@@ -27,10 +27,6 @@ def upgrade() -> None:
                 server_default="manual",
             )
         )
-        batch_op.create_check_constraint(
-            "ck_courses_source_kind",
-            "source_kind IN ('manual', 'import')",
-        )
 
     op.create_table(
         "semester_settings",
@@ -76,7 +72,6 @@ def downgrade() -> None:
     op.drop_index("ix_semester_settings_id", table_name="semester_settings")
     op.drop_table("semester_settings")
     with op.batch_alter_table("courses") as batch_op:
-        batch_op.drop_constraint("ck_courses_source_kind", type_="check")
         batch_op.drop_column("source_kind")
         batch_op.alter_column(
             "weeks",
