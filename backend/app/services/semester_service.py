@@ -1,16 +1,21 @@
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timezone
+from time import sleep
 from typing import Literal
 
 from sqlalchemy import select
+from sqlalchemy.dialects.sqlite import insert
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from app.core.clock import shanghai_today
+from app.core.semester import validate_semester_setting
 from app.models import SemesterSetting
 from app.schemas.semester import SemesterResponse
 
 
 SemesterStatus = Literal["unconfigured", "before_term", "active", "after_term"]
+_SQLITE_BUSY_RETRIES = 3
 
 
 @dataclass(frozen=True)
@@ -72,17 +77,45 @@ def upsert_setting(
     start_date: date,
     total_weeks: int,
 ) -> SemesterSetting:
-    setting = get_setting(session, user_id)
-    if setting is None:
-        setting = SemesterSetting(
+    validate_semester_setting(start_date, total_weeks)
+    now = datetime.now(timezone.utc)
+    statement = (
+        insert(SemesterSetting)
+        .values(
             user_id=user_id,
             start_date=start_date,
             total_weeks=total_weeks,
+            created_at=now,
+            updated_at=now,
         )
-        session.add(setting)
-    else:
-        setting.start_date = start_date
-        setting.total_weeks = total_weeks
+        .on_conflict_do_update(
+            index_elements=[SemesterSetting.user_id],
+            set_={
+                "start_date": start_date,
+                "total_weeks": total_weeks,
+                "updated_at": now,
+            },
+        )
+    )
 
-    session.flush()
+    for attempt in range(_SQLITE_BUSY_RETRIES):
+        try:
+            session.execute(statement)
+            session.flush()
+            break
+        except OperationalError as error:
+            if not _is_sqlite_busy(error) or attempt == _SQLITE_BUSY_RETRIES - 1:
+                raise
+            session.rollback()
+            sleep(0.05 * (attempt + 1))
+
+    session.expire_all()
+    setting = get_setting(session, user_id)
+    if setting is None:
+        raise RuntimeError("semester setting upsert did not return a row")
     return setting
+
+
+def _is_sqlite_busy(error: OperationalError) -> bool:
+    message = str(error.orig).lower()
+    return "database is locked" in message or "database is busy" in message

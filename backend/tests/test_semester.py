@@ -1,6 +1,8 @@
 from collections.abc import Generator
 from datetime import date, datetime, timezone
+from queue import Queue
 from pathlib import Path
+from threading import Barrier, Thread
 from unittest.mock import Mock
 
 import pytest
@@ -106,6 +108,68 @@ def test_semester_update_requires_monday_and_rejects_server_managed_fields() -> 
             SemesterUpdate.model_validate(payload)
 
 
+@pytest.mark.parametrize("value", ["20", 20.0, True, False, None])
+def test_semester_update_requires_a_json_integer_for_total_weeks(value: object) -> None:
+    with pytest.raises(ValueError):
+        SemesterUpdate.model_validate({"start_date": "2026-08-31", "total_weeks": value})
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "2026-08-31T00:00:00",
+        "2026-8-31",
+        1788134400,
+        datetime(2026, 8, 31),
+        None,
+    ],
+)
+def test_semester_update_requires_a_date_not_a_datetime(value: object) -> None:
+    with pytest.raises(ValueError):
+        SemesterUpdate.model_validate({"start_date": value, "total_weeks": 20})
+
+
+def test_semester_update_accepts_only_a_date_or_exact_iso_date_string() -> None:
+    assert SemesterUpdate.model_validate(
+        {"start_date": date(2026, 8, 31), "total_weeks": 20}
+    ).start_date == date(2026, 8, 31)
+    assert SemesterUpdate.model_validate(
+        {"start_date": "2026-08-31", "total_weeks": 20}
+    ).start_date == date(2026, 8, 31)
+
+
+@pytest.mark.parametrize(
+    "start_date,total_weeks",
+    [
+        (date(2026, 9, 1), 20),
+        (date(2026, 8, 31), 0),
+        (date(2026, 8, 31), 31),
+    ],
+)
+def test_upsert_setting_rejects_invalid_domain_values_before_writing(
+    client_and_session: tuple[TestClient, sessionmaker],
+    start_date: date,
+    total_weeks: int,
+) -> None:
+    _, SessionLocal = client_and_session
+    with SessionLocal() as session:
+        user = User(
+            username=f"invalid-{total_weeks}-{start_date.isoformat()}",
+            student_id=f"invalid-{total_weeks}-{start_date.isoformat()}",
+            nickname="Invalid",
+            password_hash="not-used",
+            role="student",
+        )
+        session.add(user)
+        session.flush()
+
+        with pytest.raises(ValueError, match="start_date|total_weeks"):
+            upsert_setting(session, user.id, start_date, total_weeks)
+
+        assert session.scalar(select(func.count()).select_from(SemesterSetting)) == 0
+        session.rollback()
+
+
 def test_get_unconfigured_semester_returns_exact_json(
     client_and_session: tuple[TestClient, sessionmaker],
 ) -> None:
@@ -139,6 +203,30 @@ def test_semester_api_rejects_invalid_payloads(
         {"start_date": "2026-08-31", "total_weeks": 20, "status": "active"},
     ):
         assert client.put("/api/semester", json=payload, headers=headers).status_code == 422
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"start_date": "2026-08-31", "total_weeks": "20"},
+        {"start_date": "2026-08-31", "total_weeks": 20.0},
+        {"start_date": "2026-08-31", "total_weeks": True},
+        {"start_date": "2026-08-31", "total_weeks": False},
+        {"start_date": "2026-08-31", "total_weeks": None},
+        {"start_date": "2026-08-31T00:00:00", "total_weeks": 20},
+        {"start_date": "2026-8-31", "total_weeks": 20},
+        {"start_date": 1788134400, "total_weeks": 20},
+        {"total_weeks": 20},
+    ],
+)
+def test_semester_api_rejects_coerced_request_types(
+    client_and_session: tuple[TestClient, sessionmaker],
+    payload: dict[str, object],
+) -> None:
+    client, _ = client_and_session
+    headers = auth_headers(client)
+
+    assert client.put("/api/semester", json=payload, headers=headers).status_code == 422
 
 
 def test_put_semester_returns_current_week_persists_and_upserts_one_row(
@@ -187,6 +275,25 @@ def test_put_semester_returns_current_week_persists_and_upserts_one_row(
         assert len(settings) == 1
         assert settings[0].start_date == date(2026, 9, 7)
         assert settings[0].total_weeks == 18
+
+
+def test_repeated_semester_put_is_api_idempotent(
+    client_and_session: tuple[TestClient, sessionmaker],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, SessionLocal = client_and_session
+    headers = auth_headers(client)
+    monkeypatch.setitem(app.dependency_overrides, get_current_time, fixed_now)
+    payload = {"start_date": "2026-08-31", "total_weeks": 20}
+
+    first = client.put("/api/semester", json=payload, headers=headers)
+    second = client.put("/api/semester", json=payload, headers=headers)
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert second.json() == first.json()
+    with SessionLocal() as session:
+        assert session.scalar(select(func.count()).select_from(SemesterSetting)) == 1
 
 
 def test_semester_settings_are_isolated_between_authenticated_users(
@@ -257,3 +364,59 @@ def test_semester_service_flushes_without_committing(
         response = get_semester_response(session, user.id, fixed_now())
         assert response.current_week == 4
         session.rollback()
+
+
+def test_concurrent_first_upserts_are_atomic_and_keep_a_complete_submission(
+    tmp_path: Path,
+) -> None:
+    engine = create_sqlite_engine(make_test_database_url(tmp_path / "semester-race.db"))
+    init_db(engine)
+    SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+    submissions = (
+        (date(2026, 8, 31), 20),
+        (date(2026, 9, 7), 18),
+    )
+    try:
+        with engine.connect() as connection:
+            assert connection.exec_driver_sql("PRAGMA foreign_keys").scalar() == 1
+            assert connection.exec_driver_sql("PRAGMA busy_timeout").scalar() == 5000
+
+        with SessionLocal() as session:
+            user = User(
+                username="race-user",
+                student_id="race-user-2026",
+                nickname="Race User",
+                password_hash="not-used",
+                role="student",
+            )
+            session.add(user)
+            session.commit()
+            user_id = user.id
+
+        start = Barrier(2)
+        errors: Queue[BaseException] = Queue()
+
+        def submit(start_date: date, total_weeks: int) -> None:
+            try:
+                with SessionLocal() as session:
+                    start.wait(timeout=10)
+                    upsert_setting(session, user_id, start_date, total_weeks)
+                    session.commit()
+            except BaseException as error:
+                errors.put(error)
+
+        workers = [Thread(target=submit, args=submission) for submission in submissions]
+        for worker in workers:
+            worker.start()
+        for worker in workers:
+            worker.join(timeout=15)
+
+        assert all(not worker.is_alive() for worker in workers)
+        assert errors.empty(), list(errors.queue)
+        with SessionLocal() as session:
+            settings = list(session.scalars(select(SemesterSetting)))
+            assert len(settings) == 1
+            assert (settings[0].start_date, settings[0].total_weeks) in submissions
+    finally:
+        Base.metadata.drop_all(bind=engine)
+        engine.dispose()
