@@ -27,6 +27,10 @@ from app.models import Building, Course, SemesterSetting, User
 from app.schemas.course import CourseCreate, CourseRead, CourseUpdate
 from app.services.course_service import add_course, list_courses, update_course
 from app.api.semester import persist_semester_setting_with_retry
+from app.services.user_mutation_guard import (
+    acquire_user_mutation_guard,
+    require_user_mutation_guard,
+)
 
 
 def make_test_database_url(path: Path) -> str:
@@ -834,6 +838,151 @@ def test_failed_route_update_rolls_back_and_keeps_the_same_session_usable(
             CourseCreate.model_validate(course_payload(building.id, course_name="Usable", weekday=3)), session, user
         )
         assert usable.id is not None
+
+
+@pytest.mark.parametrize("end_transaction", ["commit", "rollback"])
+@pytest.mark.parametrize("start_new_transaction", [False, True])
+def test_user_mutation_guard_cannot_be_reused_after_its_transaction_ends(
+    client_and_session: tuple[TestClient, sessionmaker],
+    end_transaction: str,
+    start_new_transaction: bool,
+) -> None:
+    client, SessionLocal = client_and_session
+    auth_headers(client)
+
+    with SessionLocal() as session:
+        user = session.scalar(select(User).where(User.username == "alice"))
+        assert user is not None
+        guard = acquire_user_mutation_guard(session, user.id)
+
+        getattr(session, end_transaction)()
+        if start_new_transaction:
+            session.scalar(select(SemesterSetting.id).where(SemesterSetting.user_id == user.id))
+
+        with pytest.raises(RuntimeError, match="transaction"):
+            require_user_mutation_guard(session, user.id, guard)
+
+
+def test_user_mutation_guard_is_scoped_to_its_nested_transaction(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    client, SessionLocal = client_and_session
+    auth_headers(client)
+
+    with SessionLocal() as session:
+        user = session.scalar(select(User).where(User.username == "alice"))
+        assert user is not None
+        with session.begin_nested():
+            guard = acquire_user_mutation_guard(session, user.id)
+            require_user_mutation_guard(session, user.id, guard)
+
+        with pytest.raises(RuntimeError, match="transaction"):
+            require_user_mutation_guard(session, user.id, guard)
+
+
+def test_stale_guard_cannot_race_a_guarded_writer_in_a_new_transaction(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    client, SessionLocal = client_and_session
+    auth_headers(client)
+    building_id = get_first_building_id(client)
+    with SessionLocal() as session:
+        user = session.scalar(select(User).where(User.username == "alice"))
+        assert user is not None
+        user_id = user.id
+
+    engine = SessionLocal.kw["bind"]
+    stale_ready = ThreadEvent()
+    start_stale_write = ThreadEvent()
+    stale_entered_course_validation = ThreadEvent()
+    normal_has_guard = ThreadEvent()
+    release_normal_guard = ThreadEvent()
+    stale_thread_id: list[int] = []
+    results: Queue[str] = Queue()
+
+    def observe_interleaving(*args: object) -> None:
+        statement = str(args[2])
+        if (
+            "UPDATE semester_settings SET updated_at=semester_settings.updated_at" in statement
+            and stale_ready.is_set()
+            and not normal_has_guard.is_set()
+        ):
+            normal_has_guard.set()
+            assert release_normal_guard.wait(timeout=5)
+        if (
+            "FROM courses" in statement
+            and stale_thread_id
+            and get_ident() == stale_thread_id[0]
+        ):
+            stale_entered_course_validation.set()
+
+    def stale_writer() -> None:
+        with SessionLocal() as session:
+            guard = acquire_user_mutation_guard(session, user_id)
+            session.commit()
+            session.scalar(select(SemesterSetting.id).where(SemesterSetting.user_id == user_id))
+            stale_thread_id.append(get_ident())
+            stale_ready.set()
+            assert start_stale_write.wait(timeout=5)
+            try:
+                add_course(
+                    session,
+                    user_id=user_id,
+                    payload=CourseCreate.model_validate(
+                        course_payload(building_id, course_name="Stale writer")
+                    ),
+                    guard=guard,
+                )
+                session.commit()
+                results.put("stale_committed")
+            except RuntimeError:
+                session.rollback()
+                results.put("stale_rejected")
+            except SQLAlchemyError:
+                session.rollback()
+                results.put("stale_database_error")
+
+    def normal_writer() -> None:
+        with SessionLocal() as session:
+            try:
+                add_course(
+                    session,
+                    user_id=user_id,
+                    payload=CourseCreate.model_validate(
+                        course_payload(building_id, course_name="Normal writer")
+                    ),
+                )
+                session.commit()
+                results.put("normal_committed")
+            except BusinessError as error:
+                session.rollback()
+                results.put(error.code)
+
+    stale_thread = Thread(target=stale_writer)
+    normal_thread = Thread(target=normal_writer)
+    stale_thread.start()
+    assert stale_ready.wait(timeout=5)
+    event.listen(engine, "after_cursor_execute", observe_interleaving)
+    try:
+        normal_thread.start()
+        assert normal_has_guard.wait(timeout=5)
+        start_stale_write.set()
+        stale_entered_course_validation.wait(timeout=0.5)
+        release_normal_guard.set()
+        stale_thread.join(timeout=10)
+        normal_thread.join(timeout=10)
+
+        assert not stale_thread.is_alive() and not normal_thread.is_alive()
+        assert sorted(list(results.queue)) == ["normal_committed", "stale_rejected"]
+        assert stale_entered_course_validation.is_set() is False
+        with SessionLocal() as session:
+            assert len(list_courses(session, user_id)) == 1
+    finally:
+        release_normal_guard.set()
+        start_stale_write.set()
+        stale_thread.join(timeout=5)
+        normal_thread.join(timeout=5)
+        event.remove(engine, "after_cursor_execute", observe_interleaving)
 
 
 def test_concurrent_conflicting_creates_have_one_winner_and_one_business_conflict(
