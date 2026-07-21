@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { isAxiosError } from 'axios'
-import { showFailToast, showSuccessToast, showToast } from 'vant'
+import { showFailToast, showSuccessToast } from 'vant'
 import { useRoute, useRouter } from 'vue-router'
 
 import { getBuildings, type Building } from '@/api/buildings'
 import { createCourse, getCourses, updateCourse } from '@/api/courses'
+import { extractBusinessError } from '@/api/errors'
 import type { Course } from '@/types/course'
 import { filterBuildingsByKeyword, includeSelectedBuilding } from '@/utils/buildings'
 import {
@@ -13,7 +13,6 @@ import {
   buildEmptyCourseForm,
   buildWeeksRange,
   courseToForm,
-  findCourseTimeOverlap,
   formToPayload,
   getTeachingWeekOptions,
   parseWeeksRangeToPicker,
@@ -29,6 +28,10 @@ const courses = ref<Course[]>([])
 const loading = ref(true)
 const submitting = ref(false)
 const errorMessage = ref('')
+const validationMessages = ref<string[]>([])
+const saveErrorMessage = ref('')
+const saveErrorCode = ref('')
+const conflictNotices = ref<Array<{ courseName: string; overlapWeeks: number[] }>>([])
 const weekOptions = getTeachingWeekOptions()
 const weekRangeStart = ref(1)
 const weekRangeEnd = ref(16)
@@ -80,12 +83,41 @@ function applyWeeksPreset(value: string) {
   syncWeekRangePicker(value)
 }
 
-function getErrorMessage(error: unknown): string {
-  if (isAxiosError(error)) {
-    const detail = error.response?.data?.detail
-    if (typeof detail === 'string') return detail
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+}
+
+function readConflictNotices(details: Record<string, unknown>) {
+  if (!Array.isArray(details.conflicts)) return []
+  return details.conflicts.flatMap((item) => {
+    if (!isRecord(item) || typeof item.course_name !== 'string') return []
+    const overlapWeeks = Array.isArray(item.overlap_weeks)
+      ? item.overlap_weeks.filter(
+          (week): week is number => Number.isInteger(week) && Number(week) > 0
+        )
+      : []
+    return [{ courseName: item.course_name, overlapWeeks }]
+  })
+}
+
+function collectValidationMessages(): string[] {
+  const messages: string[] = []
+  if (!Number.isInteger(Number(form.building_id)) || Number(form.building_id) <= 0) {
+    messages.push('请选择上课建筑')
   }
-  return '课程保存失败，请稍后重试'
+  if (!form.room_name.trim()) {
+    messages.push('请输入完整教室')
+  }
+  const firstError = validateCourseForm(form)
+  if (firstError && !messages.includes(firstError)) messages.push(firstError)
+  return messages
+}
+
+function resetSubmitErrors() {
+  validationMessages.value = []
+  saveErrorMessage.value = ''
+  saveErrorCode.value = ''
+  conflictNotices.value = []
 }
 
 async function loadFormData() {
@@ -107,24 +139,19 @@ async function loadFormData() {
       applyCreateDefaultsFromQuery()
     }
   } catch (error) {
-    errorMessage.value = getErrorMessage(error)
+    errorMessage.value = extractBusinessError(error).message
   } finally {
     loading.value = false
   }
 }
 
 async function submitCourse() {
-  const validationError = validateCourseForm(form)
-  if (validationError) {
-    showFailToast(validationError)
+  resetSubmitErrors()
+  validationMessages.value = collectValidationMessages()
+  if (validationMessages.value.length > 0) {
+    showFailToast(validationMessages.value[0])
     return
   }
-  const overlap = findCourseTimeOverlap(
-    form,
-    courses.value,
-    isEdit.value ? courseId.value ?? undefined : undefined
-  )
-  if (overlap) showToast(`与「${overlap.course_name}」时间重叠，已继续保存`)
 
   submitting.value = true
   try {
@@ -138,7 +165,19 @@ async function submitCourse() {
     }
     router.push('/courses')
   } catch (error) {
-    showFailToast(getErrorMessage(error))
+    const businessError = extractBusinessError(error)
+    saveErrorCode.value = businessError.code
+    if (businessError.code === 'course_conflict') {
+      conflictNotices.value = readConflictNotices(businessError.details)
+      saveErrorMessage.value = '这段时间已有课程，请调整时间或周次后再保存。'
+    } else if (businessError.code === 'semester_unconfigured') {
+      saveErrorMessage.value = '请先设置学期，再保存课程。'
+    } else if (businessError.code === 'invalid_room_name') {
+      saveErrorMessage.value = '请填写确认无误的完整教室。'
+    } else {
+      saveErrorMessage.value = businessError.message
+    }
+    showFailToast(saveErrorMessage.value)
   } finally {
     submitting.value = false
   }
@@ -186,6 +225,33 @@ onMounted(loadFormData)
       </section>
 
       <van-form v-else class="course-form" @submit="submitCourse">
+        <section
+          v-if="validationMessages.length"
+          class="form-notice form-notice--validation"
+          role="alert"
+          aria-labelledby="course-validation-title"
+        >
+          <strong id="course-validation-title">还需要补全这些信息</strong>
+          <ul>
+            <li v-for="message in validationMessages" :key="message">{{ message }}</li>
+          </ul>
+        </section>
+
+        <section v-if="saveErrorMessage" class="form-notice form-notice--server" role="alert">
+          <strong>{{ saveErrorMessage }}</strong>
+          <ul v-if="conflictNotices.length" class="conflict-list">
+            <li v-for="conflict in conflictNotices" :key="conflict.courseName">
+              <span>「{{ conflict.courseName }}」</span>
+              <span v-if="conflict.overlapWeeks.length">
+                第 {{ conflict.overlapWeeks.join('、') }} 周
+              </span>
+            </li>
+          </ul>
+          <a v-if="saveErrorCode === 'semester_unconfigured'" href="/courses#semester-settings">
+            前往课表设置学期
+          </a>
+        </section>
+
         <section v-reveal="{ from: 'right', distance: 32, stagger: 38 }" class="form-sheet">
           <header class="sheet-heading">
             <span class="sheet-number">01</span>
@@ -216,6 +282,7 @@ onMounted(loadFormData)
             <van-field v-model="form.teacher" label="老师" maxlength="64" placeholder="选填" />
             <van-field
               v-model="form.weeks"
+              required
               label="上课周次"
               maxlength="64"
               placeholder="例如：1-16"
@@ -309,8 +376,8 @@ onMounted(loadFormData)
               v-model="form.room_name"
               required
               label="教室"
-              maxlength="64"
-              placeholder="例如：A101"
+              maxlength="120"
+              placeholder="请按课表填写完整教室，例如：逸夫楼 A101"
             />
           </van-cell-group>
         </section>
@@ -320,15 +387,12 @@ onMounted(loadFormData)
             <strong>{{ isEdit ? '准备更新这张课程卡' : '都写好了吗？' }}</strong>
             <p>保存后会回到课表，也可以随时再修改。</p>
           </div>
-          <van-button
-            type="primary"
-            block
-            native-type="submit"
-            :loading="submitting"
-            loading-text="正在保存课程"
-          >
-            {{ isEdit ? '保存课程修改' : '添加到我的课表' }}
-          </van-button>
+          <button type="submit" class="course-save" :disabled="submitting">
+            <span v-if="submitting" class="course-save__spinner" aria-hidden="true"></span>
+            <span class="course-save__label">
+              {{ submitting ? '正在保存课程' : isEdit ? '保存课程修改' : '添加到我的课表' }}
+            </span>
+          </button>
           <van-button block plain native-type="button" @click="router.push('/courses')">暂不保存</van-button>
         </footer>
       </van-form>
@@ -525,6 +589,50 @@ onMounted(loadFormData)
 .state-flower i:nth-child(4) { transform: rotate(270deg); }
 
 .course-form { display: grid; gap: 18px; }
+.form-notice {
+  display: grid;
+  gap: 9px;
+  border: 1px solid #e3b6a7;
+  border-radius: 19px;
+  background: #fff1ec;
+  color: #713b32;
+  padding: 14px 16px;
+}
+
+.form-notice strong {
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.form-notice ul {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding-left: 20px;
+}
+
+.form-notice li {
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.form-notice a {
+  justify-self: start;
+  border-bottom: 1px solid currentColor;
+  color: #6b3c32;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.8;
+  text-decoration: none;
+}
+
+.conflict-list li {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 4px 12px;
+}
+
 .form-sheet {
   position: relative;
   overflow: hidden;
@@ -693,6 +801,52 @@ onMounted(loadFormData)
 .form-actions strong { color: #405642; font-size: 15px; }
 .form-actions p { margin: 5px 0 0; color: #7f8c80; font-size: 13px; line-height: 1.5; }
 
+.course-save {
+  display: inline-flex;
+  min-height: 48px;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  border: 1px solid #547e58;
+  border-radius: 14px;
+  background: #5f8964;
+  box-shadow: 0 8px 18px rgba(64, 101, 67, .18);
+  color: #fff;
+  cursor: pointer;
+  padding: 0 17px;
+  transition: transform 260ms ease, box-shadow 260ms ease, background 260ms ease;
+}
+
+.course-save:disabled {
+  cursor: wait;
+  opacity: .82;
+}
+
+.course-save__label {
+  color: #fff;
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.course-save__spinner {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  border: 2px solid rgba(255, 255, 255, .45);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: save-spin 900ms linear infinite;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .course-save:not(:disabled):hover {
+    background: #527a57;
+    box-shadow: 0 12px 24px rgba(64, 101, 67, .24);
+    transform: translateY(-2px);
+  }
+}
+
 @keyframes notebook-float {
   0%, 100% { transform: rotate(3deg) translateY(0); }
   50% { transform: rotate(-1deg) translateY(-8px); }
@@ -702,6 +856,7 @@ onMounted(loadFormData)
   50% { rotate: 8deg; }
 }
 @keyframes flower-turn { to { transform: rotate(360deg); } }
+@keyframes save-spin { to { transform: rotate(360deg); } }
 
 @media (max-width: 560px) {
   .form-hero { grid-template-columns: minmax(0, 1fr) 112px; min-height: 210px; padding: 22px 18px; }
@@ -724,6 +879,7 @@ onMounted(loadFormData)
 @media (prefers-reduced-motion: reduce) {
   .notebook-art,
   .leaf,
-  .state-flower { animation: none; }
+  .state-flower,
+  .course-save__spinner { animation: none; }
 }
 </style>

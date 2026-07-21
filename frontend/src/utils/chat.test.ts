@@ -49,6 +49,8 @@ const course: Course = {
   room_name: '教4-211',
   teacher: '罗益辉',
   weeks: '1-16',
+  source_kind: 'import',
+  needs_location_review: false,
   created_at: '2026-06-01T08:00:00'
 }
 

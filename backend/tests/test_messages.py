@@ -445,6 +445,36 @@ def test_room_messages_are_filtered_by_room_name(
     assert response.json()[0]["room_name"] == "教4-203"
 
 
+def test_room_message_channel_accepts_full_room_name_up_to_course_limit(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    client, _ = client_and_session
+    building = get_first_building(client)
+    headers = auth_headers(client, "long_room_channel")
+    room_name = "东区三层联合创新实验教室-" + "A" * 88
+    assert 64 < len(room_name) <= 120
+
+    created = client.post(
+        f"/api/buildings/{building['id']}/messages",
+        json={
+            "content": "完整地点频道留言",
+            "room_name": room_name,
+            **message_location_payload(building),
+        },
+        headers=headers,
+    )
+    response = client.get(
+        f"/api/buildings/{building['id']}/messages",
+        params={"room_name": room_name},
+        headers=headers,
+    )
+
+    assert created.status_code == 201
+    assert response.status_code == 200
+    assert [message["content"] for message in response.json()] == ["完整地点频道留言"]
+    assert response.json()[0]["room_name"] == room_name
+
+
 def test_general_channel_excludes_classroom_messages_and_counts_only_general(
     client_and_session: tuple[TestClient, sessionmaker],
 ) -> None:

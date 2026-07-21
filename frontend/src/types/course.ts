@@ -4,6 +4,8 @@ export type CourseBuilding = {
   type: string
 }
 
+export type CourseSourceKind = 'manual' | 'import'
+
 export type Course = {
   id: number
   course_name: string
@@ -14,7 +16,9 @@ export type Course = {
   building: CourseBuilding
   room_name: string
   teacher: string | null
-  weeks: string | null
+  weeks: string
+  source_kind: CourseSourceKind
+  needs_location_review: boolean
   created_at: string
 }
 
@@ -26,7 +30,7 @@ export type CoursePayload = {
   building_id: number
   room_name: string
   teacher?: string | null
-  weeks?: string | null
+  weeks: string
 }
 
 export type CourseUpdatePayload = Partial<CoursePayload>

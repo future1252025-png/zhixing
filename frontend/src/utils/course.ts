@@ -201,7 +201,7 @@ export function courseToForm(course: Course): CourseForm {
     building_id: course.building_id,
     room_name: course.room_name,
     teacher: course.teacher ?? '',
-    weeks: course.weeks ?? ''
+    weeks: course.weeks
   }
 }
 
@@ -214,7 +214,7 @@ export function formToPayload(form: CourseForm): CoursePayload {
     building_id: Number(form.building_id),
     room_name: form.room_name.trim(),
     teacher: form.teacher.trim() || null,
-    weeks: form.weeks.trim() || null
+    weeks: form.weeks.trim()
   }
 }
 
@@ -260,16 +260,19 @@ export function validateCourseForm(form: CourseForm | CoursePayload): string | n
     return '请选择上课建筑'
   }
   if (!roomName) {
-    return '教室不能为空'
+    return '请输入完整教室'
   }
-  if (roomName.length > 64) {
-    return '教室不能超过 64 字'
+  if (roomName.length > 120) {
+    return '教室不能超过 120 字'
   }
   if (teacher.length > 64) {
     return '教师不能超过 64 字'
   }
   if (weeks.length > 64) {
     return '周次不能超过 64 字'
+  }
+  if (!weeks) {
+    return '请输入上课周次'
   }
   return null
 }

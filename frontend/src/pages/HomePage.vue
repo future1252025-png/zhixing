@@ -7,6 +7,7 @@ import { getBuildings, type Building } from '@/api/buildings'
 import { getCourses } from '@/api/courses'
 import RealCampusMap from '@/components/RealCampusMap.vue'
 import TechIcon from '@/components/TechIcon.vue'
+import CourseCard from '@/components/course/CourseCard.vue'
 import { useAuthStore } from '@/stores/auth'
 import type { Course } from '@/types/course'
 import {
@@ -21,7 +22,6 @@ import {
 import {
   filterCoursesByWeek,
   findNextCourse,
-  getWeekdayLabel,
   readSelectedWeek
 } from '@/utils/course'
 import { createScopedStorage } from '@/utils/scopedStorage'
@@ -144,6 +144,10 @@ function openNextCourseChat() {
   openBuildingChat({ id: target.buildingId, name: target.buildingName }, target.roomName)
 }
 
+function openCourseEdit(courseId: number) {
+  router.push(`/courses/${courseId}/edit`)
+}
+
 function openSearchResult(result: ChatSearchResult) {
   openBuildingChat(result.building, result.roomName)
 }
@@ -186,18 +190,13 @@ onMounted(initializeHome)
         <div class="today-copy">
           <span class="fresh-kicker">今天的下一站</span>
           <template v-if="nextCourse && nextCourseChat">
-            <p>{{ getWeekdayLabel(nextCourse.weekday) }} · {{ nextCourse.start_time }}</p>
-            <h1>{{ nextCourse.course_name }}</h1>
-            <div class="today-location">
-              <span class="location-pin" aria-hidden="true">
-                <van-icon name="location-o" />
-              </span>
-              <span>
-                <small>上课地点</small>
-                <strong>{{ nextCourse.building.name }}</strong>
-                <em>教室 {{ nextCourse.room_name }}</em>
-              </span>
-            </div>
+            <CourseCard
+              class="home-next-course"
+              :course="nextCourse"
+              compact
+              @select="openNextCourseChat"
+              @edit="openCourseEdit"
+            />
           </template>
           <template v-else>
             <p>第 {{ selectedWeek }} 周</p>
@@ -450,6 +449,12 @@ onMounted(initializeHome)
   position: relative;
   z-index: 2;
   max-width: 370px;
+}
+
+.home-next-course {
+  width: min(100%, 350px);
+  margin-top: 14px;
+  box-shadow: 0 12px 28px rgba(57, 84, 58, .11);
 }
 
 .today-copy p {

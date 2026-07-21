@@ -89,6 +89,14 @@ describe('auth route guard decisions', () => {
     })
   })
 
+  it('scrolls a course settings link to the requested section', () => {
+    expect(resolveRouteScrollPosition(null, '#semester-settings')).toEqual({
+      el: '#semester-settings',
+      top: 12,
+      behavior: 'smooth'
+    })
+  })
+
   it('registers building detail as a protected route', () => {
     const match = router.resolve('/buildings/1')
 

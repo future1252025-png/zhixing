@@ -46,6 +46,8 @@ const baseCourse: Course = {
   room_name: 'A101',
   teacher: '李老师',
   weeks: '1-16',
+  source_kind: 'manual',
+  needs_location_review: false,
   created_at: '2026-05-29T08:00:00'
 }
 
@@ -63,7 +65,11 @@ describe('course helpers', () => {
       '课程名称不能为空'
     )
     expect(validateCourseForm({ ...baseForm, room_name: '' })).toBe(
-      '教室不能为空'
+      '请输入完整教室'
+    )
+    expect(validateCourseForm({ ...baseForm, room_name: '教'.repeat(120) })).toBeNull()
+    expect(validateCourseForm({ ...baseForm, room_name: '教'.repeat(121) })).toBe(
+      '教室不能超过 120 字'
     )
     expect(validateCourseForm({ ...baseForm, teacher: 'a'.repeat(65) })).toBe(
       '教师不能超过 64 字'

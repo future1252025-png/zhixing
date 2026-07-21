@@ -6,7 +6,7 @@ import { useRouter } from 'vue-router'
 
 import { getBuildings, type Building } from '@/api/buildings'
 import { createCourse, previewCourseImport } from '@/api/courses'
-import type { CourseImportPreviewItem } from '@/types/course'
+import type { CourseImportPreviewItem, CoursePayload } from '@/types/course'
 import { filterBuildingsByKeyword, includeSelectedBuilding } from '@/utils/buildings'
 import { WEEKDAYS, validateCourseForm } from '@/utils/course'
 import { useKeyboardAwarePage } from '@/utils/keyboardInset'
@@ -76,7 +76,7 @@ async function previewFile() {
   }
 }
 
-function toPayload(item: CourseImportPreviewItem) {
+function toPayload(item: CourseImportPreviewItem): CoursePayload {
   return {
     course_name: item.course_name,
     weekday: item.weekday,
@@ -85,7 +85,7 @@ function toPayload(item: CourseImportPreviewItem) {
     building_id: Number(item.building_id),
     room_name: item.room_name,
     teacher: item.teacher,
-    weeks: item.weeks
+    weeks: item.weeks?.trim() ?? ''
   }
 }
 

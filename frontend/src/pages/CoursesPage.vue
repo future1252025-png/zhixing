@@ -6,6 +6,7 @@ import { useRouter } from 'vue-router'
 import { deleteCourse, getCourses } from '@/api/courses'
 import { extractBusinessError } from '@/api/errors'
 import TechIcon from '@/components/TechIcon.vue'
+import CourseCard from '@/components/course/CourseCard.vue'
 import SemesterSettingsCard from '@/components/course/SemesterSettingsCard.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useSemesterStore } from '@/stores/semester'
@@ -227,6 +228,7 @@ onMounted(() => {
       </van-empty>
       <SemesterSettingsCard
         v-else
+        id="semester-settings"
         v-reveal="{ from: 'right', distance: 32 }"
         :semester="semesterStore.semester"
         :saving="semesterStore.saving"
@@ -407,24 +409,14 @@ onMounted(() => {
           </header>
 
           <div class="place-course-list">
-            <button
+            <CourseCard
               v-for="course in orderedVisibleCourses"
               :key="`place-${course.id}`"
-              type="button"
+              :course="course"
               :disabled="deletingId === course.id"
-              @click="openCourseActions(course)"
-            >
-              <span class="place-day">{{ WEEKDAYS[course.weekday - 1]?.label || `周${course.weekday}` }}</span>
-              <span class="place-course-copy">
-                <strong>{{ course.course_name }}</strong>
-                <span>
-                  <van-icon name="location-o" />
-                  <b>{{ course.building.name }}</b>
-                </span>
-                <small>教室 {{ course.room_name }}</small>
-              </span>
-              <time>{{ course.start_time }}</time>
-            </button>
+              @select="openCourseActions(course)"
+              @edit="openEditPage"
+            />
           </div>
         </section>
 

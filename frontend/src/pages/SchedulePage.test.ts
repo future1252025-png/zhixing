@@ -6,6 +6,7 @@ import { createMemoryHistory, createRouter } from 'vue-router'
 import { getBuildings } from '@/api/buildings'
 import { getCourses } from '@/api/courses'
 import { getScheduleSuggestion } from '@/api/schedule'
+import type { Course } from '@/types/course'
 import SchedulePage from './SchedulePage.vue'
 
 
@@ -54,7 +55,7 @@ const buildings = [
   }
 ]
 
-const courses = [
+const courses: Course[] = [
   {
     id: 1,
     course_name: '数据库原理',
@@ -66,6 +67,8 @@ const courses = [
     room_name: 'A101',
     teacher: '张老师',
     weeks: '1-16',
+    source_kind: 'manual',
+    needs_location_review: false,
     created_at: '2026-09-01T00:00:00Z'
   }
 ]

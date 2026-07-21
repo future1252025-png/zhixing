@@ -41,7 +41,7 @@ def read_building_chatrooms(
 @router.get("/messages", response_model=list[MessageRead])
 def read_building_messages(
     building_id: int,
-    room_name: str | None = Query(default=None, max_length=64),
+    room_name: str | None = Query(default=None, max_length=120),
     limit: int = Query(default=50, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
     session: Session = Depends(get_session),

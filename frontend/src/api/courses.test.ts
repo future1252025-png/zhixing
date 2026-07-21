@@ -33,6 +33,8 @@ const course = {
   room_name: 'A101',
   teacher: 'Teacher Li',
   weeks: '1-16',
+  source_kind: 'import',
+  needs_location_review: false,
   created_at: '2026-05-29T08:00:00'
 }
 
@@ -59,6 +61,8 @@ describe('courses api', () => {
 
     expect(request.get).toHaveBeenCalledWith('/api/courses')
     expect(result[0].course_name).toBe('Mobile App Design')
+    expect(result[0].source_kind).toBe('import')
+    expect(result[0].needs_location_review).toBe(false)
   })
 
   it('creates a course', async () => {

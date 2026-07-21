@@ -35,6 +35,8 @@ function createCourse(overrides: Partial<Course>): Course {
     room_name: '101',
     teacher: null,
     weeks: '1-16',
+    source_kind: 'manual',
+    needs_location_review: false,
     created_at: '2026-06-01T00:00:00',
     ...restOverrides,
     building: {
@@ -81,6 +83,8 @@ describe('login intro flag', () => {
       room_name: '102',
       teacher: '曾星',
       weeks: '1-16',
+      source_kind: 'import',
+      needs_location_review: false,
       created_at: '2026-06-01T00:00:00'
     })
 

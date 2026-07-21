@@ -61,8 +61,10 @@ export function shouldLoadCurrentUser(
 }
 
 export function resolveRouteScrollPosition(
-  savedPosition: { left: number; top: number } | null
-): { left: number; top: number } {
+  savedPosition: { left: number; top: number } | null,
+  hash = ''
+): { left: number; top: number } | { el: string; top: number; behavior: 'smooth' } {
+  if (hash) return { el: hash, top: 12, behavior: 'smooth' }
   return savedPosition ?? { left: 0, top: 0 }
 }
 
@@ -154,8 +156,8 @@ const routes: RouteRecordRaw[] = [
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes,
-  scrollBehavior(_to, _from, savedPosition) {
-    return resolveRouteScrollPosition(savedPosition)
+  scrollBehavior(to, _from, savedPosition) {
+    return resolveRouteScrollPosition(savedPosition, to.hash)
   }
 })
 
