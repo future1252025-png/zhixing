@@ -1,28 +1,133 @@
 import { computed, onMounted, onUnmounted, ref, type CSSProperties, type Ref } from 'vue'
 
+type KeyboardVisualViewport = Pick<VisualViewport, 'height' | 'offsetTop'> & { scale?: number }
+
+export type KeyboardViewportBaseline = {
+  layoutHeight: number
+  scale: number
+  height: number
+  offsetTop: number
+  bottom: number
+}
+
+export type KeyboardInsetTracker = {
+  measure: (layoutHeight: number, visualViewport: KeyboardVisualViewport | null) => number
+  getBaseline: () => KeyboardViewportBaseline | null
+  reset: () => void
+}
+
+const MIN_KEYBOARD_INSET_PX = 80
+
+function viewportScale(visualViewport: KeyboardVisualViewport): number {
+  return visualViewport.scale && visualViewport.scale > 0
+    ? visualViewport.scale
+    : 1
+}
+
 /**
  * Track how much of the layout viewport is covered by the on-screen keyboard
  * (or other visualViewport shrink). Useful for fixed bottom composers.
  */
 export function measureKeyboardInset(
   layoutHeight = typeof window !== 'undefined' ? window.innerHeight : 0,
-  visualViewport: (Pick<VisualViewport, 'height' | 'offsetTop'> & { scale?: number }) | null = null
+  visualViewport: KeyboardVisualViewport | null = null,
+  baselineHeight?: number
 ): number {
   if (!visualViewport || layoutHeight <= 0) {
     return 0
   }
-  // Compare against the layout viewport expressed at the same page scale.
-  // This removes pure page zoom while preserving a real keyboard shrink that
-  // happens at the same time (notably on iOS during focus animation).
-  const scale = visualViewport.scale && visualViewport.scale > 0
-    ? visualViewport.scale
-    : 1
-  const effectiveLayoutHeight = layoutHeight / scale
-  const covered = effectiveLayoutHeight - visualViewport.height - visualViewport.offsetTop
+  const effectiveLayoutHeight = layoutHeight / viewportScale(visualViewport)
+  // offsetTop is the visual viewport's position inside the layout viewport;
+  // panning a zoomed page does not change how much height the keyboard covers.
+  const covered = (baselineHeight ?? effectiveLayoutHeight) - visualViewport.height
   return Math.max(0, Math.round(covered))
 }
 
-export function useKeyboardInset(): { keyboardInset: Ref<number> } {
+export function createKeyboardInsetTracker(): KeyboardInsetTracker {
+  let baseline: KeyboardViewportBaseline | null = null
+
+  function reset() {
+    baseline = null
+  }
+
+  function getBaseline(): KeyboardViewportBaseline | null {
+    return baseline ? { ...baseline } : null
+  }
+
+  function setObservedBaseline(
+    layoutHeight: number,
+    visualViewport: KeyboardVisualViewport,
+    scale: number
+  ) {
+    baseline = {
+      layoutHeight,
+      scale,
+      height: visualViewport.height,
+      offsetTop: visualViewport.offsetTop,
+      bottom: visualViewport.offsetTop + visualViewport.height
+    }
+  }
+
+  function rebuildBaseline(
+    layoutHeight: number,
+    visualViewport: KeyboardVisualViewport,
+    scale: number
+  ) {
+    const effectiveLayoutHeight = layoutHeight / scale
+    const inferredInset = effectiveLayoutHeight - visualViewport.height
+    if (inferredInset < MIN_KEYBOARD_INSET_PX) {
+      setObservedBaseline(layoutHeight, visualViewport, scale)
+      return
+    }
+
+    // The first sample may already include an open keyboard. Seed its height
+    // from the same-scale layout viewport instead of recording the shrunken
+    // visual viewport as the no-keyboard baseline.
+    baseline = {
+      layoutHeight,
+      scale,
+      height: effectiveLayoutHeight,
+      offsetTop: visualViewport.offsetTop,
+      bottom: visualViewport.offsetTop + effectiveLayoutHeight
+    }
+  }
+
+  function measure(layoutHeight: number, visualViewport: KeyboardVisualViewport | null): number {
+    if (!visualViewport || layoutHeight <= 0) {
+      reset()
+      return 0
+    }
+
+    const scale = viewportScale(visualViewport)
+    const viewportStructureChanged = !baseline ||
+      Math.abs(baseline.layoutHeight - layoutHeight) > 1 ||
+      Math.abs(baseline.scale - scale) > 0.01
+    if (viewportStructureChanged) {
+      rebuildBaseline(layoutHeight, visualViewport, scale)
+    }
+
+    if (!baseline) return 0
+    if (visualViewport.height > baseline.height) {
+      setObservedBaseline(layoutHeight, visualViewport, scale)
+      return 0
+    }
+
+    const inset = measureKeyboardInset(layoutHeight, visualViewport, baseline.height)
+    if (inset < MIN_KEYBOARD_INSET_PX) {
+      // Browser chrome and small viewport rounding changes are not keyboards.
+      // This also refreshes offset/bottom after a keyboard fully closes.
+      setObservedBaseline(layoutHeight, visualViewport, scale)
+      return 0
+    }
+    return inset
+  }
+
+  return { measure, getBaseline, reset }
+}
+
+export function useKeyboardInset(
+  tracker: KeyboardInsetTracker = createKeyboardInsetTracker()
+): { keyboardInset: Ref<number> } {
   const keyboardInset = ref(0)
 
   function updateInset() {
@@ -30,7 +135,7 @@ export function useKeyboardInset(): { keyboardInset: Ref<number> } {
       keyboardInset.value = 0
       return
     }
-    keyboardInset.value = measureKeyboardInset(
+    keyboardInset.value = tracker.measure(
       window.innerHeight,
       window.visualViewport
     )
@@ -45,10 +150,12 @@ export function useKeyboardInset(): { keyboardInset: Ref<number> } {
   })
 
   onUnmounted(() => {
-    if (typeof window === 'undefined') return
-    window.visualViewport?.removeEventListener('resize', updateInset)
-    window.visualViewport?.removeEventListener('scroll', updateInset)
-    window.removeEventListener('resize', updateInset)
+    if (typeof window !== 'undefined') {
+      window.visualViewport?.removeEventListener('resize', updateInset)
+      window.visualViewport?.removeEventListener('scroll', updateInset)
+      window.removeEventListener('resize', updateInset)
+    }
+    tracker.reset()
   })
 
   return { keyboardInset }
@@ -99,10 +206,10 @@ export function isSoftwareKeyboardField(target: EventTarget | null): target is H
   return target.isContentEditable === true
 }
 
-function isFieldObscuredByKeyboard(target: HTMLElement): boolean {
+function isFieldObscuredByKeyboard(target: HTMLElement, tracker: KeyboardInsetTracker): boolean {
   if (typeof window === 'undefined') return false
   const viewport = window.visualViewport
-  if (!viewport || measureKeyboardInset(window.innerHeight, viewport) <= 0) return false
+  if (!viewport || tracker.measure(window.innerHeight, viewport) <= 0) return false
   if (typeof target.getBoundingClientRect !== 'function') return false
 
   const rectangle = target.getBoundingClientRect()
@@ -112,16 +219,21 @@ function isFieldObscuredByKeyboard(target: HTMLElement): boolean {
 
 export function scrollFocusedFieldIntoView(
   target: EventTarget | null,
-  options?: { delayMs?: number; block?: ScrollLogicalPosition }
+  options?: {
+    delayMs?: number
+    block?: ScrollLogicalPosition
+    tracker?: KeyboardInsetTracker
+  }
 ): () => void {
   if (!canScrollIntoView(target)) {
     return () => undefined
   }
   const delayMs = options?.delayMs ?? 280
   const block = options?.block ?? 'nearest'
+  const tracker = options?.tracker ?? createKeyboardInsetTracker()
   let hasScrolled = false
   const run = () => {
-    if (hasScrolled || !isFieldObscuredByKeyboard(target)) return
+    if (hasScrolled || !isFieldObscuredByKeyboard(target, tracker)) return
     target.scrollIntoView({
       behavior: 'smooth',
       block,
@@ -152,7 +264,8 @@ export function useKeyboardAwarePage(options: KeyboardAwarePageOptions = {}): {
   onFieldFocus: (event: FocusEvent) => void
 } {
   const basePaddingPx = options.basePaddingPx ?? 34
-  const { keyboardInset } = useKeyboardInset()
+  const keyboardTracker = createKeyboardInsetTracker()
+  const { keyboardInset } = useKeyboardInset(keyboardTracker)
   let cancelPendingScroll: (() => void) | null = null
 
   const pageStyle = computed<CSSProperties>(() => {
@@ -167,7 +280,7 @@ export function useKeyboardAwarePage(options: KeyboardAwarePageOptions = {}): {
     cancelPendingScroll?.()
     cancelPendingScroll = null
     if (!isSoftwareKeyboardField(event.target)) return
-    cancelPendingScroll = scrollFocusedFieldIntoView(event.target)
+    cancelPendingScroll = scrollFocusedFieldIntoView(event.target, { tracker: keyboardTracker })
   }
 
   onUnmounted(() => {

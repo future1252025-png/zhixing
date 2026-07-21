@@ -2,10 +2,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createApp, defineComponent, h, nextTick } from 'vue'
 
 import {
+  createKeyboardInsetTracker,
   isSoftwareKeyboardField,
   measureKeyboardInset,
   scrollFocusedFieldIntoView,
-  useKeyboardAwarePage
+  useKeyboardAwarePage,
+  useKeyboardInset
 } from './keyboardInset'
 
 afterEach(() => {
@@ -28,13 +30,13 @@ describe('measureKeyboardInset', () => {
     ).toBe(300)
   })
 
-  it('accounts for visualViewport offsetTop when scrolled', () => {
+  it('does not subtract visualViewport offsetTop from keyboard height', () => {
     expect(
       measureKeyboardInset(800, {
         height: 500,
         offsetTop: 40
       })
-    ).toBe(260)
+    ).toBe(300)
   })
 
   it('never returns negative inset', () => {
@@ -50,7 +52,7 @@ describe('measureKeyboardInset', () => {
     expect(
       measureKeyboardInset(800, {
         height: 500,
-        offsetTop: 0,
+        offsetTop: 100,
         scale: 1.6
       })
     ).toBe(0)
@@ -60,10 +62,61 @@ describe('measureKeyboardInset', () => {
     expect(
       measureKeyboardInset(800, {
         height: 300,
-        offsetTop: 0,
+        offsetTop: 100,
         scale: 1.6
       })
     ).toBe(200)
+    expect(
+      measureKeyboardInset(800, {
+        height: 300,
+        offsetTop: 200,
+        scale: 1.6
+      })
+    ).toBe(200)
+  })
+})
+
+describe('keyboard viewport baseline', () => {
+  it('keeps the same-scale no-keyboard baseline while offsetTop changes', () => {
+    const tracker = createKeyboardInsetTracker()
+
+    expect(tracker.measure(800, { height: 500, offsetTop: 100, scale: 1.6 })).toBe(0)
+    expect(tracker.getBaseline()).toMatchObject({
+      layoutHeight: 800,
+      scale: 1.6,
+      height: 500,
+      offsetTop: 100,
+      bottom: 600
+    })
+    expect(tracker.measure(800, { height: 300, offsetTop: 100, scale: 1.6 })).toBe(200)
+    expect(tracker.measure(800, { height: 300, offsetTop: 200, scale: 1.6 })).toBe(200)
+    expect(tracker.getBaseline()).toMatchObject({ height: 500, offsetTop: 100, bottom: 600 })
+  })
+
+  it('recovers its observed baseline when the keyboard closes', () => {
+    const tracker = createKeyboardInsetTracker()
+    expect(tracker.measure(800, { height: 500, offsetTop: 100, scale: 1.6 })).toBe(0)
+    expect(tracker.measure(800, { height: 300, offsetTop: 200, scale: 1.6 })).toBe(200)
+
+    expect(tracker.measure(800, { height: 500, offsetTop: 200, scale: 1.6 })).toBe(0)
+    expect(tracker.getBaseline()).toMatchObject({ height: 500, offsetTop: 200, bottom: 700 })
+  })
+
+  it('does not capture an initially open keyboard as the no-keyboard baseline', () => {
+    const tracker = createKeyboardInsetTracker()
+    expect(tracker.measure(800, { height: 500, offsetTop: 100, scale: 1 })).toBe(300)
+    expect(tracker.getBaseline()).toMatchObject({ height: 800, scale: 1 })
+  })
+
+  it('rebuilds for scale, rotation and layout resize changes', () => {
+    const tracker = createKeyboardInsetTracker()
+    expect(tracker.measure(800, { height: 800, offsetTop: 0, scale: 1 })).toBe(0)
+
+    expect(tracker.measure(800, { height: 300, offsetTop: 100, scale: 1.6 })).toBe(200)
+    expect(tracker.getBaseline()).toMatchObject({ height: 500, scale: 1.6 })
+
+    expect(tracker.measure(600, { height: 400, offsetTop: 0, scale: 1.5 })).toBe(0)
+    expect(tracker.getBaseline()).toMatchObject({ layoutHeight: 600, height: 400, scale: 1.5 })
   })
 })
 
@@ -219,6 +272,21 @@ describe('scrollFocusedFieldIntoView', () => {
     expect(target.scrollIntoView).toHaveBeenCalledTimes(1)
   })
 
+  it('uses the same zoom baseline when offsetTop changes during keyboard animation', () => {
+    vi.useFakeTimers()
+    const tracker = createKeyboardInsetTracker()
+    const viewport = useViewport(500, { layoutHeight: 800, offsetTop: 100, scale: 1.6 })
+    const target = scrollTarget(560)
+
+    scrollFocusedFieldIntoView(target, { delayMs: 100, tracker })
+    expect(target.scrollIntoView).not.toHaveBeenCalled()
+    viewport.height = 300
+    viewport.offsetTop = 200
+    vi.advanceTimersByTime(100)
+
+    expect(target.scrollIntoView).toHaveBeenCalledTimes(1)
+  })
+
   it('returns a cleanup that cancels its delayed visibility check', () => {
     vi.useFakeTimers()
     const viewport = useViewport(800)
@@ -245,6 +313,78 @@ describe('scrollFocusedFieldIntoView', () => {
     expect(scrollIntoView).not.toHaveBeenCalled()
     expect(cancel).toBeTypeOf('function')
     expect(() => cancel()).not.toThrow()
+  })
+})
+
+describe('useKeyboardInset lifecycle for the message composer', () => {
+  it('tracks open, offset changes, close and scale reset, then disposes its baseline', async () => {
+    const listeners = new Map<string, Set<EventListener>>()
+    const viewport = {
+      height: 500,
+      offsetTop: 100,
+      scale: 1.6,
+      addEventListener: vi.fn((name: string, listener: EventListener) => {
+        const group = listeners.get(name) ?? new Set<EventListener>()
+        group.add(listener)
+        listeners.set(name, group)
+      }),
+      removeEventListener: vi.fn((name: string, listener: EventListener) => {
+        listeners.get(name)?.delete(listener)
+      })
+    }
+    const dispatchViewport = (name: string) => {
+      listeners.get(name)?.forEach((listener) => listener(new Event(name)))
+    }
+    vi.stubGlobal('innerHeight', 800)
+    vi.stubGlobal('visualViewport', viewport)
+    const tracker = createKeyboardInsetTracker()
+    const Harness = defineComponent({
+      setup() {
+        const { keyboardInset } = useKeyboardInset(tracker)
+        return () => h('output', { id: 'inset' }, String(keyboardInset.value))
+      }
+    })
+    const host = document.createElement('div')
+    document.body.append(host)
+    const application = createApp(Harness)
+    application.mount(host)
+    await nextTick()
+    expect(host.textContent).toBe('0')
+
+    viewport.height = 300
+    viewport.offsetTop = 200
+    dispatchViewport('resize')
+    await nextTick()
+    expect(host.textContent).toBe('200')
+
+    viewport.offsetTop = 100
+    dispatchViewport('scroll')
+    await nextTick()
+    expect(host.textContent).toBe('200')
+
+    viewport.height = 500
+    dispatchViewport('resize')
+    await nextTick()
+    expect(host.textContent).toBe('0')
+
+    viewport.scale = 2
+    viewport.height = 400
+    viewport.offsetTop = 0
+    dispatchViewport('resize')
+    await nextTick()
+    expect(host.textContent).toBe('0')
+
+    vi.stubGlobal('innerHeight', 600)
+    viewport.scale = 1.5
+    viewport.height = 400
+    window.dispatchEvent(new Event('resize'))
+    await nextTick()
+    expect(host.textContent).toBe('0')
+    expect(tracker.getBaseline()).toMatchObject({ layoutHeight: 600, scale: 1.5, height: 400 })
+
+    application.unmount()
+    expect(viewport.removeEventListener).toHaveBeenCalledTimes(2)
+    expect(tracker.getBaseline()).toBeNull()
   })
 })
 

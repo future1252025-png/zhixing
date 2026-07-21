@@ -50,6 +50,12 @@ describe('mobile input policy', () => {
     expect(frontendFile('src/pages/BuildingMessagesPage.vue')).toMatch(/\.message-composer :deep\(\.van-cell\)[\s\S]*?min-height:\s*4[8-9]px;[\s\S]*?\.message-composer :deep\(\.van-field__control\)[\s\S]*?font-size:\s*16px/)
   })
 
+  it('keeps the building message composer wired to the lifecycle-aware inset', () => {
+    const source = frontendFile('src/pages/BuildingMessagesPage.vue')
+    expect(source).toContain('const { keyboardInset } = useKeyboardInset()')
+    expect(source).toContain('const composerLift = computed(() => Math.max(0, keyboardInset.value))')
+  })
+
   it('keeps both RealCampusMap search themes at 16px', () => {
     const matches = frontendFile('src/components/RealCampusMap.vue').match(/\.map-search :deep\(\.van-field__control\) \{[\s\S]*?font-size:\s*16px;/g)
     expect(matches).toHaveLength(2)
