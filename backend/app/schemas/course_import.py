@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class ImportFileInfo(BaseModel):
@@ -41,3 +41,31 @@ class CourseImportPreviewResponse(BaseModel):
     file: ImportFileInfo
     candidates: list[ImportCandidateResponse]
     can_commit: bool
+
+
+class ImportResolution(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    row_ref: str = Field(min_length=1, max_length=80)
+    building_id: int = Field(gt=0)
+    room_name: str = Field(min_length=1, max_length=120)
+
+    @field_validator("row_ref", "room_name")
+    @classmethod
+    def trim_required_text(cls, value: str) -> str:
+        result = value.strip()
+        if not result:
+            raise ValueError("value must not be blank")
+        return result
+
+
+class ImportCommitManifest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    resolutions: list[ImportResolution]
+
+
+class ImportCommitResponse(BaseModel):
+    created_count: int = Field(ge=0)
+    course_ids: list[int]

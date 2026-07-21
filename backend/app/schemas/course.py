@@ -60,7 +60,7 @@ class CourseBase(BaseModel):
     start_time: str
     end_time: str
     building_id: int
-    room_name: str = Field(min_length=1, max_length=64)
+    room_name: str = Field(min_length=1, max_length=120)
     teacher: str | None = Field(default=None, max_length=64)
     weeks: str = Field(min_length=1, max_length=64)
 
@@ -101,7 +101,7 @@ class CourseUpdate(BaseModel):
     start_time: str | None = None
     end_time: str | None = None
     building_id: int | None = None
-    room_name: str | None = Field(default=None, min_length=1, max_length=64)
+    room_name: str | None = Field(default=None, min_length=1, max_length=120)
     teacher: str | None = Field(default=None, max_length=64)
     weeks: str | None = Field(default=None, max_length=64)
 

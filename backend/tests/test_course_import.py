@@ -1,16 +1,20 @@
 from collections.abc import Generator
 from io import BytesIO
+import json
 from pathlib import Path
+from zipfile import ZIP_DEFLATED, ZipFile
 
 import pytest
 from fastapi.testclient import TestClient
 from openpyxl import Workbook
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.db.database import Base, create_sqlite_engine, get_session, init_db
 from app.db.seed import seed_demo_data
 from app.main import app
-from app.models import Building
+from app.models import Building, Course, CourseImportSource, User
+from app.api.courses import MAX_IMPORT_FILE_BYTES
 from app.services.course_import_service import parse_course_cell
 
 
@@ -36,7 +40,14 @@ def auth_headers(client: TestClient) -> dict[str, str]:
         json={"username": "importer", "password": "secret123"},
     )
     assert login.status_code == 200
-    return {"Authorization": f"Bearer {login.json()['access_token']}"}
+    headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+    semester = client.put(
+        "/api/semester",
+        json={"start_date": "2026-02-23", "total_weeks": 20},
+        headers=headers,
+    )
+    assert semester.status_code == 200
+    return headers
 
 
 @pytest.fixture
@@ -358,3 +369,488 @@ def test_preview_rejects_unknown_extension_with_business_error(client: TestClien
         "fields": ["file"],
         "details": {"filename": "schedule.csv"},
     }
+
+
+def valid_import_content() -> bytes:
+    return """
+    <table>
+      <tr><th>节次</th><th>星期一</th><th>星期二</th></tr>
+      <tr>
+        <td>第一二节<br>08:00-09:40</td>
+        <td>大学英语<br>李老师<br>1-16(周)[01-02节]<br>教3-205</td>
+        <td>机器学习<br>吴笛<br>9-16(周)[03-04节]<br>实训大楼423-425数据中国实验室1</td>
+      </tr>
+    </table>
+    """.encode("utf-8")
+
+
+def conflicting_import_content() -> bytes:
+    return """
+    <table>
+      <tr><th>节次</th><th>星期一</th></tr>
+      <tr>
+        <td>第一二节<br>08:00-09:40</td>
+        <td>
+          课程甲<br>甲老师<br>1-16(周)[01-02节]<br>教3-205<br>
+          --------------------<br>
+          课程乙<br>乙老师<br>1-16(周)[01-02节]<br>教3-206
+        </td>
+      </tr>
+    </table>
+    """.encode("utf-8")
+
+
+def preview_and_resolutions(
+    client: TestClient,
+    headers: dict[str, str],
+    content: bytes,
+    *,
+    filename: str = "valid.html",
+) -> tuple[str, list[dict[str, object]], dict[str, object]]:
+    preview = client.post(
+        "/api/courses/import/preview",
+        files={"file": (filename, content, "text/html")},
+        headers=headers,
+    )
+    assert preview.status_code == 200
+    body = preview.json()
+    resolutions = [
+        {
+            "row_ref": candidate["row_ref"],
+            "building_id": candidate["suggested_building_id"],
+            "room_name": candidate["suggested_room_name"],
+        }
+        for candidate in body["candidates"]
+    ]
+    return body["file"]["sha256"], resolutions, body
+
+
+def commit_import_request(
+    client: TestClient,
+    headers: dict[str, str],
+    content: bytes,
+    *,
+    digest: str,
+    resolutions: list[dict[str, object]],
+    filename: str = "valid.html",
+):
+    manifest = json.dumps(
+        {"sha256": digest, "resolutions": resolutions},
+        ensure_ascii=False,
+    )
+    return client.post(
+        "/api/courses/import",
+        data={"manifest": manifest},
+        files={"file": (filename, content, "text/html")},
+        headers=headers,
+    )
+
+
+def importer_counts(SessionLocal: sessionmaker) -> tuple[int, int]:
+    with SessionLocal() as session:
+        user_id = session.scalar(select(User.id).where(User.username == "importer"))
+        assert user_id is not None
+        course_count = session.scalar(
+            select(func.count()).select_from(Course).where(Course.user_id == user_id)
+        )
+        source_count = session.scalar(
+            select(func.count())
+            .select_from(CourseImportSource)
+            .join(Course, Course.id == CourseImportSource.course_id)
+            .where(Course.user_id == user_id)
+        )
+        return int(course_count or 0), int(source_count or 0)
+
+
+def test_import_reparses_uploaded_file_and_rejects_wrong_sha(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    client, SessionLocal = client_and_session
+    headers = auth_headers(client)
+    content = valid_import_content()
+    _, resolutions, _ = preview_and_resolutions(client, headers, content)
+
+    response = commit_import_request(
+        client,
+        headers,
+        content,
+        digest="0" * 64,
+        resolutions=resolutions,
+    )
+
+    assert response.status_code == 409
+    assert response.json()["code"] == "import_file_changed"
+    assert importer_counts(SessionLocal) == (0, 0)
+
+
+@pytest.mark.parametrize("mismatch", ["missing", "duplicate", "extra"])
+def test_import_requires_an_exact_resolution_set(
+    client_and_session: tuple[TestClient, sessionmaker],
+    mismatch: str,
+) -> None:
+    client, SessionLocal = client_and_session
+    headers = auth_headers(client)
+    content = valid_import_content()
+    digest, resolutions, _ = preview_and_resolutions(client, headers, content)
+    if mismatch == "missing":
+        resolutions = resolutions[:-1]
+    elif mismatch == "duplicate":
+        resolutions = [*resolutions, dict(resolutions[0])]
+    else:
+        resolutions = [
+            *resolutions,
+            {"row_ref": "row-999", "building_id": 1, "room_name": "101"},
+        ]
+
+    response = commit_import_request(
+        client,
+        headers,
+        content,
+        digest=digest,
+        resolutions=resolutions,
+    )
+
+    assert response.status_code == 409
+    assert response.json()["code"] == "import_resolution_mismatch"
+    assert importer_counts(SessionLocal) == (0, 0)
+
+
+def test_import_rejects_unresolved_final_location(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    client, SessionLocal = client_and_session
+    headers = auth_headers(client)
+    content = valid_import_content()
+    digest, resolutions, _ = preview_and_resolutions(client, headers, content)
+    resolutions[0]["building_id"] = 999999
+
+    response = commit_import_request(
+        client,
+        headers,
+        content,
+        digest=digest,
+        resolutions=resolutions,
+    )
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "import_unresolved"
+    assert response.json()["details"]["row_refs"] == ["row-1"]
+    assert importer_counts(SessionLocal) == (0, 0)
+
+
+def test_import_internal_conflict_rolls_back_every_course(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    client, SessionLocal = client_and_session
+    headers = auth_headers(client)
+    content = conflicting_import_content()
+    digest, resolutions, _ = preview_and_resolutions(client, headers, content)
+
+    response = commit_import_request(
+        client,
+        headers,
+        content,
+        digest=digest,
+        resolutions=resolutions,
+        filename="conflict.html",
+    )
+
+    assert response.status_code == 409
+    assert response.json()["code"] == "course_conflict"
+    assert response.json()["details"]["conflicts"][0]["row_ref"] == "row-2"
+    assert response.json()["details"]["conflicts"][0]["conflicting_row_ref"] == "row-1"
+    assert importer_counts(SessionLocal) == (0, 0)
+
+
+def test_import_existing_conflict_writes_nothing(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    client, SessionLocal = client_and_session
+    headers = auth_headers(client)
+    content = valid_import_content()
+    digest, resolutions, _ = preview_and_resolutions(client, headers, content)
+    existing = client.post(
+        "/api/courses",
+        json={
+            "course_name": "已有课程",
+            "weekday": 1,
+            "start_time": "08:00",
+            "end_time": "09:40",
+            "building_id": resolutions[0]["building_id"],
+            "room_name": "201",
+            "teacher": "老师",
+            "weeks": "1-16",
+        },
+        headers=headers,
+    )
+    assert existing.status_code == 201
+
+    response = commit_import_request(
+        client,
+        headers,
+        content,
+        digest=digest,
+        resolutions=resolutions,
+    )
+
+    assert response.status_code == 409
+    assert response.json()["code"] == "course_conflict"
+    assert importer_counts(SessionLocal) == (1, 0)
+
+
+def test_import_success_persists_every_raw_source_and_is_idempotent(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    client, SessionLocal = client_and_session
+    headers = auth_headers(client)
+    content = valid_import_content()
+    digest, resolutions, preview = preview_and_resolutions(client, headers, content)
+
+    response = commit_import_request(
+        client,
+        headers,
+        content,
+        digest=digest,
+        resolutions=resolutions,
+    )
+
+    assert response.status_code == 201
+    assert response.json()["created_count"] == 2
+    assert len(response.json()["course_ids"]) == 2
+    assert importer_counts(SessionLocal) == (2, 2)
+    with SessionLocal() as session:
+        sources = list(
+            session.scalars(
+                select(CourseImportSource).order_by(CourseImportSource.source_row)
+            ).all()
+        )
+        courses = list(
+            session.scalars(
+                select(Course)
+                .join(User, User.id == Course.user_id)
+                .where(User.username == "importer")
+                .order_by(Course.id)
+            ).all()
+        )
+        assert [course.source_kind for course in courses] == ["import", "import"]
+        for source, candidate in zip(sources, preview["candidates"], strict=True):
+            assert source.filename == "valid.html"
+            assert source.file_sha256 == digest
+            assert source.source_row == candidate["row_ref"]
+            assert {
+                "raw_course_name": source.raw_course_name,
+                "raw_weekday": source.raw_weekday,
+                "raw_time_or_section": source.raw_time_or_section,
+                "raw_teacher": source.raw_teacher,
+                "raw_weeks": source.raw_weeks,
+                "raw_location": source.raw_location,
+            } == candidate["source"]
+
+    repeated = commit_import_request(
+        client,
+        headers,
+        content,
+        digest=digest,
+        resolutions=resolutions,
+    )
+    assert repeated.status_code == 409
+    assert repeated.json()["code"] == "import_already_committed"
+    assert importer_counts(SessionLocal) == (2, 2)
+
+
+def test_import_database_error_rolls_back_every_course(
+    client_and_session: tuple[TestClient, sessionmaker],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, SessionLocal = client_and_session
+    headers = auth_headers(client)
+    content = valid_import_content()
+    digest, resolutions, _ = preview_and_resolutions(client, headers, content)
+    original_init = CourseImportSource.__init__
+
+    def fail_on_second_source(self, **kwargs):
+        if kwargs.get("source_row") == "row-2":
+            raise RuntimeError("simulated source persistence failure")
+        original_init(self, **kwargs)
+
+    monkeypatch.setattr(CourseImportSource, "__init__", fail_on_second_source)
+    no_raise_client = TestClient(app, raise_server_exceptions=False)
+
+    response = commit_import_request(
+        no_raise_client,
+        headers,
+        content,
+        digest=digest,
+        resolutions=resolutions,
+    )
+
+    assert response.status_code == 500
+    assert importer_counts(SessionLocal) == (0, 0)
+
+
+def test_import_allows_explicit_room_resolution(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    client, SessionLocal = client_and_session
+    headers = auth_headers(client)
+    content = """
+    <table>
+      <tr><th>节次</th><th>星期四</th></tr>
+      <tr><td>第一二节</td><td>形势与政策<br>周老师<br>1-4(周)[01-02节]<br>教4</td></tr>
+    </table>
+    """.encode("utf-8")
+    digest, resolutions, preview = preview_and_resolutions(client, headers, content)
+    assert preview["candidates"][0]["errors"][0]["code"] == "room_missing"
+    resolutions[0]["room_name"] = "103"
+
+    response = commit_import_request(
+        client,
+        headers,
+        content,
+        digest=digest,
+        resolutions=resolutions,
+    )
+
+    assert response.status_code == 201
+    assert importer_counts(SessionLocal) == (1, 1)
+
+
+def test_import_rejects_non_location_parse_error(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    client, SessionLocal = client_and_session
+    headers = auth_headers(client)
+    content = """
+    <table>
+      <tr><th>节次</th><th>星期五</th></tr>
+      <tr><td>晚间</td><td>创新实践<br>陈老师<br>1-12(周)[晚自习]<br>教4-203</td></tr>
+    </table>
+    """.encode("utf-8")
+    digest, resolutions, _ = preview_and_resolutions(client, headers, content)
+
+    response = commit_import_request(
+        client,
+        headers,
+        content,
+        digest=digest,
+        resolutions=resolutions,
+    )
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "import_unresolved"
+    assert response.json()["details"]["rows"][0]["issues"][0]["code"] == (
+        "time_unrecognized"
+    )
+    assert importer_counts(SessionLocal) == (0, 0)
+
+
+def test_import_endpoint_requires_login(client: TestClient) -> None:
+    response = client.post(
+        "/api/courses/import",
+        data={"manifest": json.dumps({"sha256": "0" * 64, "resolutions": []})},
+        files={"file": ("schedule.html", b"<table></table>", "text/html")},
+    )
+
+    assert response.status_code == 401
+
+
+def test_import_rejects_invalid_manifest(client: TestClient) -> None:
+    response = client.post(
+        "/api/courses/import",
+        data={"manifest": "not-json"},
+        files={"file": ("schedule.html", b"<table></table>", "text/html")},
+        headers=auth_headers(client),
+    )
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "invalid_import_manifest"
+
+
+def test_preview_rejects_oversized_upload_before_parsing(client: TestClient) -> None:
+    response = client.post(
+        "/api/courses/import/preview",
+        files={
+            "file": (
+                "schedule.html",
+                b"x" * (MAX_IMPORT_FILE_BYTES + 1),
+                "text/html",
+            )
+        },
+        headers=auth_headers(client),
+    )
+
+    assert response.status_code == 413
+    assert response.json()["code"] == "import_file_too_large"
+
+
+def test_preview_rejects_xlsx_with_excessive_expanded_size(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "app.services.course_import_service.MAX_XLSX_EXPANDED_BYTES",
+        1024,
+    )
+    content = BytesIO()
+    with ZipFile(content, "w", compression=ZIP_DEFLATED) as archive:
+        archive.writestr("xl/worksheets/sheet1.xml", b"x" * 2048)
+
+    response = client.post(
+        "/api/courses/import/preview",
+        files={"file": ("schedule.xlsx", content.getvalue(), "application/octet-stream")},
+        headers=auth_headers(client),
+    )
+
+    assert response.status_code == 413
+    assert response.json()["code"] == "import_file_too_large"
+
+
+def test_preview_accepts_html_export_with_xls_suffix(client: TestClient) -> None:
+    response = upload_preview(
+        client,
+        "legacy-export.xls",
+        (FIXTURES / "import_schedule.html").read_bytes(),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["file"]["candidate_count"] == 5
+
+
+def test_import_keeps_room_name_longer_than_legacy_limit(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    client, SessionLocal = client_and_session
+    headers = auth_headers(client)
+    long_room = "423-425数据中国实验室" + "东区联合创新空间" * 7
+    assert 64 < len(long_room) <= 120
+    content = f"""
+    <table>
+      <tr><th>节次</th><th>星期二</th></tr>
+      <tr>
+        <td>第三四节</td>
+        <td>机器学习<br>吴笛<br>1-16(周)[03-04节]<br>实训大楼{long_room}</td>
+      </tr>
+    </table>
+    """.encode("utf-8")
+    digest, resolutions, preview = preview_and_resolutions(client, headers, content)
+    assert preview["candidates"][0]["suggested_room_name"] == long_room
+
+    response = commit_import_request(
+        client,
+        headers,
+        content,
+        digest=digest,
+        resolutions=resolutions,
+    )
+
+    assert response.status_code == 201
+    with SessionLocal() as session:
+        course = session.scalar(
+            select(Course)
+            .join(User, User.id == Course.user_id)
+            .where(User.username == "importer")
+        )
+        assert course is not None
+        assert course.room_name == long_room
+        assert course.import_source is not None
+        assert course.import_source.raw_location == f"实训大楼{long_room}"

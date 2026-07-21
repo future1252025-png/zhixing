@@ -7,22 +7,31 @@ from html.parser import HTMLParser
 from io import BytesIO
 from pathlib import PurePath
 import re
+from zipfile import BadZipFile, ZipFile
+from collections import Counter
 from collections.abc import Sequence
 
 from openpyxl import load_workbook
+from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 import xlrd
 
 from app.core.errors import BusinessError
-from app.models import Building
+from app.models import Building, Course, CourseImportSource
+from app.schemas.course import CourseCreate
 from app.schemas.course_import import (
     CourseImportPreviewResponse,
     ImportCandidateResponse,
+    ImportCommitManifest,
     ImportFileInfo,
     ImportIssueResponse,
+    ImportResolution,
     RawCourseSourceResponse,
 )
+from app.services.course_policy import location_requires_review
+from app.services.course_service import add_course, validate_course_batch
+from app.services.user_mutation_guard import acquire_user_mutation_guard
 
 
 WEEKDAY_LABELS = {
@@ -64,6 +73,7 @@ RAW_WEEKS_RE = re.compile(
 )
 DASH_RE = re.compile(r"^-{3,}$")
 CONNECTOR_CHARS = " -—–·()（）"
+MAX_XLSX_EXPANDED_BYTES = 50 * 1024 * 1024
 
 
 @dataclass(frozen=True)
@@ -97,6 +107,12 @@ class ImportCandidate:
     suggested_building_name: str | None
     suggested_room_name: str | None
     errors: tuple[ImportIssue, ...]
+
+
+@dataclass(frozen=True)
+class ResolvedImportCourse:
+    source: RawCourseRow
+    course: CourseCreate
 
 
 @dataclass(frozen=True)
@@ -198,7 +214,21 @@ def _extract_html_rows(content: bytes) -> list[list[str]]:
 
 
 def _extract_xlsx_rows(content: bytes) -> list[list[str]]:
-    workbook = load_workbook(BytesIO(content), data_only=True, read_only=True)
+    try:
+        with ZipFile(BytesIO(content)) as archive:
+            expanded_size = sum(item.file_size for item in archive.infolist())
+    except BadZipFile as exc:
+        raise ValueError("invalid XLSX archive") from exc
+    if expanded_size > MAX_XLSX_EXPANDED_BYTES:
+        raise BusinessError(
+            413,
+            "import_file_too_large",
+            "XLSX 解压后的内容过大",
+            fields=["file"],
+            details={"max_expanded_bytes": MAX_XLSX_EXPANDED_BYTES},
+        )
+
+    workbook = load_workbook(BytesIO(content), data_only=False, read_only=True)
     try:
         sheet = workbook.active
         return [
@@ -234,6 +264,8 @@ def _read_rows(filename: str, content: bytes) -> list[list[str]]:
         if suffix == ".xlsx":
             return _extract_xlsx_rows(content)
         if suffix == ".xls":
+            if content.lstrip().startswith((b"<", b"<!")):
+                return _extract_html_rows(content)
             return _extract_xls_rows(content)
     except BusinessError:
         raise
@@ -517,10 +549,7 @@ def build_course_import_preview(
     filename: str,
     content: bytes,
 ) -> CourseImportPreviewResponse:
-    rows = _read_rows(filename, content)
-    raw_courses = _rows_to_raw_courses(rows)
-    buildings = list(session.scalars(select(Building).order_by(Building.id.asc())).all())
-    candidates = [_candidate_from_raw(raw, buildings) for raw in raw_courses]
+    candidates = _parse_import_candidates(session, filename, content)
     return CourseImportPreviewResponse(
         file=ImportFileInfo(
             filename=filename,
@@ -530,6 +559,239 @@ def build_course_import_preview(
         candidates=[_candidate_response(candidate) for candidate in candidates],
         can_commit=bool(candidates) and all(not candidate.errors for candidate in candidates),
     )
+
+
+def _parse_import_candidates(
+    session: Session,
+    filename: str,
+    content: bytes,
+) -> list[ImportCandidate]:
+    rows = _read_rows(filename, content)
+    raw_courses = _rows_to_raw_courses(rows)
+    buildings = list(session.scalars(select(Building).order_by(Building.id.asc())).all())
+    return [_candidate_from_raw(raw, buildings) for raw in raw_courses]
+
+
+def _match_resolutions(
+    candidates: Sequence[ImportCandidate],
+    resolutions: Sequence[ImportResolution],
+) -> dict[str, ImportResolution]:
+    expected = [candidate.source.row_ref for candidate in candidates]
+    actual = [resolution.row_ref for resolution in resolutions]
+    counts = Counter(actual)
+    duplicates = sorted(row_ref for row_ref, count in counts.items() if count > 1)
+    expected_set = set(expected)
+    actual_set = set(actual)
+    missing = sorted(expected_set - actual_set)
+    extra = sorted(actual_set - expected_set)
+    if duplicates or missing or extra or len(actual) != len(expected):
+        raise BusinessError(
+            409,
+            "import_resolution_mismatch",
+            "导入确认项与文件中的课程行不一致，请重新预览",
+            fields=["resolutions"],
+            details={
+                "missing_row_refs": missing,
+                "extra_row_refs": extra,
+                "duplicate_row_refs": duplicates,
+            },
+        )
+    return {resolution.row_ref: resolution for resolution in resolutions}
+
+
+def _resolve_import_candidates(
+    session: Session,
+    candidates: Sequence[ImportCandidate],
+    resolutions: dict[str, ImportResolution],
+) -> list[ResolvedImportCourse]:
+    resolved: list[ResolvedImportCourse] = []
+    unresolved: list[dict[str, object]] = []
+    resolvable_location_codes = {"building_unrecognized", "room_missing"}
+
+    for candidate in candidates:
+        source = candidate.source
+        resolution = resolutions[source.row_ref]
+        issues = [
+            {
+                "code": issue.code,
+                "field": issue.field,
+                "message": issue.message,
+            }
+            for issue in candidate.errors
+            if issue.code not in resolvable_location_codes
+        ]
+        building = session.get(Building, resolution.building_id)
+        if building is None:
+            issues.append(
+                {
+                    "code": "building_not_found",
+                    "field": "building_id",
+                    "message": "确认的建筑不存在",
+                }
+            )
+        if location_requires_review(resolution.room_name):
+            issues.append(
+                {
+                    "code": "room_unresolved",
+                    "field": "room_name",
+                    "message": "教室仍未确认",
+                }
+            )
+
+        required_values = {
+            "course_name": candidate.course_name,
+            "weekday": candidate.weekday,
+            "start_time": candidate.start_time,
+            "end_time": candidate.end_time,
+            "weeks": candidate.weeks,
+        }
+        missing_fields = [field for field, value in required_values.items() if value is None]
+        for field in missing_fields:
+            if not any(issue["field"] == field for issue in issues):
+                issues.append(
+                    {
+                        "code": f"{field}_unresolved",
+                        "field": field,
+                        "message": "该字段无法从原文件确认",
+                    }
+                )
+
+        if not issues:
+            try:
+                course = CourseCreate(
+                    course_name=candidate.course_name,
+                    weekday=candidate.weekday,
+                    start_time=candidate.start_time.strftime("%H:%M"),
+                    end_time=candidate.end_time.strftime("%H:%M"),
+                    building_id=resolution.building_id,
+                    room_name=resolution.room_name,
+                    teacher=candidate.teacher,
+                    weeks=candidate.weeks,
+                )
+            except (ValidationError, ValueError) as exc:
+                if isinstance(exc, ValidationError):
+                    validation_errors = exc.errors(include_context=False)
+                else:
+                    validation_errors = [{"msg": str(exc)}]
+                issues.append(
+                    {
+                        "code": "course_values_invalid",
+                        "field": "course",
+                        "message": "课程字段无法通过校验",
+                        "details": validation_errors,
+                    }
+                )
+            else:
+                resolved.append(ResolvedImportCourse(source=source, course=course))
+
+        if issues:
+            unresolved.append({"row_ref": source.row_ref, "issues": issues})
+
+    if unresolved or not candidates:
+        raise BusinessError(
+            422,
+            "import_unresolved",
+            "导入文件仍有未解决的课程字段",
+            fields=["resolutions"],
+            details={
+                "row_refs": [item["row_ref"] for item in unresolved],
+                "rows": unresolved,
+            },
+        )
+    return resolved
+
+
+def _ensure_file_not_committed(
+    session: Session,
+    *,
+    user_id: int,
+    file_sha256: str,
+) -> None:
+    existing_source = session.scalar(
+        select(CourseImportSource.id)
+        .join(Course, Course.id == CourseImportSource.course_id)
+        .where(
+            Course.user_id == user_id,
+            CourseImportSource.file_sha256 == file_sha256,
+        )
+        .limit(1)
+    )
+    if existing_source is not None:
+        raise BusinessError(
+            409,
+            "import_already_committed",
+            "该课表文件已经导入，不能重复提交",
+            fields=["file"],
+            details={"sha256": file_sha256},
+        )
+
+
+def commit_course_import(
+    session: Session,
+    *,
+    user_id: int,
+    filename: str,
+    content: bytes,
+    manifest: ImportCommitManifest,
+) -> list[Course]:
+    actual_sha = sha256(content).hexdigest()
+    if actual_sha != manifest.sha256:
+        raise BusinessError(
+            409,
+            "import_file_changed",
+            "提交的文件与预览时不同，请重新预览",
+            fields=["file", "sha256"],
+            details={"expected_sha256": manifest.sha256, "actual_sha256": actual_sha},
+        )
+    if not filename or len(filename) > 255:
+        raise BusinessError(
+            422,
+            "invalid_import_filename",
+            "导入文件名无效",
+            fields=["file"],
+        )
+
+    candidates = _parse_import_candidates(session, filename, content)
+    resolution_map = _match_resolutions(candidates, manifest.resolutions)
+    guard = acquire_user_mutation_guard(session, user_id)
+    _ensure_file_not_committed(session, user_id=user_id, file_sha256=actual_sha)
+    resolved = _resolve_import_candidates(session, candidates, resolution_map)
+    validated_entries = validate_course_batch(
+        session,
+        user_id=user_id,
+        entries=[(item.source.row_ref, item.course) for item in resolved],
+        guard=guard,
+    )
+
+    created: list[Course] = []
+    for item, (row_ref, payload) in zip(resolved, validated_entries, strict=True):
+        if row_ref != item.source.row_ref:
+            raise RuntimeError("validated import rows changed order")
+        course = add_course(
+            session,
+            user_id=user_id,
+            payload=payload,
+            source_kind="import",
+            guard=guard,
+        )
+        source = item.source
+        session.add(
+            CourseImportSource(
+                course_id=course.id,
+                filename=filename,
+                file_sha256=actual_sha,
+                source_row=source.row_ref,
+                raw_course_name=source.raw_course_name,
+                raw_weekday=source.raw_weekday,
+                raw_time_or_section=source.raw_time_or_section,
+                raw_teacher=source.raw_teacher,
+                raw_weeks=source.raw_weeks,
+                raw_location=source.raw_location,
+            )
+        )
+        created.append(course)
+    session.flush()
+    return created
 
 
 def parse_course_cell(

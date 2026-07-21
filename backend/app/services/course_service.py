@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Literal
 
 from sqlalchemy import select
@@ -78,6 +79,77 @@ def create_course(session: Session, user_id: int, payload: CourseCreate) -> Cour
     return add_course(session, user_id=user_id, payload=payload)
 
 
+def validate_course_batch(
+    session: Session,
+    *,
+    user_id: int,
+    entries: Sequence[tuple[str, CourseCreate]],
+    guard: UserMutationGuard,
+) -> list[tuple[str, CourseCreate]]:
+    """Validate a complete batch before its first course row is inserted."""
+
+    require_user_mutation_guard(session, user_id, guard)
+    setting = get_setting(session, user_id)
+    if setting is None:
+        raise BusinessError(409, "semester_unconfigured", "Semester is not configured")
+
+    existing_values = _existing_course_values(
+        session,
+        user_id,
+        setting.total_weeks,
+        excluded_course_id=None,
+        allow_other_invalid=False,
+    )
+    comparison_values = list(existing_values)
+    batch_row_refs: dict[int, str] = {}
+    validated: list[tuple[str, CourseCreate]] = []
+
+    for index, (row_ref, payload) in enumerate(entries, start=1):
+        synthetic_id = -index
+        values = payload.model_dump()
+        normalized_weeks, candidate = _validated_course_value(
+            session,
+            values,
+            setting.total_weeks,
+            candidate_id=synthetic_id,
+        )
+        conflicts = detect_conflicts(
+            candidate,
+            comparison_values,
+            max_week=setting.total_weeks,
+        )
+        if conflicts:
+            details: list[dict[str, object]] = []
+            for conflict in conflicts:
+                item: dict[str, object] = {
+                    "row_ref": row_ref,
+                    "course_name": payload.course_name,
+                    "overlap_weeks": list(conflict.overlap_weeks),
+                }
+                conflicting_row_ref = batch_row_refs.get(conflict.course_id)
+                if conflicting_row_ref is None:
+                    item["course_id"] = conflict.course_id
+                    item["conflicting_course_name"] = conflict.course_name
+                else:
+                    item["conflicting_row_ref"] = conflicting_row_ref
+                    item["conflicting_course_name"] = conflict.course_name
+                details.append(item)
+            raise BusinessError(
+                409,
+                "course_conflict",
+                "导入课程存在时间冲突",
+                fields=["weekday", "start_time", "end_time", "weeks"],
+                details={"conflicts": details},
+            )
+
+        normalized_payload = payload.model_copy(update={"weeks": normalized_weeks})
+        validated.append((row_ref, normalized_payload))
+        batch_row_refs[synthetic_id] = row_ref
+        comparison_values.append(candidate)
+
+    return validated
+
+
 def update_course(
     session: Session,
     *,
@@ -150,6 +222,29 @@ def _validate_course_values(
     excluded_course_id: int | None = None,
     allow_other_invalid: bool = False,
 ) -> str:
+    normalized_weeks, candidate = _validated_course_value(
+        session,
+        values,
+        max_week,
+        candidate_id=excluded_course_id,
+    )
+    conflicts = detect_conflicts(
+        candidate,
+        _existing_course_values(session, user_id, max_week, excluded_course_id, allow_other_invalid),
+        max_week=max_week,
+    )
+    if conflicts:
+        raise _conflict_error(conflicts)
+    return normalized_weeks
+
+
+def _validated_course_value(
+    session: Session,
+    values: dict[str, object],
+    max_week: int,
+    *,
+    candidate_id: int | None,
+) -> tuple[str, CourseValue]:
     if not building_exists(session, _required_int(values, "building_id")):
         raise BusinessError(404, "building_not_found", "Building not found", fields=["building_id"])
     room_name = _required_str(values, "room_name")
@@ -166,21 +261,14 @@ def _validate_course_values(
     except WeekExpressionError as exc:
         raise BusinessError(422, "invalid_course_weeks", str(exc), fields=["weeks"], details={"max_week": max_week}) from exc
     candidate = CourseValue(
-        id=excluded_course_id,
+        id=candidate_id,
         course_name=_required_str(values, "course_name"),
         weekday=_required_int(values, "weekday"),
         start_time=start_time,
         end_time=end_time,
         weeks=normalized_weeks,
     )
-    conflicts = detect_conflicts(
-        candidate,
-        _existing_course_values(session, user_id, max_week, excluded_course_id, allow_other_invalid),
-        max_week=max_week,
-    )
-    if conflicts:
-        raise _conflict_error(conflicts)
-    return normalized_weeks
+    return normalized_weeks, candidate
 
 
 def _existing_course_values(

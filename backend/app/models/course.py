@@ -19,7 +19,7 @@ class Course(Base):
     start_time: Mapped[str] = mapped_column(String(5))
     end_time: Mapped[str] = mapped_column(String(5))
     building_id: Mapped[int] = mapped_column(ForeignKey("buildings.id"), index=True)
-    room_name: Mapped[str] = mapped_column(String(64))
+    room_name: Mapped[str] = mapped_column(String(120))
     teacher: Mapped[str | None] = mapped_column(String(64), nullable=True)
     weeks: Mapped[str] = mapped_column(
         String(64),
