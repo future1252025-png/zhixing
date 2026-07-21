@@ -802,7 +802,7 @@ onMounted(loadCourses)
 }
 
 .time-cell time {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 650;
   color: var(--fresh-text);
 }

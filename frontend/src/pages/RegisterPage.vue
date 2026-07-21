@@ -281,6 +281,10 @@ async function handleSubmit() {
   width: 44px;
 }
 
+.register-card :deep(.van-field__control) {
+  font-size: 16px;
+}
+
 .gentle-note {
   display: flex;
   gap: 10px;

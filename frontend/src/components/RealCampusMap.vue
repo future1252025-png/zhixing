@@ -808,7 +808,7 @@ onBeforeUnmount(() => {
 
 .map-search :deep(.van-field__control) {
   caret-color: var(--map-cyan);
-  font-size: 15px;
+  font-size: 16px;
   letter-spacing: .01em;
 }
 
@@ -1295,7 +1295,7 @@ onBeforeUnmount(() => {
 .map-selected-card strong {
   overflow: hidden;
   color: #effcff;
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 700;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2056,7 +2056,7 @@ onBeforeUnmount(() => {
 
 .map-search :deep(.van-field__control) {
   caret-color: #658d61;
-  font-size: 15px;
+  font-size: 16px;
 }
 .map-search :deep(.van-icon-search) { filter: none; font-size: 18px; }
 .map-search :deep(.van-icon-clear) { color: #849285; }
@@ -2198,7 +2198,7 @@ onBeforeUnmount(() => {
   letter-spacing: .03em;
 }
 .map-selected-card strong { color: #324739; font-size: 15px; }
-.map-selected-card div > span { color: #7e897f; font-size: 13px; }
+.map-selected-card div > span { color: #5f6e62; font-size: 13px; }
 .map-selected-card button {
   min-height: 44px;
   border: 0;

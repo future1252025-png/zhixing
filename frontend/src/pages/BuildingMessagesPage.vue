@@ -30,7 +30,7 @@ const selectedRoomName = computed(() => {
   const value = route.query.room_name
   return typeof value === 'string' && value.trim() ? value.trim() : null
 })
-const roomTitle = computed(() => selectedRoomName.value || '建筑公共频道')
+const roomTitle = computed(() => selectedRoomName.value || '建筑总聊')
 const remainingCount = computed(() => Math.max(0, 200 - draft.value.length))
 const currentLocation = ref<{ latitude: number; longitude: number; location_source: MessageLocationSource; label: string } | null>(null)
 const distanceToBuildingMeters = computed(() => {
@@ -384,7 +384,7 @@ watch(composerLift, () => {
   gap: 3px;
 }
 
-.heading-copy small { color: #82788d; font-size: 12px; }
+.heading-copy small { color: #635b6b; font-size: 12px; }
 .heading-copy strong { overflow: hidden; color: var(--fresh-ink); font-size: 17px; text-overflow: ellipsis; white-space: nowrap; }
 .heading-copy span { color: var(--fresh-muted); font-size: 12px; }
 

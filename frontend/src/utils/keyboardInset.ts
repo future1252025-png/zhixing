@@ -6,9 +6,15 @@ import { computed, onMounted, onUnmounted, ref, type CSSProperties, type Ref } f
  */
 export function measureKeyboardInset(
   layoutHeight = typeof window !== 'undefined' ? window.innerHeight : 0,
-  visualViewport: Pick<VisualViewport, 'height' | 'offsetTop'> | null = null
+  visualViewport: (Pick<VisualViewport, 'height' | 'offsetTop'> & { scale?: number }) | null = null
 ): number {
   if (!visualViewport || layoutHeight <= 0) {
+    return 0
+  }
+  // On iOS, focusing a small input can zoom the page before the keyboard
+  // animation settles. That viewport shrink is page zoom, not covered space;
+  // treating it as both creates a second, exaggerated lift.
+  if ((visualViewport.scale ?? 1) > 1.01) {
     return 0
   }
   const covered = layoutHeight - visualViewport.height - visualViewport.offsetTop
@@ -30,6 +36,7 @@ export function useKeyboardInset(): { keyboardInset: Ref<number> } {
   }
 
   onMounted(() => {
+    if (typeof window === 'undefined') return
     updateInset()
     window.visualViewport?.addEventListener('resize', updateInset)
     window.visualViewport?.addEventListener('scroll', updateInset)
@@ -37,6 +44,7 @@ export function useKeyboardInset(): { keyboardInset: Ref<number> } {
   })
 
   onUnmounted(() => {
+    if (typeof window === 'undefined') return
     window.visualViewport?.removeEventListener('resize', updateInset)
     window.visualViewport?.removeEventListener('scroll', updateInset)
     window.removeEventListener('resize', updateInset)
@@ -54,12 +62,40 @@ function canScrollIntoView(
   )
 }
 
+const TEXT_INPUT_TYPES = new Set([
+  'text',
+  'search',
+  'email',
+  'password',
+  'tel',
+  'url',
+  'number'
+])
+
+/** Return true only for editable controls that can invoke a software keyboard. */
+export function isSoftwareKeyboardField(target: EventTarget | null): target is HTMLElement {
+  if (typeof HTMLElement === 'undefined') return false
+  if (!(target instanceof HTMLElement)) return false
+
+  if (target instanceof HTMLInputElement) {
+    return !target.disabled && !target.readOnly && TEXT_INPUT_TYPES.has(target.type.toLowerCase())
+  }
+  if (target instanceof HTMLTextAreaElement) {
+    return !target.disabled && !target.readOnly
+  }
+  if (target instanceof HTMLSelectElement) {
+    return !target.disabled
+  }
+
+  return Boolean(target.closest('[contenteditable="true"], [contenteditable=""]'))
+}
+
 export function scrollFocusedFieldIntoView(
   target: EventTarget | null,
   options?: { delayMs?: number; block?: ScrollLogicalPosition }
-): void {
+): () => void {
   if (!canScrollIntoView(target)) {
-    return
+    return () => undefined
   }
   const delayMs = options?.delayMs ?? 280
   const block = options?.block ?? 'center'
@@ -72,7 +108,9 @@ export function scrollFocusedFieldIntoView(
   }
   // Immediate pass for already-visible fields; delayed pass after keyboard animation.
   run()
-  window.setTimeout(run, delayMs)
+  if (typeof window === 'undefined') return () => undefined
+  const timer = window.setTimeout(run, delayMs)
+  return () => window.clearTimeout(timer)
 }
 
 type KeyboardAwarePageOptions = {
@@ -91,6 +129,7 @@ export function useKeyboardAwarePage(options: KeyboardAwarePageOptions = {}): {
 } {
   const basePaddingPx = options.basePaddingPx ?? 34
   const { keyboardInset } = useKeyboardInset()
+  let cancelPendingScroll: (() => void) | null = null
 
   const pageStyle = computed<CSSProperties>(() => {
     const bottom = `calc(${basePaddingPx}px + env(safe-area-inset-bottom, 0px) + ${keyboardInset.value}px)`
@@ -101,8 +140,16 @@ export function useKeyboardAwarePage(options: KeyboardAwarePageOptions = {}): {
   })
 
   function onFieldFocus(event: FocusEvent) {
-    scrollFocusedFieldIntoView(event.target)
+    cancelPendingScroll?.()
+    cancelPendingScroll = null
+    if (!isSoftwareKeyboardField(event.target)) return
+    cancelPendingScroll = scrollFocusedFieldIntoView(event.target)
   }
+
+  onUnmounted(() => {
+    cancelPendingScroll?.()
+    cancelPendingScroll = null
+  })
 
   return {
     keyboardInset,

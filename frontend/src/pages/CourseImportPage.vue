@@ -568,13 +568,13 @@ onMounted(loadBuildings)
 .building-search strong { color: #506752; font-size: 12px; }
 .building-search input {
   width: 100%;
-  min-height: 36px;
+  min-height: 44px;
   border: 1px solid #d7e3d4;
   border-radius: 11px;
   background: #fff;
   color: #304537;
   font: inherit;
-  font-size: 12px;
+  font-size: 16px;
   outline: none;
   padding: 0 10px;
 }
@@ -627,7 +627,7 @@ onMounted(loadBuildings)
 }
 .preview-heading > div { min-width: 0; }
 .preview-heading strong { display: block; overflow: hidden; color: #35493a; font-size: 15px; text-overflow: ellipsis; white-space: nowrap; }
-.preview-heading p { overflow: hidden; margin: 4px 0 0; color: #8a938a; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.preview-heading p { overflow: hidden; margin: 4px 0 0; color: #657067; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .match-badge {
   border-radius: 99px;
   background: #e5f1df;
@@ -643,6 +643,7 @@ onMounted(loadBuildings)
   .edit-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 .edit-grid :deep(.van-cell) {
+  min-height: 44px;
   min-width: 0;
   border: 1px solid #e0e8dc;
   border-radius: 14px;
@@ -661,7 +662,7 @@ onMounted(loadBuildings)
   background: #fff;
   color: #304537;
   font: inherit;
-  font-size: 15px;
+  font-size: 16px;
   outline: none;
   padding: 0 30px 0 9px;
 }

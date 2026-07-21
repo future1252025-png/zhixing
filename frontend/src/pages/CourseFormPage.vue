@@ -592,13 +592,13 @@ onMounted(loadFormData)
 .form-select,
 .building-search input {
   width: 100%;
-  min-height: 40px;
+  min-height: 44px;
   border: 1px solid #dbe7d8;
   border-radius: 12px;
   background: #fbfdf8;
   color: #304537;
   font: inherit;
-  font-size: 13px;
+  font-size: 16px;
   outline: none;
   padding: 0 34px 0 11px;
 }

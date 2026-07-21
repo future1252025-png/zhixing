@@ -497,6 +497,26 @@ a {
   }
 }
 
+/* iOS zooms focused controls below 16px. Keep editable touch controls readable
+   and large enough even when a page-specific style is more compact. */
+@media (hover: none) and (pointer: coarse) {
+  textarea,
+  select,
+  input:is(
+    :not([type]),
+    [type="text"],
+    [type="search"],
+    [type="email"],
+    [type="password"],
+    [type="tel"],
+    [type="url"],
+    [type="number"]
+  ) {
+    min-height: 44px;
+    font-size: 16px !important;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
