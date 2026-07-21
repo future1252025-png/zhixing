@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import DEFAULT_DATABASE_PATH, settings
-from app.core.security import hash_password, verify_password
+from app.core.security import hash_password
 from app.db.database import create_sqlite_engine, upgrade_database
 from app.models import Building, Course, LocationPreset, Message, User
 
@@ -15,6 +15,7 @@ DEMO_USERNAME = "demo"
 DEMO_PASSWORD = "demo123"
 DEMO_STUDENT_ID = "20240001"
 DEMO_NICKNAME = "演示同学"
+LEGACY_DEMO_PASSWORD_PLACEHOLDER = "demo-password-hash-placeholder"
 
 
 MAP_POINTS_SEED_FILE = Path(__file__).with_name("map_points_seed.json")
@@ -145,8 +146,9 @@ DEMO_MESSAGES = [
 def _get_or_create_demo_user(session: Session) -> User:
     user = session.scalar(select(User).where(User.username == DEMO_USERNAME))
     if user is not None:
-        # Demo account must stay loginable after re-seed / legacy DB repair.
-        if not verify_password(DEMO_PASSWORD, user.password_hash):
+        # Repair the one known pre-hashing placeholder only. Any other value may
+        # be a real user-selected password and must never be reset by seeding.
+        if user.password_hash == LEGACY_DEMO_PASSWORD_PLACEHOLDER:
             user.password_hash = hash_password(DEMO_PASSWORD)
             session.add(user)
             session.flush()

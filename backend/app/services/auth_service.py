@@ -1,3 +1,5 @@
+import re
+
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -10,6 +12,29 @@ from app.schemas.user import UserProfileUpdate
 
 class DuplicateUserError(ValueError):
     """Raised when username or student_id collides on insert."""
+
+
+_IDENTITY_CONSTRAINT_NAMES = frozenset(
+    {
+        "ix_users_username",
+        "ix_users_student_id",
+        "users_username_key",
+        "users_student_id_key",
+    }
+)
+_SQLITE_IDENTITY_UNIQUE_ERROR = re.compile(
+    r"^UNIQUE constraint failed:\s*users\.(?:username|student_id)$",
+    re.IGNORECASE,
+)
+
+
+def _is_identity_unique_collision(error: IntegrityError) -> bool:
+    original = error.orig
+    diagnostic = getattr(original, "diag", None)
+    constraint_name = getattr(diagnostic, "constraint_name", None)
+    if isinstance(constraint_name, str):
+        return constraint_name.casefold() in _IDENTITY_CONSTRAINT_NAMES
+    return bool(_SQLITE_IDENTITY_UNIQUE_ERROR.fullmatch(str(original).strip()))
 
 
 def get_user_by_username(session: Session, username: str) -> User | None:
@@ -35,7 +60,9 @@ def create_user(session: Session, payload: RegisterRequest) -> User:
         session.commit()
     except IntegrityError as exc:
         session.rollback()
-        raise DuplicateUserError() from exc
+        if _is_identity_unique_collision(exc):
+            raise DuplicateUserError() from exc
+        raise
     session.refresh(user)
     return user
 

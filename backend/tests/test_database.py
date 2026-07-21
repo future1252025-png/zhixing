@@ -1,14 +1,22 @@
 from datetime import date
 from pathlib import Path
+from threading import Event, Thread
 
 import pytest
 from sqlalchemy import inspect, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
-from app.db.database import Base, create_sqlite_engine, init_db
+from app.db.database import (
+    _migration_file_lock,
+    _sqlite_file_path,
+    create_sqlite_engine,
+    init_db,
+)
 from app.db.seed import (
     DEMO_BUILDINGS,
+    DEMO_PASSWORD,
+    DEMO_USERNAME,
     MAP_POINTS_SEED_FILE,
     initialize_database,
     load_map_points_seed,
@@ -23,6 +31,7 @@ from app.models import (
     SemesterSetting,
     User,
 )
+from app.core.security import hash_password, verify_password
 
 
 def make_test_database_url(path: Path) -> str:
@@ -82,6 +91,50 @@ def test_sqlite_file_engine_uses_wal_and_busy_timeout(tmp_path: Path) -> None:
     assert int(busy_timeout) >= 5000
 
 
+def test_sqlite_file_path_skips_memory_and_uri_databases() -> None:
+    assert _sqlite_file_path("sqlite:///:memory:") is None
+    assert (
+        _sqlite_file_path(
+            "sqlite:///file:shared-memory?mode=memory&cache=shared&uri=true"
+        )
+        is None
+    )
+
+
+def test_migration_file_lock_is_released_when_upgrade_raises(tmp_path: Path) -> None:
+    database_path = tmp_path / "exception" / "database.db"
+
+    with pytest.raises(RuntimeError, match="simulated migration failure"):
+        with _migration_file_lock(database_path, timeout_seconds=0.2):
+            raise RuntimeError("simulated migration failure")
+
+    with _migration_file_lock(database_path, timeout_seconds=0.2):
+        pass
+
+
+def test_migration_file_lock_has_an_explicit_timeout(tmp_path: Path) -> None:
+    database_path = tmp_path / "timeout" / "database.db"
+    acquired = Event()
+    release = Event()
+
+    def hold_lock() -> None:
+        with _migration_file_lock(database_path, timeout_seconds=1):
+            acquired.set()
+            assert release.wait(timeout=2)
+
+    holder = Thread(target=hold_lock)
+    holder.start()
+    assert acquired.wait(timeout=1)
+    try:
+        with pytest.raises(TimeoutError, match="migration lock"):
+            with _migration_file_lock(database_path, timeout_seconds=0.05):
+                pass
+    finally:
+        release.set()
+        holder.join(timeout=2)
+    assert not holder.is_alive()
+
+
 def test_map_points_seed_file_loads_common_campus_points() -> None:
     points = load_map_points_seed()
 
@@ -126,6 +179,98 @@ def test_seed_demo_data_is_idempotent(tmp_path: Path) -> None:
         assert second_counts == first_counts
 
 
+def test_seed_demo_data_preserves_real_demo_account_password_hash(tmp_path: Path) -> None:
+    engine = create_sqlite_engine(make_test_database_url(tmp_path / "real-demo.db"))
+    init_db(engine)
+    SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+    real_hash = hash_password("owner-chosen-password")
+
+    with SessionLocal() as session:
+        session.add(
+            User(
+                student_id="existing-demo",
+                username=DEMO_USERNAME,
+                password_hash=real_hash,
+                nickname="Real demo owner",
+            )
+        )
+        session.commit()
+        seed_demo_data(session)
+        session.expire_all()
+        user = session.scalar(select(User).where(User.username == DEMO_USERNAME))
+
+        assert user is not None
+        assert user.password_hash == real_hash
+        assert verify_password("owner-chosen-password", user.password_hash)
+        assert not verify_password(DEMO_PASSWORD, user.password_hash)
+
+
+def test_seed_demo_data_repairs_only_known_legacy_placeholder(tmp_path: Path) -> None:
+    engine = create_sqlite_engine(make_test_database_url(tmp_path / "legacy-demo.db"))
+    init_db(engine)
+    SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+
+    with SessionLocal() as session:
+        session.add(
+            User(
+                student_id="legacy-demo",
+                username=DEMO_USERNAME,
+                password_hash="demo-password-hash-placeholder",
+                nickname="Legacy demo",
+            )
+        )
+        session.commit()
+        seed_demo_data(session)
+        session.expire_all()
+        user = session.scalar(select(User).where(User.username == DEMO_USERNAME))
+
+        assert user is not None
+        assert verify_password(DEMO_PASSWORD, user.password_hash)
+
+
+def test_seed_demo_data_preserves_unknown_invalid_demo_hash(tmp_path: Path) -> None:
+    engine = create_sqlite_engine(make_test_database_url(tmp_path / "unknown-demo.db"))
+    init_db(engine)
+    SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+    unknown_value = "unknown-invalid-password-value"
+
+    with SessionLocal() as session:
+        session.add(
+            User(
+                student_id="unknown-demo",
+                username=DEMO_USERNAME,
+                password_hash=unknown_value,
+                nickname="Unknown demo",
+            )
+        )
+        session.commit()
+        seed_demo_data(session)
+        session.expire_all()
+        user = session.scalar(select(User).where(User.username == DEMO_USERNAME))
+
+        assert user is not None
+        assert user.password_hash == unknown_value
+
+
+def test_new_demo_user_password_and_repeated_seed_are_stable(tmp_path: Path) -> None:
+    engine = create_sqlite_engine(make_test_database_url(tmp_path / "new-demo.db"))
+    init_db(engine)
+    SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+
+    with SessionLocal() as session:
+        seed_demo_data(session)
+        user = session.scalar(select(User).where(User.username == DEMO_USERNAME))
+        assert user is not None
+        first_hash = user.password_hash
+        assert verify_password(DEMO_PASSWORD, first_hash)
+
+        seed_demo_data(session)
+        session.expire_all()
+        user = session.scalar(select(User).where(User.username == DEMO_USERNAME))
+        assert user is not None
+        assert user.password_hash == first_hash
+
+
 def test_initialize_database_creates_sqlite_file(tmp_path: Path) -> None:
     database_path = tmp_path / "campusmind.db"
 
@@ -134,6 +279,16 @@ def test_initialize_database_creates_sqlite_file(tmp_path: Path) -> None:
     assert database_path.exists()
     assert counts["buildings"] >= len(DEMO_BUILDINGS)
     assert counts["location_presets"] >= 4
+
+
+def test_initialize_database_creates_custom_sqlite_parent_directories(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "custom" / "nested" / "campusmind.db"
+
+    initialize_database(make_test_database_url(database_path))
+
+    assert database_path.exists()
 
 
 def test_model_relationships_are_available(tmp_path: Path) -> None:

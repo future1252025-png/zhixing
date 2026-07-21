@@ -1,26 +1,112 @@
 from collections.abc import Generator
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
+import os
 from pathlib import Path
+import time
 from types import MappingProxyType
 
 from sqlalchemy import create_engine, event
 from sqlalchemy.engine import Engine
+from sqlalchemy.engine.url import make_url
 from sqlalchemy import inspect
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from app.core.config import settings
 
 
+MIGRATION_LOCK_TIMEOUT_SECONDS = 30.0
+MIGRATION_LOCK_POLL_SECONDS = 0.05
+
+
 class Base(DeclarativeBase):
     pass
 
 
+def _sqlite_file_path(database_url: str) -> Path | None:
+    """Return the real file path for ordinary SQLite URLs, excluding memory/URI DBs."""
+    url = make_url(database_url)
+    if not url.drivername.startswith("sqlite"):
+        return None
+    database = url.database
+    uri_enabled = str(url.query.get("uri", "")).lower() in {"1", "true", "yes"}
+    if not database or database == ":memory:" or uri_enabled or database.startswith("file:"):
+        return None
+    path = Path(database).expanduser()
+    return path if path.is_absolute() else (Path.cwd() / path).resolve()
+
+
+def _ensure_sqlite_parent(database_url: str) -> Path | None:
+    database_path = _sqlite_file_path(database_url)
+    if database_path is not None:
+        database_path.parent.mkdir(parents=True, exist_ok=True)
+    return database_path
+
+
+@contextmanager
+def _migration_file_lock(
+    database_path: Path,
+    timeout_seconds: float = MIGRATION_LOCK_TIMEOUT_SECONDS,
+):
+    """Serialize Alembic for one SQLite file across both processes and threads."""
+    lock_path = database_path.with_name(f"{database_path.name}.migration.lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    deadline = time.monotonic() + timeout_seconds
+
+    with lock_path.open("a+b") as handle:
+        handle.seek(0, os.SEEK_END)
+        if handle.tell() == 0:
+            handle.write(b"\0")
+            handle.flush()
+
+        if os.name == "nt":
+            import msvcrt
+
+            def try_lock() -> bool:
+                handle.seek(0)
+                try:
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                except OSError:
+                    return False
+                return True
+
+            def unlock() -> None:
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+
+            def try_lock() -> bool:
+                try:
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError:
+                    return False
+                return True
+
+            def unlock() -> None:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+
+        while not try_lock():
+            if time.monotonic() >= deadline:
+                raise TimeoutError(
+                    f"Timed out after {timeout_seconds:g}s waiting for migration lock: "
+                    f"{lock_path}"
+                )
+            time.sleep(MIGRATION_LOCK_POLL_SECONDS)
+
+        try:
+            yield
+        finally:
+            unlock()
+
+
 def create_sqlite_engine(database_url: str = settings.database_url) -> Engine:
+    _ensure_sqlite_parent(database_url)
     sqlite_engine = create_engine(
         database_url,
         connect_args={"check_same_thread": False},
     )
-    if database_url.startswith("sqlite"):
+    if make_url(database_url).drivername.startswith("sqlite"):
         configure_sqlite_pragmas(sqlite_engine)
     return sqlite_engine
 
@@ -437,19 +523,24 @@ def upgrade_database(database_url: str = settings.database_url) -> None:
     from alembic import command
     from alembic.config import Config
 
-    inspection_engine = create_sqlite_engine(database_url)
-    try:
-        is_unversioned_baseline = _validate_unversioned_baseline(inspection_engine)
-    finally:
-        inspection_engine.dispose()
+    database_path = _ensure_sqlite_parent(database_url)
+    lock = _migration_file_lock(database_path) if database_path is not None else nullcontext()
+    with lock:
+        # Inspection happens under the same cross-process lock as the migration.
+        # Every waiter therefore re-reads the state left by the previous upgrader.
+        inspection_engine = create_sqlite_engine(database_url)
+        try:
+            is_unversioned_baseline = _validate_unversioned_baseline(inspection_engine)
+        finally:
+            inspection_engine.dispose()
 
-    backend_dir = Path(__file__).resolve().parents[2]
-    config = Config(str(backend_dir / "alembic.ini"))
-    config.set_main_option("script_location", str(backend_dir / "migrations"))
-    config.set_main_option("sqlalchemy.url", database_url.replace("%", "%%"))
-    if is_unversioned_baseline:
-        command.stamp(config, "20260720_00")
-    command.upgrade(config, "head")
+        backend_dir = Path(__file__).resolve().parents[2]
+        config = Config(str(backend_dir / "alembic.ini"))
+        config.set_main_option("script_location", str(backend_dir / "migrations"))
+        config.set_main_option("sqlalchemy.url", database_url.replace("%", "%%"))
+        if is_unversioned_baseline:
+            command.stamp(config, "20260720_00")
+        command.upgrade(config, "head")
 
 
 def get_session() -> Generator[Session, None, None]:

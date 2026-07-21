@@ -1,4 +1,7 @@
+from concurrent.futures import ThreadPoolExecutor
+from multiprocessing import get_context
 from pathlib import Path
+import traceback
 
 import pytest
 from alembic import command
@@ -31,6 +34,16 @@ def migration_config(database_url: str) -> Config:
 
 def upgrade_to_baseline(database_url: str) -> None:
     command.upgrade(migration_config(database_url), "20260720_00")
+
+
+def _upgrade_database_process_worker(database_url: str, start, results) -> None:
+    try:
+        if not start.wait(timeout=10):
+            raise TimeoutError("migration start signal was not received")
+        upgrade_database(database_url)
+        results.put(None)
+    except BaseException:  # pragma: no cover - failure text is asserted by parent
+        results.put(traceback.format_exc())
 
 
 def insert_legacy_course(database_url: str, *, drop_version: bool = True) -> None:
@@ -473,5 +486,58 @@ def test_alembic_upgrade_is_idempotent(tmp_path: Path) -> None:
     try:
         with engine.connect() as connection:
             assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260720_02"
+    finally:
+        engine.dispose()
+
+
+def test_upgrade_database_serializes_simultaneous_threads(tmp_path: Path) -> None:
+    database_url = make_database_url(tmp_path / "threaded-startup.db")
+
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        futures = [executor.submit(upgrade_database, database_url) for _ in range(4)]
+        for future in futures:
+            future.result(timeout=20)
+
+    engine = create_engine(database_url)
+    try:
+        with engine.connect() as connection:
+            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260720_02"
+        assert {"semester_settings", "course_import_sources"} <= set(
+            inspect(engine).get_table_names()
+        )
+    finally:
+        engine.dispose()
+
+
+def test_upgrade_database_serializes_simultaneous_processes(tmp_path: Path) -> None:
+    database_url = make_database_url(tmp_path / "process-startup.db")
+    context = get_context("spawn")
+    start = context.Event()
+    results = context.Queue()
+    processes = [
+        context.Process(
+            target=_upgrade_database_process_worker,
+            args=(database_url, start, results),
+        )
+        for _ in range(3)
+    ]
+
+    for process in processes:
+        process.start()
+    start.set()
+    failures = [results.get(timeout=30) for _ in processes]
+    for process in processes:
+        process.join(timeout=10)
+        assert not process.is_alive()
+        assert process.exitcode == 0
+
+    assert failures == [None, None, None]
+    engine = create_engine(database_url)
+    try:
+        with engine.connect() as connection:
+            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260720_02"
+        assert {"semester_settings", "course_import_sources"} <= set(
+            inspect(engine).get_table_names()
+        )
     finally:
         engine.dispose()

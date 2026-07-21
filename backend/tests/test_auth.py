@@ -1,13 +1,17 @@
 from collections.abc import Generator
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.db.database import Base, create_sqlite_engine, get_session, init_db
 from app.main import app
 from app.models import User
+from app.schemas.auth import RegisterRequest
+from app.services.auth_service import DuplicateUserError, create_user
 
 
 def make_test_database_url(path: Path) -> str:
@@ -227,3 +231,48 @@ def test_demo_seed_user_can_login(
 
     assert response.status_code == 200
     assert response.json()["user"]["username"] == DEMO_USERNAME
+
+
+@pytest.mark.parametrize(
+    "database_message",
+    [
+        "UNIQUE constraint failed: users.username",
+        "UNIQUE constraint failed: users.student_id",
+    ],
+)
+def test_create_user_maps_confirmed_identity_unique_collision(
+    database_message: str,
+) -> None:
+    session = MagicMock(spec=Session)
+    error = IntegrityError("INSERT INTO users", {}, Exception(database_message))
+    session.commit.side_effect = error
+    payload = RegisterRequest(**register_payload("race-user"))
+
+    with pytest.raises(DuplicateUserError) as caught:
+        create_user(session, payload)
+
+    assert caught.value.__cause__ is error
+    session.rollback.assert_called_once_with()
+
+
+@pytest.mark.parametrize(
+    "database_message",
+    [
+        "UNIQUE constraint failed: buildings.name",
+        "FOREIGN KEY constraint failed",
+        "database disk image is malformed",
+    ],
+)
+def test_create_user_reraises_unrelated_integrity_error_after_rollback(
+    database_message: str,
+) -> None:
+    session = MagicMock(spec=Session)
+    error = IntegrityError("INSERT INTO users", {}, Exception(database_message))
+    session.commit.side_effect = error
+    payload = RegisterRequest(**register_payload("integrity-user"))
+
+    with pytest.raises(IntegrityError) as caught:
+        create_user(session, payload)
+
+    assert caught.value is error
+    session.rollback.assert_called_once_with()
