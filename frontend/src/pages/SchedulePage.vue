@@ -13,7 +13,6 @@ import { useLocationStore } from '@/stores/location'
 import type { Course } from '@/types/course'
 import type { CampusMapPoint } from '@/types/map'
 import type { ScheduleSuggestion } from '@/types/schedule'
-import { readSelectedWeek } from '@/utils/course'
 import {
   filterScheduleLocations,
   formatDistance,
@@ -96,10 +95,15 @@ const routeReady = computed(() => Boolean(routeFromPoint.value && suggestionRout
 
 function getErrorMessage(error: unknown): string {
   if (isAxiosError(error)) {
+    const code = error.response?.data?.code
+    const message = error.response?.data?.message
+    if (code === 'no_upcoming_course') return '本教学周暂无后续课程'
+    if (code === 'semester_unconfigured') return '请先在课表页设置学期'
+    if (code === 'semester_not_active') return '当前日期不在已设置的教学周内'
+    if (code === 'schedule_conflict') return '同一时间存在多门课程，请先修复课表冲突'
+    if (code === 'course_location_incomplete') return '下一节课的地点不完整，请先补全教学楼和教室'
+    if (typeof message === 'string') return message
     const detail = error.response?.data?.detail
-    if (detail === '暂无后续课程' || detail === 'No upcoming course found') {
-      return '暂无后续课程，请先添加课程'
-    }
     if (typeof detail === 'string') return detail
   }
   return '出发建议生成失败，请稍后重试'
@@ -193,12 +197,7 @@ async function generateSuggestion() {
   generating.value = true
   errorMessage.value = ''
   try {
-    const currentWeek =
-      typeof window === 'undefined' ? 1 : readSelectedWeek(window.localStorage)
-    suggestion.value = await getScheduleSuggestion({
-      ...payload,
-      current_week: currentWeek
-    })
+    suggestion.value = await getScheduleSuggestion(payload)
     // Keep the departure time first; map is one tap away.
     mapExpanded.value = false
   } catch (error) {
@@ -471,7 +470,7 @@ onMounted(loadScheduleData)
             <TechIcon name="arrow" :size="16" />
           </span>
         </button>
-        <div v-show="mapExpanded" class="map-body">
+        <div v-if="mapExpanded" class="map-body">
           <RealCampusMap
             title=""
             subtitle=""

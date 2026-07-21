@@ -35,8 +35,6 @@ class Settings:
         os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "60")
     )
     cors_allow_origins: tuple[str, ...] = get_cors_allow_origins()
-    # First day of teaching week 1 (YYYY-MM-DD). Used when request omits current_week.
-    semester_start_date: str | None = os.getenv("SEMESTER_START_DATE")
 
     @property
     def is_production(self) -> bool:

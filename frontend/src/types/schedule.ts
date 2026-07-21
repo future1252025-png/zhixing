@@ -9,9 +9,7 @@ export type ScheduleSuggestionPayload = (
       latitude: number
       longitude: number
     }
-) & {
-  current_week?: number
-}
+)
 
 export type ScheduleStatus = 'normal' | 'tight' | 'likely_late'
 
@@ -23,8 +21,9 @@ export type NextCourseInfo = {
   end_time: string
   room_name: string
   teacher: string | null
-  weeks: string | null
-  teaching_week?: number | null
+  weeks: string
+  teaching_week: number
+  start_at: string
 }
 
 export type ScheduleLocationInfo = {
@@ -52,5 +51,4 @@ export type ScheduleSuggestion = {
   status: ScheduleStatus
   text: string
   warning: string | null
-  current_week?: number | null
 }

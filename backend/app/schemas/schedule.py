@@ -1,17 +1,18 @@
+from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 SuggestionStatus = Literal["normal", "tight", "likely_late"]
 
 
 class ScheduleSuggestionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     current_building_id: int | None = Field(default=None, gt=0)
     latitude: float | None = Field(default=None, ge=-90, le=90)
     longitude: float | None = Field(default=None, ge=-180, le=180)
-    # Optional explicit teaching week for "now" (1-based). Overrides SEMESTER_START_DATE.
-    current_week: int | None = Field(default=None, ge=1, le=30)
 
     @model_validator(mode="after")
     def validate_location_source(self) -> "ScheduleSuggestionRequest":
@@ -34,8 +35,9 @@ class NextCourseInfo(BaseModel):
     end_time: str
     room_name: str
     teacher: str | None = None
-    weeks: str | None = None
-    teaching_week: int | None = None
+    weeks: str
+    teaching_week: int
+    start_at: datetime
 
 
 class LocationInfo(BaseModel):
@@ -63,4 +65,3 @@ class ScheduleSuggestionResponse(BaseModel):
     status: SuggestionStatus
     text: str
     warning: str | None = None
-    current_week: int | None = None
