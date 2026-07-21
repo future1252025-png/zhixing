@@ -11,6 +11,7 @@ import {
   type RegisterPayload
 } from '@/api/auth'
 import { TOKEN_STORAGE_KEY } from '@/api/request'
+import { extractBusinessError, resetUnauthorizedState } from '@/api/errors'
 
 type AuthState = {
   token: string | null
@@ -49,6 +50,7 @@ export const useAuthStore = defineStore('auth', {
       const result = await loginRequest(payload)
       this.setToken(result.access_token)
       this.setCurrentUser(result.user)
+      resetUnauthorizedState()
       return result.user
     },
     async loadCurrentUser() {
@@ -62,16 +64,21 @@ export const useAuthStore = defineStore('auth', {
         this.setCurrentUser(user)
         return user
       } catch (error) {
-        this.logout()
+        if (extractBusinessError(error).status === 401) {
+          this.clearSession()
+        }
         throw error
       } finally {
         this.loadingUser = false
       }
     },
-    logout() {
+    clearSession() {
       this.token = null
       this.currentUser = null
       localStorage.removeItem(TOKEN_STORAGE_KEY)
+    },
+    logout() {
+      this.clearSession()
     }
   }
 })

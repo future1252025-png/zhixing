@@ -7,6 +7,7 @@ import { getBuildings, type Building } from '@/api/buildings'
 import { getCourses } from '@/api/courses'
 import RealCampusMap from '@/components/RealCampusMap.vue'
 import TechIcon from '@/components/TechIcon.vue'
+import { useAuthStore } from '@/stores/auth'
 import type { Course } from '@/types/course'
 import {
   buildChatSearchResults,
@@ -23,8 +24,10 @@ import {
   getWeekdayLabel,
   readSelectedWeek
 } from '@/utils/course'
+import { createScopedStorage } from '@/utils/scopedStorage'
 
 const router = useRouter()
+const authStore = useAuthStore()
 const buildings = ref<Building[]>([])
 const courses = ref<Course[]>([])
 const loading = ref(true)
@@ -65,11 +68,12 @@ const popularChatBuildings = computed(() => {
 const showSearchResults = computed(() => chatQuery.value.trim().length > 0)
 
 function refreshRecentChats() {
-  if (typeof window === 'undefined') {
+  const userId = authStore.currentUser?.id
+  if (typeof window === 'undefined' || !userId) {
     recentChats.value = []
     return
   }
-  recentChats.value = readRecentChatEntries(window.localStorage)
+  recentChats.value = readRecentChatEntries(createScopedStorage(userId))
 }
 
 async function loadHomeData() {
@@ -110,8 +114,9 @@ async function initializeHome() {
 }
 
 function rememberChat(building: Pick<Building, 'id' | 'name'>, roomName: string | null = null) {
-  if (typeof window === 'undefined') return
-  recentChats.value = rememberRecentChatEntry(window.localStorage, {
+  const userId = authStore.currentUser?.id
+  if (typeof window === 'undefined' || !userId) return
+  recentChats.value = rememberRecentChatEntry(createScopedStorage(userId), {
     buildingId: building.id,
     buildingName: building.name,
     roomName

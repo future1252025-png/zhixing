@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import router, {
   resolveAuthRedirect,
   resolveRouteScrollPosition,
+  sanitizeInternalRedirect,
   shouldLoadCurrentUser
 } from './index'
 
@@ -127,5 +128,16 @@ describe('auth route guard decisions', () => {
 
     expect(match.name).toBe('map-collector')
     expect(match.meta.requiresAuth).toBeUndefined()
+  })
+
+  it.each([
+    ['/courses?week=3', '/courses?week=3'],
+    ['/home#today', '/home#today'],
+    ['//evil.example/login', '/home'],
+    ['https://evil.example/login', '/home'],
+    ['/\\evil.example/login', '/home'],
+    ['', '/home']
+  ])('sanitizes login redirect %s', (input, expected) => {
+    expect(sanitizeInternalRedirect(input)).toBe(expected)
   })
 })

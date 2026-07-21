@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { computed, reactive, ref } from 'vue'
-import { isAxiosError } from 'axios'
 import { showFailToast, showSuccessToast } from 'vant'
 import { useRoute, useRouter } from 'vue-router'
 
 import { getCourses } from '@/api/courses'
+import { extractBusinessError } from '@/api/errors'
 import TechIcon from '@/components/TechIcon.vue'
 import { useAuthStore } from '@/stores/auth'
+import { sanitizeInternalRedirect } from '@/router'
 import { useKeyboardAwarePage } from '@/utils/keyboardInset'
 import { prepareLoginIntro } from '@/utils/loginIntro'
 
@@ -21,24 +22,16 @@ const pageStyle = computed(() => ({
   scrollPaddingBottom: `calc(24px + env(safe-area-inset-bottom, 0px) + ${keyboardInset.value}px)`
 }))
 
-function getErrorMessage(error: unknown): string {
-  if (isAxiosError(error)) {
-    const detail = error.response?.data?.detail
-    if (typeof detail === 'string') return detail
-  }
-  return '登录失败，请检查账号或密码'
-}
-
 async function handleSubmit() {
   submitting.value = true
   try {
     await authStore.login(form)
     await prepareLoginIntro(getCourses)
     showSuccessToast('欢迎回来')
-    const redirect = typeof route.query.redirect === 'string' ? route.query.redirect : '/home'
+    const redirect = sanitizeInternalRedirect(route.query.redirect)
     await router.replace(redirect)
   } catch (error) {
-    showFailToast(getErrorMessage(error))
+    showFailToast(extractBusinessError(error).message)
   } finally {
     submitting.value = false
   }

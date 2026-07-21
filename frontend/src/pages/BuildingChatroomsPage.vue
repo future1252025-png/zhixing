@@ -7,10 +7,13 @@ import {
   type BuildingChatRoom
 } from '@/api/messages'
 import TechIcon from '@/components/TechIcon.vue'
+import { useAuthStore } from '@/stores/auth'
 import { rememberRecentChatEntry } from '@/utils/chat'
+import { createScopedStorage } from '@/utils/scopedStorage'
 
 const route = useRoute()
 const router = useRouter()
+const authStore = useAuthStore()
 const building = ref<Building | null>(null)
 const rooms = ref<BuildingChatRoom[]>([])
 const loading = ref(true)
@@ -37,8 +40,9 @@ const canOpenCustomRoom = computed(() => {
 })
 
 function openRoom(room: BuildingChatRoom) {
-  if (building.value && typeof window !== 'undefined') {
-    rememberRecentChatEntry(window.localStorage, {
+  const userId = authStore.currentUser?.id
+  if (building.value && typeof window !== 'undefined' && userId) {
+    rememberRecentChatEntry(createScopedStorage(userId), {
       buildingId: buildingId.value,
       buildingName: building.value.name,
       roomName: room.room_name || null
@@ -52,12 +56,15 @@ function openRoom(room: BuildingChatRoom) {
 
 function openCustomRoom() {
   const roomName = roomQuery.value.trim()
+  const userId = authStore.currentUser?.id
   if (!roomName || !building.value) return
-  rememberRecentChatEntry(window.localStorage, {
-    buildingId: buildingId.value,
-    buildingName: building.value.name,
-    roomName
-  })
+  if (userId) {
+    rememberRecentChatEntry(createScopedStorage(userId), {
+      buildingId: buildingId.value,
+      buildingName: building.value.name,
+      roomName
+    })
+  }
   router.push({
     path: `/buildings/${buildingId.value}/messages`,
     query: { room_name: roomName }

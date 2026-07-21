@@ -5,6 +5,7 @@ import {
 } from 'vue-router'
 
 import { useAuthStore } from '@/stores/auth'
+import { extractBusinessError } from '@/api/errors'
 
 const LoginPage = () => import('@/pages/LoginPage.vue')
 const RegisterPage = () => import('@/pages/RegisterPage.vue')
@@ -63,6 +64,20 @@ export function resolveRouteScrollPosition(
   savedPosition: { left: number; top: number } | null
 ): { left: number; top: number } {
   return savedPosition ?? { left: 0, top: 0 }
+}
+
+export function sanitizeInternalRedirect(value: unknown, fallback = '/home'): string {
+  if (typeof value !== 'string') return fallback
+  const redirect = value.trim()
+  if (
+    !redirect.startsWith('/') ||
+    redirect.startsWith('//') ||
+    redirect.includes('\\') ||
+    /[\u0000-\u001f\u007f]/.test(redirect)
+  ) {
+    return fallback
+  }
+  return redirect
 }
 
 const routes: RouteRecordRaw[] = [
@@ -155,12 +170,15 @@ router.beforeEach(async (to) => {
   if (shouldLoadCurrentUser(target, Boolean(authStore.token), Boolean(authStore.currentUser))) {
     try {
       await authStore.loadCurrentUser()
-    } catch {
-      authStore.logout()
-      return {
-        path: '/login',
-        query: { redirect: to.fullPath }
+    } catch (error) {
+      if (extractBusinessError(error).status === 401) {
+        authStore.clearSession()
+        return {
+          path: '/login',
+          query: { redirect: to.fullPath, reason: 'expired' }
+        }
       }
+      return true
     }
   }
 

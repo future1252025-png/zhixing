@@ -13,19 +13,23 @@ import {
   NavBar,
   Search,
   Tabbar,
-  TabbarItem
+  TabbarItem,
+  showFailToast
 } from 'vant'
 import 'vant/lib/index.css'
 
 import App from './App.vue'
 import revealDirective from './directives/reveal'
 import router from './router'
+import { setUnauthorizedHandler } from './api/errors'
+import { useAuthStore } from './stores/auth'
 import './styles/base.css'
 import './styles/fresh.css'
 
 const app = createApp(App)
+const pinia = createPinia()
 
-app.use(createPinia())
+app.use(pinia)
 app.use(router)
 app.directive('reveal', revealDirective)
 
@@ -42,5 +46,19 @@ app.use(NavBar)
 app.use(Search)
 app.use(Tabbar)
 app.use(TabbarItem)
+
+setUnauthorizedHandler(async () => {
+  const auth = useAuthStore(pinia)
+  const currentRoute = router.currentRoute.value
+  const redirect = currentRoute.fullPath
+  auth.clearSession()
+  if (currentRoute.name !== 'login') {
+    showFailToast('登录已过期，请重新登录')
+    await router.replace({
+      name: 'login',
+      query: { redirect, reason: 'expired' }
+    })
+  }
+})
 
 app.mount('#app')
