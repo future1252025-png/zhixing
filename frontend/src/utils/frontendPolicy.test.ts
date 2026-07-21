@@ -54,6 +54,12 @@ describe('mobile input policy', () => {
     const matches = frontendFile('src/components/RealCampusMap.vue').match(/\.map-search :deep\(\.van-field__control\) \{[\s\S]*?font-size:\s*16px;/g)
     expect(matches).toHaveLength(2)
   })
+
+  it('overrides MapCollector scoped sizing for all four input and select controls', () => {
+    const source = frontendFile('src/pages/MapCollectorPage.vue')
+    expect(source.match(/class="collector-input"/g)).toHaveLength(4)
+    expect(source).toMatch(/\.collector-input \{[\s\S]*?min-height:\s*44px;[\s\S]*?font-size:\s*16px;/)
+  })
 })
 
 describe('readability policy', () => {
@@ -87,7 +93,7 @@ describe('SPA response security headers', () => {
     'Content-Security-Policy': "frame-ancestors 'none'",
     'X-Frame-Options': 'DENY',
     'X-Content-Type-Options': 'nosniff',
-    'Referrer-Policy': 'no-referrer'
+    'Referrer-Policy': 'strict-origin-when-cross-origin'
   }
 
   it('sets equivalent headers in Vite dev and preview', () => {
@@ -108,5 +114,6 @@ describe('SPA response security headers', () => {
     expect(deployment).toContain('Nginx')
     expect(deployment).toContain('CDN')
     expect(deployment).toContain('frame-ancestors')
+    expect(deployment).toContain('Referrer-Policy: strict-origin-when-cross-origin')
   })
 })

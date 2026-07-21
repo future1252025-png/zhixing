@@ -909,12 +909,13 @@ onBeforeUnmount(() => {
 }
 
 .collector-input {
-  min-height: 36px;
+  min-height: 44px;
   border: 1px solid var(--cm-line);
   border-radius: 12px;
   background: #fbfdf8;
   color: var(--cm-ink);
   font: inherit;
+  font-size: 16px;
   padding: 0 10px;
 }
 

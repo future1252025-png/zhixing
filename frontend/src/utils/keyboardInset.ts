@@ -11,13 +11,14 @@ export function measureKeyboardInset(
   if (!visualViewport || layoutHeight <= 0) {
     return 0
   }
-  // On iOS, focusing a small input can zoom the page before the keyboard
-  // animation settles. That viewport shrink is page zoom, not covered space;
-  // treating it as both creates a second, exaggerated lift.
-  if ((visualViewport.scale ?? 1) > 1.01) {
-    return 0
-  }
-  const covered = layoutHeight - visualViewport.height - visualViewport.offsetTop
+  // Compare against the layout viewport expressed at the same page scale.
+  // This removes pure page zoom while preserving a real keyboard shrink that
+  // happens at the same time (notably on iOS during focus animation).
+  const scale = visualViewport.scale && visualViewport.scale > 0
+    ? visualViewport.scale
+    : 1
+  const effectiveLayoutHeight = layoutHeight / scale
+  const covered = effectiveLayoutHeight - visualViewport.height - visualViewport.offsetTop
   return Math.max(0, Math.round(covered))
 }
 
@@ -87,7 +88,26 @@ export function isSoftwareKeyboardField(target: EventTarget | null): target is H
     return !target.disabled
   }
 
-  return Boolean(target.closest('[contenteditable="true"], [contenteditable=""]'))
+  for (let current: HTMLElement | null = target; current; current = current.parentElement) {
+    const attribute = current.getAttribute('contenteditable')
+    if (attribute === null) continue
+    const value = attribute.trim().toLowerCase()
+    if (value === 'false') return false
+    if (value === '' || value === 'true' || value === 'plaintext-only') return true
+  }
+
+  return target.isContentEditable === true
+}
+
+function isFieldObscuredByKeyboard(target: HTMLElement): boolean {
+  if (typeof window === 'undefined') return false
+  const viewport = window.visualViewport
+  if (!viewport || measureKeyboardInset(window.innerHeight, viewport) <= 0) return false
+  if (typeof target.getBoundingClientRect !== 'function') return false
+
+  const rectangle = target.getBoundingClientRect()
+  const visibleBottom = viewport.offsetTop + viewport.height
+  return rectangle.bottom > visibleBottom
 }
 
 export function scrollFocusedFieldIntoView(
@@ -98,15 +118,19 @@ export function scrollFocusedFieldIntoView(
     return () => undefined
   }
   const delayMs = options?.delayMs ?? 280
-  const block = options?.block ?? 'center'
+  const block = options?.block ?? 'nearest'
+  let hasScrolled = false
   const run = () => {
+    if (hasScrolled || !isFieldObscuredByKeyboard(target)) return
     target.scrollIntoView({
       behavior: 'smooth',
       block,
       inline: 'nearest'
     })
+    hasScrolled = true
   }
-  // Immediate pass for already-visible fields; delayed pass after keyboard animation.
+  // Check now if the keyboard is already open, and once after its animation.
+  // Never move an already visible control or scroll the same focus twice.
   run()
   if (typeof window === 'undefined') return () => undefined
   const timer = window.setTimeout(run, delayMs)
