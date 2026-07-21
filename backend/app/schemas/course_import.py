@@ -1,24 +1,43 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
-class CourseImportPreviewItem(BaseModel):
-    course_name: str
-    weekday: int
-    start_time: str
-    end_time: str
-    room_name: str
+class ImportFileInfo(BaseModel):
+    filename: str
+    sha256: str
+    candidate_count: int = Field(ge=0)
+
+
+class RawCourseSourceResponse(BaseModel):
+    raw_course_name: str
+    raw_weekday: str
+    raw_time_or_section: str
+    raw_teacher: str
+    raw_weeks: str
+    raw_location: str
+
+
+class ImportIssueResponse(BaseModel):
+    code: str
+    field: str
+    message: str
+
+
+class ImportCandidateResponse(BaseModel):
+    row_ref: str
+    source: RawCourseSourceResponse
+    course_name: str | None = None
+    weekday: int | None = Field(default=None, ge=1, le=7)
+    start_time: str | None = None
+    end_time: str | None = None
     teacher: str | None = None
     weeks: str | None = None
-    raw_weeks: str | None = None
-    raw_location: str | None = None
-    building_id: int | None = None
-    building_name: str | None = None
-    confidence: str
-    needs_building: bool
+    suggested_building_id: int | None = None
+    suggested_building_name: str | None = None
+    suggested_room_name: str | None = None
+    errors: list[ImportIssueResponse] = Field(default_factory=list)
 
 
 class CourseImportPreviewResponse(BaseModel):
-    total: int
-    matched_count: int
-    needs_review_count: int
-    items: list[CourseImportPreviewItem]
+    file: ImportFileInfo
+    candidates: list[ImportCandidateResponse]
+    can_commit: bool

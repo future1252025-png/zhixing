@@ -10,7 +10,11 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.db.database import Base, create_sqlite_engine, get_session, init_db
 from app.db.seed import seed_demo_data
 from app.main import app
+from app.models import Building
 from app.services.course_import_service import parse_course_cell
+
+
+FIXTURES = Path(__file__).with_name("fixtures")
 
 
 def make_test_database_url(path: Path) -> str:
@@ -45,6 +49,25 @@ def client_and_session(
 
     with TestingSessionLocal() as session:
         seed_demo_data(session)
+        fixture_buildings = [
+            ("3号教学楼", "教学楼", "别名：教3"),
+            ("风雨操场", "体育场地", "风雨操场东区和西区"),
+        ]
+        for offset, (name, kind, description) in enumerate(fixture_buildings):
+            if session.query(Building).filter(Building.name == name).first() is None:
+                session.add(
+                    Building(
+                        name=name,
+                        type=kind,
+                        description=description,
+                        latitude=30.58,
+                        longitude=114.32,
+                        map_x=50 + offset,
+                        map_y=50 + offset,
+                        walk_hint=None,
+                    )
+                )
+        session.commit()
 
     def override_get_session() -> Generator[Session, None, None]:
         session = TestingSessionLocal()
@@ -126,12 +149,12 @@ def test_preview_html_course_import_returns_parsed_items(client: TestClient) -> 
 
     assert response.status_code == 200
     data = response.json()
-    assert data["total"] == 2
-    assert data["items"][0]["course_name"] == "机器学习"
-    assert data["items"][0]["weekday"] == 1
-    assert data["items"][0]["weeks"] == "9-16"
-    assert data["items"][1]["weekday"] == 6
-    assert data["items"][1]["raw_location"] == "教3-205"
+    assert data["file"]["candidate_count"] == 2
+    assert data["candidates"][0]["course_name"] == "机器学习"
+    assert data["candidates"][0]["weekday"] == 1
+    assert data["candidates"][0]["weeks"] == "9-16"
+    assert data["candidates"][1]["weekday"] == 6
+    assert data["candidates"][1]["source"]["raw_location"] == "教3-205"
 
 
 def test_preview_xlsx_course_import_returns_parsed_items(client: TestClient) -> None:
@@ -168,13 +191,14 @@ def test_preview_xlsx_course_import_returns_parsed_items(client: TestClient) -> 
 
     assert response.status_code == 200
     data = response.json()
-    assert data["total"] == 1
-    item = data["items"][0]
+    assert data["file"]["candidate_count"] == 1
+    item = data["candidates"][0]
     assert item["course_name"] == "马克思主义基本原理"
     assert item["weekday"] == 2
     assert item["start_time"] == "09:55"
     assert item["end_time"] == "11:35"
-    assert item["room_name"] == "教4-103"
+    assert item["source"]["raw_location"] == "教4-103"
+    assert item["suggested_room_name"] == "103"
 
 
 def test_preview_import_matches_short_teaching_building_names(
@@ -215,9 +239,9 @@ def test_preview_import_matches_short_teaching_building_names(
     )
 
     assert response.status_code == 200
-    item = response.json()["items"][0]
-    assert item["building_name"] in {"3号教学楼", "教3"}
-    assert item["needs_building"] is False
+    item = response.json()["candidates"][0]
+    assert item["suggested_building_name"] in {"3号教学楼", "教3"}
+    assert item["suggested_building_id"] is not None
 
 
 def test_preview_import_matches_real_seed_building_aliases(client: TestClient) -> None:
@@ -238,8 +262,99 @@ def test_preview_import_matches_real_seed_building_aliases(client: TestClient) -
     )
 
     assert response.status_code == 200
-    items = response.json()["items"]
-    assert items[0]["building_name"] == "湖北大学(武昌主校区)-教4"
-    assert items[0]["needs_building"] is False
-    assert items[1]["building_name"] == "湖北大学武昌校区综合实训大楼"
-    assert items[1]["needs_building"] is False
+    items = response.json()["candidates"]
+    assert items[0]["suggested_building_name"] == "湖北大学(武昌主校区)-教4"
+    assert items[0]["suggested_building_id"] is not None
+    assert items[1]["suggested_building_name"] == "湖北大学武昌校区综合实训大楼"
+    assert items[1]["suggested_building_id"] is not None
+
+
+def upload_preview(client: TestClient, filename: str, content: bytes):
+    return client.post(
+        "/api/courses/import/preview",
+        files={"file": (filename, content, "application/octet-stream")},
+        headers=auth_headers(client),
+    )
+
+
+@pytest.mark.parametrize(
+    "filename",
+    [
+        "import_schedule.html",
+        "import_schedule.htm",
+        "import_schedule.xlsx",
+        "import_schedule.xls",
+    ],
+)
+def test_preview_preserves_every_candidate_row(
+    client: TestClient,
+    filename: str,
+) -> None:
+    fixture_filename = "import_schedule.html" if filename.endswith(".htm") else filename
+    content = (FIXTURES / fixture_filename).read_bytes()
+
+    response = upload_preview(client, filename, content)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["file"]["filename"] == filename
+    assert body["file"]["candidate_count"] == 5
+    assert len(body["file"]["sha256"]) == 64
+    assert [item["row_ref"] for item in body["candidates"]] == [
+        "row-1",
+        "row-2",
+        "row-3",
+        "row-4",
+        "row-5",
+    ]
+    assert body["candidates"][1]["source"]["raw_location"] == (
+        "实训大楼423-425数据中国实验室1"
+    )
+    assert body["candidates"][1]["suggested_room_name"] == (
+        "423-425数据中国实验室1"
+    )
+    assert body["candidates"][2]["source"]["raw_location"] == "风雨操场东区"
+    assert body["candidates"][2]["suggested_room_name"] == "东区"
+
+    expected_source_fields = {
+        "raw_course_name",
+        "raw_weekday",
+        "raw_time_or_section",
+        "raw_teacher",
+        "raw_weeks",
+        "raw_location",
+    }
+    assert all(
+        set(candidate["source"]) == expected_source_fields
+        for candidate in body["candidates"]
+    )
+
+
+def test_preview_reports_incomplete_and_unrecognized_rows(client: TestClient) -> None:
+    response = upload_preview(
+        client,
+        "import_schedule.html",
+        (FIXTURES / "import_schedule.html").read_bytes(),
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert [error["code"] for error in body["candidates"][3]["errors"]] == [
+        "room_missing"
+    ]
+    assert [error["code"] for error in body["candidates"][4]["errors"]] == [
+        "time_unrecognized"
+    ]
+    assert body["can_commit"] is False
+
+
+def test_preview_rejects_unknown_extension_with_business_error(client: TestClient) -> None:
+    response = upload_preview(client, "schedule.csv", b"course,weekday")
+
+    assert response.status_code == 415
+    assert response.json() == {
+        "code": "unsupported_import_format",
+        "message": "仅支持 HTM、HTML、XLS、XLSX 课表文件",
+        "fields": ["file"],
+        "details": {"filename": "schedule.csv"},
+    }

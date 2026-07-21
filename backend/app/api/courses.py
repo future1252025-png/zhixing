@@ -2,13 +2,13 @@ import sqlite3
 from collections.abc import Callable
 from typing import TypeVar
 
-from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile, status
+from fastapi import APIRouter, Depends, File, Response, UploadFile, status
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from app.core.security import get_current_user
 from app.db.database import get_session
-from app.models import Course, User
+from app.models import User
 from app.schemas.course import CourseCreate, CourseRead, CourseUpdate
 from app.schemas.course_import import CourseImportPreviewResponse
 from app.schemas.error import BusinessErrorResponse
@@ -48,7 +48,14 @@ def create_current_user_course(
     return course
 
 
-@router.post("/import/preview", response_model=CourseImportPreviewResponse)
+@router.post(
+    "/import/preview",
+    response_model=CourseImportPreviewResponse,
+    responses={
+        415: {"model": BusinessErrorResponse},
+        422: {"model": BusinessErrorResponse},
+    },
+)
 async def preview_course_import(
     file: UploadFile = File(...),
     session: Session = Depends(get_session),
@@ -56,10 +63,7 @@ async def preview_course_import(
 ) -> CourseImportPreviewResponse:
     _ = current_user
     content = await file.read()
-    try:
-        return build_course_import_preview(session, file.filename or "", content)
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return build_course_import_preview(session, file.filename or "", content)
 
 
 @router.put("/{course_id}", response_model=CourseRead, responses=_BUSINESS_ERROR_RESPONSES)
