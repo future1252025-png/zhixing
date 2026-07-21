@@ -118,6 +118,57 @@ describe('keyboard viewport baseline', () => {
     expect(tracker.measure(600, { height: 400, offsetTop: 0, scale: 1.5 })).toBe(0)
     expect(tracker.getBaseline()).toMatchObject({ layoutHeight: 600, height: 400, scale: 1.5 })
   })
+
+  it('preserves the original baseline through small keyboard animation frames', () => {
+    const tracker = createKeyboardInsetTracker()
+    expect(tracker.measure(800, { height: 800, offsetTop: 0, scale: 1 }, { nowMs: 0 })).toBe(0)
+    expect(tracker.measure(800, { height: 760, offsetTop: 0, scale: 1 }, { nowMs: 16, keyboardExpected: true })).toBe(0)
+    expect(tracker.getBaseline()).toMatchObject({ height: 800 })
+    expect(tracker.measure(800, { height: 720, offsetTop: 0, scale: 1 }, { nowMs: 32, keyboardExpected: true })).toBe(80)
+    expect(tracker.measure(800, { height: 680, offsetTop: 0, scale: 1 }, { nowMs: 48, keyboardExpected: true })).toBe(120)
+    expect(tracker.getBaseline()).toMatchObject({ height: 800 })
+  })
+
+  it('returns to zero as the keyboard rises and fully closes', () => {
+    const tracker = createKeyboardInsetTracker()
+    tracker.measure(800, { height: 800, offsetTop: 0, scale: 1 }, { nowMs: 0 })
+    expect(tracker.measure(800, { height: 680, offsetTop: 0, scale: 1 }, { nowMs: 20, keyboardExpected: true })).toBe(120)
+    expect(tracker.measure(800, { height: 720, offsetTop: 0, scale: 1 }, { nowMs: 40, keyboardExpected: true })).toBe(80)
+    expect(tracker.measure(800, { height: 760, offsetTop: 0, scale: 1 }, { nowMs: 60, keyboardExpected: false })).toBe(0)
+    expect(tracker.getBaseline()).toMatchObject({ height: 800 })
+    expect(tracker.measure(800, { height: 800, offsetTop: 0, scale: 1 }, { nowMs: 80, keyboardExpected: false })).toBe(0)
+    expect(tracker.getBaseline()).toMatchObject({ height: 800 })
+  })
+
+  it('accepts a stable upward closing height even while the field remains focused', () => {
+    const tracker = createKeyboardInsetTracker()
+    tracker.measure(800, { height: 800, offsetTop: 0, scale: 1 }, { nowMs: 0 })
+    tracker.measure(800, { height: 680, offsetTop: 0, scale: 1 }, { nowMs: 20, keyboardExpected: true })
+
+    expect(tracker.measure(800, { height: 760, offsetTop: 40, scale: 1 }, { nowMs: 40, keyboardExpected: true })).toBe(0)
+    expect(tracker.getBaseline()).toMatchObject({ height: 800 })
+    expect(tracker.measure(800, { height: 760, offsetTop: 40, scale: 1 }, { nowMs: 240, keyboardExpected: true })).toBe(0)
+    expect(tracker.getBaseline()).toMatchObject({ height: 760, offsetTop: 40 })
+  })
+
+  it('accepts a small browser bar change only after it remains stable', () => {
+    const tracker = createKeyboardInsetTracker()
+    tracker.measure(800, { height: 800, offsetTop: 0, scale: 1 }, { nowMs: 0 })
+
+    expect(tracker.measure(800, { height: 760, offsetTop: 40, scale: 1 }, { nowMs: 20 })).toBe(0)
+    expect(tracker.getBaseline()).toMatchObject({ height: 800, offsetTop: 0 })
+    expect(tracker.measure(800, { height: 760, offsetTop: 40, scale: 1 }, { nowMs: 220 })).toBe(0)
+    expect(tracker.getBaseline()).toMatchObject({ height: 760, offsetTop: 40, bottom: 800 })
+  })
+
+  it('keeps a zoom baseline across progressive frames and non-zero offsets', () => {
+    const tracker = createKeyboardInsetTracker()
+    tracker.measure(800, { height: 500, offsetTop: 100, scale: 1.6 }, { nowMs: 0 })
+    expect(tracker.measure(800, { height: 460, offsetTop: 120, scale: 1.6 }, { nowMs: 16, keyboardExpected: true })).toBe(0)
+    expect(tracker.measure(800, { height: 420, offsetTop: 160, scale: 1.6 }, { nowMs: 32, keyboardExpected: true })).toBe(80)
+    expect(tracker.measure(800, { height: 300, offsetTop: 200, scale: 1.6 }, { nowMs: 48, keyboardExpected: true })).toBe(200)
+    expect(tracker.getBaseline()).toMatchObject({ height: 500, offsetTop: 100, bottom: 600 })
+  })
 })
 
 describe('isSoftwareKeyboardField', () => {
@@ -341,7 +392,10 @@ describe('useKeyboardInset lifecycle for the message composer', () => {
     const Harness = defineComponent({
       setup() {
         const { keyboardInset } = useKeyboardInset(tracker)
-        return () => h('output', { id: 'inset' }, String(keyboardInset.value))
+        return () => h('div', [
+          h('textarea', { id: 'composer' }),
+          h('output', { id: 'inset' }, String(keyboardInset.value))
+        ])
       }
     })
     const host = document.createElement('div')
@@ -350,6 +404,20 @@ describe('useKeyboardInset lifecycle for the message composer', () => {
     application.mount(host)
     await nextTick()
     expect(host.textContent).toBe('0')
+
+    host.querySelector<HTMLTextAreaElement>('#composer')!.focus()
+
+    viewport.height = 460
+    viewport.offsetTop = 120
+    dispatchViewport('resize')
+    await nextTick()
+    expect(host.textContent).toBe('0')
+
+    viewport.height = 420
+    viewport.offsetTop = 160
+    dispatchViewport('resize')
+    await nextTick()
+    expect(host.textContent).toBe('80')
 
     viewport.height = 300
     viewport.offsetTop = 200
@@ -363,6 +431,7 @@ describe('useKeyboardInset lifecycle for the message composer', () => {
     expect(host.textContent).toBe('200')
 
     viewport.height = 500
+    host.querySelector<HTMLTextAreaElement>('#composer')!.blur()
     dispatchViewport('resize')
     await nextTick()
     expect(host.textContent).toBe('0')
@@ -419,8 +488,9 @@ describe('useKeyboardAwarePage focus lifecycle', () => {
   function mountHarness() {
     const Harness = defineComponent({
       setup() {
-        const { onFieldFocus } = useKeyboardAwarePage()
+        const { keyboardInset, onFieldFocus } = useKeyboardAwarePage()
         return () => h('main', { onFocusin: onFieldFocus }, [
+          h('output', { id: 'page-inset' }, String(keyboardInset.value)),
           h('input', { id: 'first', type: 'text' }),
           h('input', { id: 'second', type: 'text' }),
           h('button', { id: 'button' }, 'button'),
@@ -504,5 +574,35 @@ describe('useKeyboardAwarePage focus lifecycle', () => {
     vi.runAllTimers()
 
     expect(editable.scrollIntoView).not.toHaveBeenCalled()
+  })
+
+  it('shares one preserved animation baseline between page inset and focus scrolling', async () => {
+    vi.useFakeTimers()
+    const viewport = useViewport(800)
+    const { application, host } = mountHarness()
+    await nextTick()
+    const editable = host.querySelector<HTMLInputElement>('#first')!
+    editable.scrollIntoView = vi.fn()
+    obscure(editable, 900)
+    editable.focus()
+
+    viewport.height = 760
+    window.dispatchEvent(new Event('resize'))
+    await nextTick()
+    expect(host.querySelector('#page-inset')?.textContent).toBe('0')
+
+    viewport.height = 720
+    window.dispatchEvent(new Event('resize'))
+    await nextTick()
+    expect(host.querySelector('#page-inset')?.textContent).toBe('80')
+
+    viewport.height = 680
+    window.dispatchEvent(new Event('resize'))
+    await nextTick()
+    expect(host.querySelector('#page-inset')?.textContent).toBe('120')
+
+    vi.runAllTimers()
+    expect(editable.scrollIntoView).toHaveBeenCalledTimes(1)
+    application.unmount()
   })
 })

@@ -10,13 +10,24 @@ export type KeyboardViewportBaseline = {
   bottom: number
 }
 
+export type KeyboardMeasurementContext = {
+  nowMs?: number
+  keyboardExpected?: boolean
+}
+
 export type KeyboardInsetTracker = {
-  measure: (layoutHeight: number, visualViewport: KeyboardVisualViewport | null) => number
+  measure: (
+    layoutHeight: number,
+    visualViewport: KeyboardVisualViewport | null,
+    context?: KeyboardMeasurementContext
+  ) => number
   getBaseline: () => KeyboardViewportBaseline | null
+  hasPendingBaseline: () => boolean
   reset: () => void
 }
 
 const MIN_KEYBOARD_INSET_PX = 80
+const BASELINE_STABILITY_MS = 160
 
 function viewportScale(visualViewport: KeyboardVisualViewport): number {
   return visualViewport.scale && visualViewport.scale > 0
@@ -45,9 +56,16 @@ export function measureKeyboardInset(
 
 export function createKeyboardInsetTracker(): KeyboardInsetTracker {
   let baseline: KeyboardViewportBaseline | null = null
+  let pendingBaseline: (KeyboardViewportBaseline & {
+    startedAt: number
+    acceptWhileFocused: boolean
+  }) | null = null
+  let lastHeight: number | null = null
 
   function reset() {
     baseline = null
+    pendingBaseline = null
+    lastHeight = null
   }
 
   function getBaseline(): KeyboardViewportBaseline | null {
@@ -59,6 +77,7 @@ export function createKeyboardInsetTracker(): KeyboardInsetTracker {
     visualViewport: KeyboardVisualViewport,
     scale: number
   ) {
+    pendingBaseline = null
     baseline = {
       layoutHeight,
       scale,
@@ -73,6 +92,7 @@ export function createKeyboardInsetTracker(): KeyboardInsetTracker {
     visualViewport: KeyboardVisualViewport,
     scale: number
   ) {
+    pendingBaseline = null
     const effectiveLayoutHeight = layoutHeight / scale
     const inferredInset = effectiveLayoutHeight - visualViewport.height
     if (inferredInset < MIN_KEYBOARD_INSET_PX) {
@@ -92,7 +112,11 @@ export function createKeyboardInsetTracker(): KeyboardInsetTracker {
     }
   }
 
-  function measure(layoutHeight: number, visualViewport: KeyboardVisualViewport | null): number {
+  function measure(
+    layoutHeight: number,
+    visualViewport: KeyboardVisualViewport | null,
+    context: KeyboardMeasurementContext = {}
+  ): number {
     if (!visualViewport || layoutHeight <= 0) {
       reset()
       return 0
@@ -102,6 +126,10 @@ export function createKeyboardInsetTracker(): KeyboardInsetTracker {
     const viewportStructureChanged = !baseline ||
       Math.abs(baseline.layoutHeight - layoutHeight) > 1 ||
       Math.abs(baseline.scale - scale) > 0.01
+    const heightIncreased = !viewportStructureChanged &&
+      lastHeight !== null &&
+      visualViewport.height > lastHeight + 1
+    lastHeight = visualViewport.height
     if (viewportStructureChanged) {
       rebuildBaseline(layoutHeight, visualViewport, scale)
     }
@@ -113,32 +141,84 @@ export function createKeyboardInsetTracker(): KeyboardInsetTracker {
     }
 
     const inset = measureKeyboardInset(layoutHeight, visualViewport, baseline.height)
-    if (inset < MIN_KEYBOARD_INSET_PX) {
-      // Browser chrome and small viewport rounding changes are not keyboards.
-      // This also refreshes offset/bottom after a keyboard fully closes.
+    if (inset <= 1) {
       setObservedBaseline(layoutHeight, visualViewport, scale)
       return 0
     }
+    if (inset < MIN_KEYBOARD_INSET_PX) {
+      // A keyboard often starts with several small animation frames. Never
+      // lower the baseline while a text control is focused; without a focus,
+      // accept a browser-bar change only after the same geometry is stable.
+      const canStabilizeWhileFocused = heightIncreased ||
+        pendingBaseline?.acceptWhileFocused === true
+      if (context.keyboardExpected && !canStabilizeWhileFocused) {
+        pendingBaseline = null
+        return 0
+      }
+      const nowMs = context.nowMs ?? Date.now()
+      const bottom = visualViewport.offsetTop + visualViewport.height
+      const candidate = pendingBaseline
+      const sameCandidate = candidate !== null &&
+        Math.abs(candidate.height - visualViewport.height) <= 1 &&
+        Math.abs(candidate.offsetTop - visualViewport.offsetTop) <= 1 &&
+        Math.abs(candidate.bottom - bottom) <= 1
+      if (sameCandidate && nowMs - candidate.startedAt >= BASELINE_STABILITY_MS) {
+        setObservedBaseline(layoutHeight, visualViewport, scale)
+      } else if (!sameCandidate) {
+        pendingBaseline = {
+          layoutHeight,
+          scale,
+          height: visualViewport.height,
+          offsetTop: visualViewport.offsetTop,
+          bottom,
+          startedAt: nowMs,
+          acceptWhileFocused: heightIncreased
+        }
+      }
+      return 0
+    }
+    pendingBaseline = null
     return inset
   }
 
-  return { measure, getBaseline, reset }
+  return {
+    measure,
+    getBaseline,
+    hasPendingBaseline: () => pendingBaseline !== null,
+    reset
+  }
 }
 
 export function useKeyboardInset(
   tracker: KeyboardInsetTracker = createKeyboardInsetTracker()
 ): { keyboardInset: Ref<number> } {
   const keyboardInset = ref(0)
+  let stabilityTimer: number | null = null
+
+  function clearStabilityTimer() {
+    if (typeof window !== 'undefined' && stabilityTimer !== null) {
+      window.clearTimeout(stabilityTimer)
+    }
+    stabilityTimer = null
+  }
 
   function updateInset() {
+    clearStabilityTimer()
     if (typeof window === 'undefined') {
       keyboardInset.value = 0
       return
     }
     keyboardInset.value = tracker.measure(
       window.innerHeight,
-      window.visualViewport
+      window.visualViewport,
+      {
+        keyboardExpected: typeof document !== 'undefined' &&
+          isSoftwareKeyboardField(document.activeElement)
+      }
     )
+    if (tracker.hasPendingBaseline()) {
+      stabilityTimer = window.setTimeout(updateInset, BASELINE_STABILITY_MS)
+    }
   }
 
   onMounted(() => {
@@ -150,6 +230,7 @@ export function useKeyboardInset(
   })
 
   onUnmounted(() => {
+    clearStabilityTimer()
     if (typeof window !== 'undefined') {
       window.visualViewport?.removeEventListener('resize', updateInset)
       window.visualViewport?.removeEventListener('scroll', updateInset)
@@ -209,7 +290,9 @@ export function isSoftwareKeyboardField(target: EventTarget | null): target is H
 function isFieldObscuredByKeyboard(target: HTMLElement, tracker: KeyboardInsetTracker): boolean {
   if (typeof window === 'undefined') return false
   const viewport = window.visualViewport
-  if (!viewport || tracker.measure(window.innerHeight, viewport) <= 0) return false
+  if (!viewport || tracker.measure(window.innerHeight, viewport, { keyboardExpected: true }) <= 0) {
+    return false
+  }
   if (typeof target.getBoundingClientRect !== 'function') return false
 
   const rectangle = target.getBoundingClientRect()
