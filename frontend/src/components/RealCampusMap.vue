@@ -52,6 +52,9 @@ const errorMessage = shallowRef('')
 const searchQuery = ref('')
 const selectedSearchBuildingId = ref<number | null>(null)
 const currentZoom = ref(props.zoom)
+let disposed = false
+let initializationGeneration = 0
+let zoomEndHandler: (() => void) | null = null
 
 const hasConfig = computed(() => isAMapConfigured())
 const markerBuildings = computed(() =>
@@ -269,8 +272,12 @@ function openSelectedBuilding() {
   }
 }
 
-async function installMapControls() {
-  if (!map.value) {
+function initializationIsActive(generation: number): boolean {
+  return !disposed && generation === initializationGeneration
+}
+
+async function installMapControls(generation: number, targetMap: any) {
+  if (!initializationIsActive(generation) || map.value !== targetMap) {
     return
   }
 
@@ -279,11 +286,11 @@ async function installMapControls() {
       loadAMapPlugin('AMap.Scale'),
       loadAMapPlugin('AMap.ToolBar')
     ])
-    if (!map.value) {
+    if (!initializationIsActive(generation) || map.value !== targetMap) {
       return
     }
-    map.value.addControl(new scaleAMap.Scale())
-    map.value.addControl(new toolbarAMap.ToolBar({ position: 'RB' }))
+    targetMap.addControl(new scaleAMap.Scale())
+    targetMap.addControl(new toolbarAMap.ToolBar({ position: 'RB' }))
   } catch {
     // The base map remains usable when optional controls fail to load.
   }
@@ -294,31 +301,54 @@ async function initMap() {
     return
   }
 
+  const generation = ++initializationGeneration
   loading.value = true
   errorMessage.value = ''
   try {
-    amap.value = await loadAMapSdk()
+    let loadedAMap = await loadAMapSdk()
+    if (!initializationIsActive(generation)) {
+      return
+    }
     if (props.walkingRoute) {
-      amap.value = await loadAMapPlugin('AMap.Walking')
+      loadedAMap = await loadAMapPlugin('AMap.Walking')
+      if (!initializationIsActive(generation)) {
+        return
+      }
     }
     await nextTick()
-    map.value = new amap.value.Map(mapContainer.value, {
+    if (!initializationIsActive(generation) || !mapContainer.value) {
+      return
+    }
+    const targetMap = new loadedAMap.Map(mapContainer.value, {
       center: getMapCenter(),
       zoom: props.zoom,
       viewMode: '2D',
       resizeEnable: true,
       mapStyle: 'amap://styles/normal'
     })
-    void installMapControls()
-    map.value.on('zoomend', () => {
-      currentZoom.value = map.value.getZoom()
-    })
-    currentZoom.value = map.value.getZoom()
+    if (!initializationIsActive(generation)) {
+      targetMap.destroy?.()
+      return
+    }
+    amap.value = loadedAMap
+    map.value = targetMap
+    void installMapControls(generation, targetMap)
+    zoomEndHandler = () => {
+      if (map.value === targetMap) {
+        currentZoom.value = targetMap.getZoom()
+      }
+    }
+    targetMap.on('zoomend', zoomEndHandler)
+    currentZoom.value = targetMap.getZoom()
     renderMapContent(true)
   } catch {
-    errorMessage.value = '地图加载失败，请检查高德 Key、域名白名单和网络连接'
+    if (initializationIsActive(generation)) {
+      errorMessage.value = '地图加载失败，请检查高德 Key、域名白名单和网络连接'
+    }
   } finally {
-    loading.value = false
+    if (initializationIsActive(generation)) {
+      loading.value = false
+    }
   }
 }
 
@@ -336,11 +366,22 @@ watch(
 )
 
 onBeforeUnmount(() => {
+  disposed = true
+  initializationGeneration += 1
   clearWalkingRoute()
   clearOverlays()
   if (map.value) {
+    if (zoomEndHandler) {
+      map.value.off?.('zoomend', zoomEndHandler)
+    }
     map.value.destroy()
   }
+  zoomEndHandler = null
+  map.value = null
+  amap.value = null
+  routePlanner.value = null
+  overlays.value = []
+  mapContainer.value = null
 })
 </script>
 

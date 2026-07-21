@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
@@ -47,8 +47,8 @@ def _normalize_now(now: datetime) -> datetime:
     return now.astimezone(SHANGHAI_TZ)
 
 
-def _course_start_datetime(base_date: date, start_time: str) -> datetime:
-    return datetime.combine(base_date, parse_course_time(start_time), tzinfo=SHANGHAI_TZ)
+def _course_start_datetime(base_date: date, start_time: time) -> datetime:
+    return datetime.combine(base_date, start_time, tzinfo=SHANGHAI_TZ)
 
 
 def course_occurs_on(
@@ -102,22 +102,59 @@ def _get_active_semester(
     return setting, state.current_week
 
 
-def _course_data_error(course: Course, error: Exception) -> BusinessError:
+def _course_data_error(course: Course, issues: list[str]) -> BusinessError:
     return BusinessError(
         409,
         "course_data_invalid",
         "课表中有无法识别的周次或时间，请先修复课程",
-        details={"course_id": course.id, "reason": str(error)},
+        details={"course_id": course.id, "issues": issues},
     )
 
 
-def _location_error(course: Course) -> BusinessError:
+def _parse_course_times(course: Course) -> tuple[time, time]:
+    issues: list[str] = []
+    start_time: time | None = None
+    end_time: time | None = None
+    try:
+        start_time = parse_course_time(course.start_time)
+    except ValueError:
+        issues.append("start_time")
+    try:
+        end_time = parse_course_time(course.end_time)
+    except ValueError:
+        issues.append("end_time")
+    if (
+        not issues
+        and start_time is not None
+        and end_time is not None
+        and end_time <= start_time
+    ):
+        issues.extend(["start_time", "end_time"])
+    if issues:
+        raise _course_data_error(course, issues)
+    if start_time is None or end_time is None:
+        raise RuntimeError("validated course times are unexpectedly missing")
+    return start_time, end_time
+
+
+def _location_is_incomplete(course: Course) -> bool:
+    building = course.building
+    return (
+        location_requires_review(course.room_name)
+        or not course.room_name.strip()
+        or building is None
+        or not building.name.strip()
+    )
+
+
+def _location_error(courses: list[Course]) -> BusinessError:
+    course_ids = sorted(course.id for course in courses)
     return BusinessError(
         409,
         "course_location_incomplete",
         "下一节课的地点信息不完整，请先补全教学楼和教室",
         fields=["building_id", "room_name"],
-        details={"course_id": course.id},
+        details={"course_id": course_ids[0], "course_ids": course_ids},
     )
 
 
@@ -145,16 +182,18 @@ def find_next_course(
         if target_date < current.date() or target_date > week_end:
             continue
         try:
-            if not course_occurs_on(
+            occurs = course_occurs_on(
                 course,
                 target_date=target_date,
                 start_date=setting.start_date,
                 total_weeks=setting.total_weeks,
-            ):
-                continue
-            starts_at = _course_start_datetime(target_date, course.start_time)
-        except (WeekExpressionError, ValueError) as error:
-            raise _course_data_error(course, error) from error
+            )
+        except WeekExpressionError as error:
+            raise _course_data_error(course, ["weeks"]) from error
+        if not occurs:
+            continue
+        start_time, _ = _parse_course_times(course)
+        starts_at = _course_start_datetime(target_date, start_time)
         if starts_at <= current:
             continue
         candidates.append(
@@ -170,26 +209,22 @@ def find_next_course(
 
     candidates.sort(key=lambda candidate: (candidate.starts_at, candidate.course.id))
     earliest_start = candidates[0].starts_at
-    earliest = [candidate for candidate in candidates if candidate.starts_at == earliest_start]
-    if len(earliest) > 1:
+    earliest = [
+        candidate for candidate in candidates if candidate.starts_at == earliest_start
+    ]
+    complete = [
+        candidate for candidate in earliest if not _location_is_incomplete(candidate.course)
+    ]
+    if len(complete) > 1:
         raise BusinessError(
             409,
             "schedule_conflict",
             "同一时间存在多门课程，请先修复课表冲突",
-            details={"course_ids": [candidate.course.id for candidate in earliest]},
+            details={"course_ids": [candidate.course.id for candidate in complete]},
         )
-
-    candidate = earliest[0]
-    course = candidate.course
-    building = course.building
-    if (
-        location_requires_review(course.room_name)
-        or not course.room_name.strip()
-        or building is None
-        or not building.name.strip()
-    ):
-        raise _location_error(course)
-    return candidate
+    if complete:
+        return complete[0]
+    raise _location_error([candidate.course for candidate in earliest])
 
 
 def resolve_current_location(
@@ -269,7 +304,7 @@ def build_schedule_suggestion(
     course = next_candidate.course
     target_building = course.building
     if target_building is None or not target_building.name.strip():
-        raise _location_error(course)
+        raise _location_error([course])
 
     distance_meters = haversine_distance_meters(
         from_location.latitude,

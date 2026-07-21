@@ -148,7 +148,10 @@ async function loadScheduleData() {
   loading.value = true
   errorMessage.value = ''
   try {
-    const [buildingResult, courseResult] = await Promise.all([getBuildings(), getCourses()])
+    const [buildingResult, courseResult] = await Promise.all([
+      getBuildings(),
+      getCourses().catch(() => [])
+    ])
     buildings.value = buildingResult
     courses.value = courseResult
 
@@ -184,10 +187,6 @@ async function useBrowserLocation() {
 }
 
 async function generateSuggestion() {
-  if (!hasCourses.value) {
-    errorMessage.value = '暂无后续课程，请先添加课程'
-    return
-  }
   const payload = locationStore.suggestionPayload
   if (!payload) {
     showFailToast('请先选择当前位置')

@@ -154,6 +154,7 @@ def add_api_course(
     building_id: int,
     weekday: int,
     start_time: str,
+    end_time: str = "11:40",
     weeks: str = "1-20",
     room_name: str = "A101",
 ) -> int:
@@ -168,6 +169,7 @@ def add_api_course(
             building,
             weekday=weekday,
             start_time=start_time,
+            end_time=end_time,
             weeks=weeks,
             room_name=room_name,
         ).id
@@ -339,6 +341,147 @@ def test_same_earliest_start_time_is_reported_as_schedule_conflict(
     assert raised.value.details["course_ids"] == [first.id, second.id]
 
 
+@pytest.mark.parametrize(
+    ("end_time", "issues"),
+    [
+        ("not-a-time", ["end_time"]),
+        ("09:00", ["start_time", "end_time"]),
+        ("08:00", ["start_time", "end_time"]),
+    ],
+)
+def test_next_course_rejects_invalid_legacy_end_time(
+    client_and_session: tuple[TestClient, sessionmaker],
+    end_time: str,
+    issues: list[str],
+) -> None:
+    _, SessionLocal = client_and_session
+    with SessionLocal() as session:
+        user = create_service_user(session, f"invalid_end_{end_time.replace(':', '_')}")
+        _, building = first_two_buildings(session)
+        course = add_course(
+            session,
+            user,
+            building,
+            weekday=1,
+            start_time="09:00",
+            end_time=end_time,
+            weeks="2",
+        )
+
+        with pytest.raises(BusinessError) as raised:
+            find_next_course(
+                session,
+                user.id,
+                now=datetime(2026, 9, 7, 8, 0, tzinfo=SHANGHAI_TZ),
+            )
+
+    assert_business_error(raised, "course_data_invalid")
+    assert raised.value.details["course_id"] == course.id
+    assert raised.value.details["issues"] == issues
+
+
+def test_next_course_rejects_invalid_legacy_start_time(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    _, SessionLocal = client_and_session
+    with SessionLocal() as session:
+        user = create_service_user(session, "invalid_start")
+        _, building = first_two_buildings(session)
+        course = add_course(
+            session,
+            user,
+            building,
+            weekday=1,
+            start_time="not-a-time",
+            end_time="10:00",
+            weeks="2",
+        )
+
+        with pytest.raises(BusinessError) as raised:
+            find_next_course(
+                session,
+                user.id,
+                now=datetime(2026, 9, 7, 8, 0, tzinfo=SHANGHAI_TZ),
+            )
+
+    assert_business_error(raised, "course_data_invalid")
+    assert raised.value.details == {"course_id": course.id, "issues": ["start_time"]}
+
+
+def test_incomplete_course_at_same_time_does_not_conflict_with_complete_course(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    _, SessionLocal = client_and_session
+    with SessionLocal() as session:
+        user = create_service_user(session, "mixed_same_time")
+        _, building = first_two_buildings(session)
+        complete = add_course(
+            session,
+            user,
+            building,
+            course_name="地点完整",
+            start_time="09:00",
+            weeks="2",
+            room_name="A101",
+        )
+        add_course(
+            session,
+            user,
+            building,
+            course_name="地点待确认",
+            start_time="09:00",
+            weeks="2",
+            room_name="待确认教室",
+        )
+
+        result = find_next_course(
+            session,
+            user.id,
+            now=datetime(2026, 9, 7, 8, 0, tzinfo=SHANGHAI_TZ),
+        )
+
+    assert result is not None
+    assert result.course.id == complete.id
+
+
+def test_same_time_incomplete_courses_report_location_not_schedule_conflict(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    _, SessionLocal = client_and_session
+    with SessionLocal() as session:
+        user = create_service_user(session, "two_incomplete")
+        _, building = first_two_buildings(session)
+        first = add_course(
+            session,
+            user,
+            building,
+            course_name="待确认 A",
+            start_time="09:00",
+            weeks="2",
+            room_name="待确认教室",
+        )
+        second = add_course(
+            session,
+            user,
+            building,
+            course_name="待确认 B",
+            start_time="09:00",
+            weeks="2",
+            room_name="未知",
+        )
+
+        with pytest.raises(BusinessError) as raised:
+            find_next_course(
+                session,
+                user.id,
+                now=datetime(2026, 9, 7, 8, 0, tzinfo=SHANGHAI_TZ),
+            )
+
+    assert_business_error(raised, "course_location_incomplete")
+    assert raised.value.details["course_id"] == first.id
+    assert raised.value.details["course_ids"] == [first.id, second.id]
+
+
 @pytest.mark.parametrize("room_name", ["待确认教室", " 未知 ", "暂无"])
 def test_earliest_course_with_incomplete_room_is_not_skipped(
     client_and_session: tuple[TestClient, sessionmaker],
@@ -465,6 +608,41 @@ def test_schedule_api_uses_injected_current_time_and_business_error_contract(
     assert data["next_course"]["teaching_week"] == 2
     assert data["next_course"]["start_at"] == "2026-09-09T09:00:00+08:00"
     assert "current_week" not in data
+
+
+def test_schedule_api_rejects_invalid_legacy_course_time(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    client, SessionLocal = client_and_session
+    username = "invalid_time_api"
+    headers = auth_headers(client, username)
+    with SessionLocal() as session:
+        from_building, target_building = first_two_buildings(session)
+    course_id = add_api_course(
+        SessionLocal,
+        username=username,
+        building_id=target_building.id,
+        weekday=1,
+        start_time="09:00",
+        end_time="08:00",
+        weeks="2",
+    )
+    app.dependency_overrides[get_current_time] = lambda: datetime(
+        2026, 9, 7, 8, 0, tzinfo=SHANGHAI_TZ
+    )
+
+    response = client.post(
+        "/api/schedule/suggestion",
+        json={"current_building_id": from_building.id},
+        headers=headers,
+    )
+
+    assert response.status_code == 409
+    assert response.json()["code"] == "course_data_invalid"
+    assert response.json()["details"] == {
+        "course_id": course_id,
+        "issues": ["start_time", "end_time"],
+    }
 
 
 def test_schedule_api_rejects_browser_selected_week(

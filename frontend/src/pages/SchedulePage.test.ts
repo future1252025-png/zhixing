@@ -163,4 +163,62 @@ describe('SchedulePage route map lifecycle', () => {
     expect(host.querySelector('[data-testid="real-campus-map"]')).not.toBeNull()
     application.unmount()
   })
+
+  it('asks the backend for the authoritative schedule state when preload finds no courses', async () => {
+    vi.mocked(getCourses).mockResolvedValue([])
+    const EmptyRoute = { template: '<div />' }
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: '/', component: EmptyRoute },
+        { path: '/courses/new', component: EmptyRoute }
+      ]
+    })
+    await router.push('/')
+    await router.isReady()
+
+    const application = createApp(SchedulePage)
+    application.use(createPinia())
+    application.use(router)
+    application.directive('reveal', {})
+    application.mount(host)
+    await settle()
+
+    const generateButton = host.querySelector<HTMLButtonElement>('.generate-button')
+    expect(generateButton).not.toBeNull()
+    generateButton?.click()
+    await settle()
+
+    expect(getScheduleSuggestion).toHaveBeenCalledWith({ current_building_id: 1 })
+    application.unmount()
+  })
+
+  it('still asks the backend when the optional course-count preload fails', async () => {
+    vi.mocked(getCourses).mockRejectedValue(new Error('course count unavailable'))
+    const EmptyRoute = { template: '<div />' }
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: '/', component: EmptyRoute },
+        { path: '/courses/new', component: EmptyRoute }
+      ]
+    })
+    await router.push('/')
+    await router.isReady()
+
+    const application = createApp(SchedulePage)
+    application.use(createPinia())
+    application.use(router)
+    application.directive('reveal', {})
+    application.mount(host)
+    await settle()
+
+    const generateButton = host.querySelector<HTMLButtonElement>('.generate-button')
+    expect(generateButton).not.toBeNull()
+    generateButton?.click()
+    await settle()
+
+    expect(getScheduleSuggestion).toHaveBeenCalledWith({ current_building_id: 1 })
+    application.unmount()
+  })
 })

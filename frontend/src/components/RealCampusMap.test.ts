@@ -1,0 +1,132 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { createApp, nextTick } from 'vue'
+
+import { isAMapConfigured, loadAMapPlugin, loadAMapSdk } from '@/utils/amap'
+import RealCampusMap from './RealCampusMap.vue'
+
+
+vi.mock('@/utils/amap', () => ({
+  isAMapConfigured: vi.fn(),
+  loadAMapSdk: vi.fn(),
+  loadAMapPlugin: vi.fn()
+}))
+
+
+type Deferred<T> = {
+  promise: Promise<T>
+  resolve: (value: T) => void
+}
+
+function deferred<T>(): Deferred<T> {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((resolver) => {
+    resolve = resolver
+  })
+  return { promise, resolve }
+}
+
+async function settle(): Promise<void> {
+  await Promise.resolve()
+  await Promise.resolve()
+  await nextTick()
+}
+
+
+describe('RealCampusMap async lifecycle', () => {
+  let host: HTMLDivElement
+
+  beforeEach(() => {
+    vi.mocked(isAMapConfigured).mockReturnValue(true)
+    host = document.createElement('div')
+    document.body.append(host)
+  })
+
+  afterEach(() => {
+    host.remove()
+    vi.clearAllMocks()
+  })
+
+  it('does not construct a map when the SDK resolves after unmount', async () => {
+    const sdk = deferred<any>()
+    const MapConstructor = vi.fn(function FakeMap() {})
+    vi.mocked(loadAMapSdk).mockReturnValue(sdk.promise)
+
+    const application = createApp(RealCampusMap)
+    application.mount(host)
+    await nextTick()
+    application.unmount()
+
+    sdk.resolve({ Map: MapConstructor })
+    await settle()
+
+    expect(MapConstructor).not.toHaveBeenCalled()
+    expect(loadAMapPlugin).not.toHaveBeenCalled()
+  })
+
+  it('destroys map state and ignores controls that finish loading after unmount', async () => {
+    const controls = deferred<any>()
+    const marker = { on: vi.fn() }
+    const routePlanner = { search: vi.fn(), clear: vi.fn() }
+    const mapInstance = {
+      add: vi.fn(),
+      remove: vi.fn(),
+      addControl: vi.fn(),
+      on: vi.fn(),
+      off: vi.fn(),
+      getZoom: vi.fn(() => 16),
+      setFitView: vi.fn(),
+      destroy: vi.fn()
+    }
+    const amap = {
+      Map: vi.fn(function FakeMap() {
+        return mapInstance
+      }),
+      Marker: vi.fn(function FakeMarker() {
+        return marker
+      }),
+      Walking: vi.fn(function FakeWalking() {
+        return routePlanner
+      }),
+      Scale: vi.fn(),
+      ToolBar: vi.fn()
+    }
+    vi.mocked(loadAMapSdk).mockResolvedValue(amap)
+    vi.mocked(loadAMapPlugin).mockImplementation((name) => {
+      if (name === 'AMap.Walking') return Promise.resolve(amap)
+      return controls.promise
+    })
+
+    const application = createApp(RealCampusMap, {
+      buildings: [{
+        id: 1,
+        name: '教学楼',
+        type: '教学楼',
+        description: '',
+        latitude: 30.59,
+        longitude: 114.33,
+        map_x: 0,
+        map_y: 0,
+        walk_hint: null
+      }],
+      fromPoint: { name: '图书馆', latitude: 30.58, longitude: 114.32 },
+      toPoint: { name: '教学楼', latitude: 30.59, longitude: 114.33 },
+      walkingRoute: true
+    })
+    application.mount(host)
+    await settle()
+    await settle()
+
+    expect(amap.Map).toHaveBeenCalledOnce()
+    expect(routePlanner.search).toHaveBeenCalledOnce()
+    application.unmount()
+
+    expect(routePlanner.clear).toHaveBeenCalledOnce()
+    expect(mapInstance.remove).toHaveBeenCalled()
+    expect(mapInstance.off).toHaveBeenCalled()
+    expect(mapInstance.destroy).toHaveBeenCalledOnce()
+
+    controls.resolve(amap)
+    await settle()
+    expect(mapInstance.addControl).not.toHaveBeenCalled()
+  })
+})
