@@ -38,6 +38,7 @@ class NextCourseCandidate:
     course: Course
     starts_at: datetime
     teaching_week: int
+    start_time: time
 
 
 def _normalize_now(now: datetime) -> datetime:
@@ -111,30 +112,20 @@ def _course_data_error(course: Course, issues: list[str]) -> BusinessError:
     )
 
 
-def _parse_course_times(course: Course) -> tuple[time, time]:
-    issues: list[str] = []
-    start_time: time | None = None
-    end_time: time | None = None
+def _parse_course_start_time(course: Course) -> time:
     try:
-        start_time = parse_course_time(course.start_time)
-    except ValueError:
-        issues.append("start_time")
+        return parse_course_time(course.start_time)
+    except ValueError as error:
+        raise _course_data_error(course, ["start_time"]) from error
+
+
+def _validate_course_end_time(course: Course, start_time: time) -> None:
     try:
         end_time = parse_course_time(course.end_time)
-    except ValueError:
-        issues.append("end_time")
-    if (
-        not issues
-        and start_time is not None
-        and end_time is not None
-        and end_time <= start_time
-    ):
-        issues.extend(["start_time", "end_time"])
-    if issues:
-        raise _course_data_error(course, issues)
-    if start_time is None or end_time is None:
-        raise RuntimeError("validated course times are unexpectedly missing")
-    return start_time, end_time
+    except ValueError as error:
+        raise _course_data_error(course, ["end_time"]) from error
+    if end_time <= start_time:
+        raise _course_data_error(course, ["start_time", "end_time"])
 
 
 def _location_is_incomplete(course: Course) -> bool:
@@ -192,7 +183,7 @@ def find_next_course(
             raise _course_data_error(course, ["weeks"]) from error
         if not occurs:
             continue
-        start_time, _ = _parse_course_times(course)
+        start_time = _parse_course_start_time(course)
         starts_at = _course_start_datetime(target_date, start_time)
         if starts_at <= current:
             continue
@@ -201,6 +192,7 @@ def find_next_course(
                 course=course,
                 starts_at=starts_at,
                 teaching_week=teaching_week,
+                start_time=start_time,
             )
         )
 
@@ -212,6 +204,8 @@ def find_next_course(
     earliest = [
         candidate for candidate in candidates if candidate.starts_at == earliest_start
     ]
+    for candidate in earliest:
+        _validate_course_end_time(candidate.course, candidate.start_time)
     complete = [
         candidate for candidate in earliest if not _location_is_incomplete(candidate.course)
     ]

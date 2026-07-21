@@ -408,6 +408,84 @@ def test_next_course_rejects_invalid_legacy_start_time(
     assert raised.value.details == {"course_id": course.id, "issues": ["start_time"]}
 
 
+@pytest.mark.parametrize("end_time", ["not-a-time", "06:00"])
+def test_past_course_with_invalid_end_does_not_block_next_valid_course(
+    client_and_session: tuple[TestClient, sessionmaker],
+    end_time: str,
+) -> None:
+    _, SessionLocal = client_and_session
+    with SessionLocal() as session:
+        user = create_service_user(session, f"past_invalid_{end_time.replace(':', '_')}")
+        _, building = first_two_buildings(session)
+        add_course(
+            session,
+            user,
+            building,
+            course_name="已经开始的旧脏课程",
+            weekday=1,
+            start_time="07:00",
+            end_time=end_time,
+            weeks="2",
+        )
+        upcoming = add_course(
+            session,
+            user,
+            building,
+            course_name="下一节有效课程",
+            weekday=1,
+            start_time="09:00",
+            end_time="10:00",
+            weeks="2",
+        )
+
+        result = find_next_course(
+            session,
+            user.id,
+            now=datetime(2026, 9, 7, 8, 0, tzinfo=SHANGHAI_TZ),
+        )
+
+    assert result is not None
+    assert result.course.id == upcoming.id
+
+
+def test_later_invalid_future_course_does_not_preempt_earliest_valid_course(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    _, SessionLocal = client_and_session
+    with SessionLocal() as session:
+        user = create_service_user(session, "later_invalid_future")
+        _, building = first_two_buildings(session)
+        upcoming = add_course(
+            session,
+            user,
+            building,
+            course_name="最早有效课程",
+            weekday=1,
+            start_time="09:00",
+            end_time="10:00",
+            weeks="2",
+        )
+        add_course(
+            session,
+            user,
+            building,
+            course_name="稍后旧脏课程",
+            weekday=1,
+            start_time="11:00",
+            end_time="oops",
+            weeks="2",
+        )
+
+        result = find_next_course(
+            session,
+            user.id,
+            now=datetime(2026, 9, 7, 8, 0, tzinfo=SHANGHAI_TZ),
+        )
+
+    assert result is not None
+    assert result.course.id == upcoming.id
+
+
 def test_incomplete_course_at_same_time_does_not_conflict_with_complete_course(
     client_and_session: tuple[TestClient, sessionmaker],
 ) -> None:
@@ -643,6 +721,46 @@ def test_schedule_api_rejects_invalid_legacy_course_time(
         "course_id": course_id,
         "issues": ["start_time", "end_time"],
     }
+
+
+def test_schedule_api_skips_past_course_with_invalid_end_time(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    client, SessionLocal = client_and_session
+    username = "past_invalid_api"
+    headers = auth_headers(client, username)
+    with SessionLocal() as session:
+        from_building, target_building = first_two_buildings(session)
+    add_api_course(
+        SessionLocal,
+        username=username,
+        building_id=target_building.id,
+        weekday=1,
+        start_time="07:00",
+        end_time="oops",
+        weeks="2",
+    )
+    upcoming_id = add_api_course(
+        SessionLocal,
+        username=username,
+        building_id=target_building.id,
+        weekday=1,
+        start_time="09:00",
+        end_time="10:00",
+        weeks="2",
+    )
+    app.dependency_overrides[get_current_time] = lambda: datetime(
+        2026, 9, 7, 8, 0, tzinfo=SHANGHAI_TZ
+    )
+
+    response = client.post(
+        "/api/schedule/suggestion",
+        json={"current_building_id": from_building.id},
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    assert response.json()["next_course"]["id"] == upcoming_id
 
 
 def test_schedule_api_rejects_browser_selected_week(
