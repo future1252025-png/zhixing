@@ -2,6 +2,7 @@ from concurrent.futures import ThreadPoolExecutor
 from multiprocessing import get_context
 from pathlib import Path
 import traceback
+from urllib.parse import quote
 
 import pytest
 from alembic import command
@@ -23,6 +24,12 @@ BASELINE_TABLES = {
 
 def make_database_url(path: Path) -> str:
     return f"sqlite:///{path.as_posix()}"
+
+
+def make_database_uri_url(path: Path) -> str:
+    encoded_path = quote(path.as_posix(), safe="/:")
+    uri_path = f"/{encoded_path}" if path.drive else encoded_path
+    return f"sqlite:///file:{uri_path}?mode=rwc&uri=true"
 
 
 def migration_config(database_url: str) -> Config:
@@ -490,8 +497,17 @@ def test_alembic_upgrade_is_idempotent(tmp_path: Path) -> None:
         engine.dispose()
 
 
-def test_upgrade_database_serializes_simultaneous_threads(tmp_path: Path) -> None:
-    database_url = make_database_url(tmp_path / "threaded-startup.db")
+@pytest.mark.parametrize("use_uri", [False, True], ids=["plain", "file-uri"])
+def test_upgrade_database_serializes_simultaneous_threads(
+    tmp_path: Path,
+    use_uri: bool,
+) -> None:
+    database_path = tmp_path / "threaded" / "nested" / "startup.db"
+    database_url = (
+        make_database_uri_url(database_path)
+        if use_uri
+        else make_database_url(database_path)
+    )
 
     with ThreadPoolExecutor(max_workers=4) as executor:
         futures = [executor.submit(upgrade_database, database_url) for _ in range(4)]
@@ -509,8 +525,17 @@ def test_upgrade_database_serializes_simultaneous_threads(tmp_path: Path) -> Non
         engine.dispose()
 
 
-def test_upgrade_database_serializes_simultaneous_processes(tmp_path: Path) -> None:
-    database_url = make_database_url(tmp_path / "process-startup.db")
+@pytest.mark.parametrize("use_uri", [False, True], ids=["plain", "file-uri"])
+def test_upgrade_database_serializes_simultaneous_processes(
+    tmp_path: Path,
+    use_uri: bool,
+) -> None:
+    database_path = tmp_path / "process" / "nested" / "startup.db"
+    database_url = (
+        make_database_uri_url(database_path)
+        if use_uri
+        else make_database_url(database_path)
+    )
     context = get_context("spawn")
     start = context.Event()
     results = context.Queue()

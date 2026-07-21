@@ -1,10 +1,14 @@
 from collections.abc import Generator
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
+import errno
+import hashlib
 import os
 from pathlib import Path
+import stat
 import time
 from types import MappingProxyType
+from urllib.parse import unquote, urlsplit
 
 from sqlalchemy import create_engine, event
 from sqlalchemy.engine import Engine
@@ -17,23 +21,80 @@ from app.core.config import settings
 
 MIGRATION_LOCK_TIMEOUT_SECONDS = 30.0
 MIGRATION_LOCK_POLL_SECONDS = 0.05
+_RETRYABLE_LOCK_ERRNOS = frozenset(
+    {
+        errno.EACCES,
+        errno.EAGAIN,
+        errno.EDEADLK,
+        getattr(errno, "EWOULDBLOCK", errno.EAGAIN),
+    }
+)
+_RETRYABLE_WINDOWS_LOCK_ERRORS = frozenset({32, 33, 36})
 
 
 class Base(DeclarativeBase):
     pass
 
 
+def _resolve_directory_aliases(directory: Path) -> Path:
+    if directory.exists():
+        return directory.resolve(strict=True)
+    if directory.parent == directory:
+        return directory
+    return _resolve_directory_aliases(directory.parent) / directory.name
+
+
+def _canonicalize_sqlite_path(raw_path: str) -> Path:
+    decoded_path = unquote(raw_path)
+    if (
+        os.name == "nt"
+        and len(decoded_path) >= 3
+        and decoded_path[0] == "/"
+        and decoded_path[2] == ":"
+    ):
+        decoded_path = decoded_path[1:]
+    path = Path(decoded_path).expanduser()
+    if not path.is_absolute():
+        path = Path.cwd() / path
+    path = Path(os.path.abspath(path))
+    canonical_path = _resolve_directory_aliases(path.parent) / path.name
+    try:
+        final_component = os.lstat(canonical_path)
+    except FileNotFoundError:
+        return canonical_path
+    reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+    if stat.S_ISLNK(final_component.st_mode) or bool(
+        getattr(final_component, "st_file_attributes", 0) & reparse_flag
+    ):
+        return canonical_path.resolve(strict=False)
+    # Resolving a newly-created regular file on Windows can change its rendered
+    # path and therefore its hash. Resolve parents, but keep the final name stable.
+    return canonical_path
+
+
 def _sqlite_file_path(database_url: str) -> Path | None:
-    """Return the real file path for ordinary SQLite URLs, excluding memory/URI DBs."""
+    """Return the canonical path for every file-backed SQLite URL."""
     url = make_url(database_url)
     if not url.drivername.startswith("sqlite"):
         return None
     database = url.database
     uri_enabled = str(url.query.get("uri", "")).lower() in {"1", "true", "yes"}
-    if not database or database == ":memory:" or uri_enabled or database.startswith("file:"):
+    if not database or database == ":memory:":
         return None
-    path = Path(database).expanduser()
-    return path if path.is_absolute() else (Path.cwd() / path).resolve()
+    if not uri_enabled:
+        return _canonicalize_sqlite_path(database)
+
+    mode = str(url.query.get("mode", "")).casefold()
+    if mode == "memory" or database.casefold() == "file::memory:":
+        return None
+    if not database.casefold().startswith("file:"):
+        return _canonicalize_sqlite_path(database)
+
+    parsed_uri = urlsplit(database)
+    raw_path = parsed_uri.path
+    if parsed_uri.netloc and parsed_uri.netloc.casefold() != "localhost":
+        raw_path = f"//{parsed_uri.netloc}{raw_path}"
+    return _canonicalize_sqlite_path(raw_path)
 
 
 def _ensure_sqlite_parent(database_url: str) -> Path | None:
@@ -43,17 +104,81 @@ def _ensure_sqlite_parent(database_url: str) -> Path | None:
     return database_path
 
 
+def _migration_lock_path(database_path: Path) -> Path:
+    canonical_path = _canonicalize_sqlite_path(str(database_path))
+    identity = os.path.normcase(str(canonical_path))
+    digest = hashlib.sha256(os.fsencode(identity)).hexdigest()
+    return canonical_path.parent / f".campusmind-migration-{digest}.lock"
+
+
+def _is_reparse_point(file_stat: os.stat_result) -> bool:
+    reparse_flag = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+    return bool(getattr(file_stat, "st_file_attributes", 0) & reparse_flag)
+
+
+def _securely_open_migration_lock(lock_path: Path):
+    """Open a regular, owned sidecar without ever following a pre-set link."""
+    try:
+        before_open = os.lstat(lock_path)
+    except FileNotFoundError:
+        before_open = None
+    if before_open is not None and (
+        stat.S_ISLNK(before_open.st_mode) or _is_reparse_point(before_open)
+    ):
+        raise OSError(errno.ELOOP, "Migration lock path may not be a link", lock_path)
+
+    flags = os.O_CREAT | os.O_RDWR | getattr(os, "O_BINARY", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    file_descriptor = os.open(lock_path, flags, 0o600)
+    try:
+        opened = os.fstat(file_descriptor)
+        if not stat.S_ISREG(opened.st_mode):
+            raise OSError(
+                errno.EINVAL,
+                "Migration lock path is not a regular file",
+                lock_path,
+            )
+        if os.name != "nt" and hasattr(os, "geteuid") and opened.st_uid != os.geteuid():
+            raise PermissionError(
+                errno.EACCES,
+                "Migration lock file is not owned by the current user",
+                lock_path,
+            )
+
+        after_open = os.lstat(lock_path)
+        if stat.S_ISLNK(after_open.st_mode) or _is_reparse_point(after_open):
+            raise OSError(errno.ELOOP, "Migration lock path became a link", lock_path)
+        if (after_open.st_dev, after_open.st_ino) != (opened.st_dev, opened.st_ino):
+            raise OSError(
+                errno.EAGAIN,
+                "Migration lock path changed while it was being opened",
+                lock_path,
+            )
+        return os.fdopen(file_descriptor, "r+b", buffering=0)
+    except BaseException:
+        os.close(file_descriptor)
+        raise
+
+
+def _is_retryable_lock_error(error: OSError) -> bool:
+    return error.errno in _RETRYABLE_LOCK_ERRNOS or getattr(
+        error,
+        "winerror",
+        None,
+    ) in _RETRYABLE_WINDOWS_LOCK_ERRORS
+
+
 @contextmanager
 def _migration_file_lock(
     database_path: Path,
     timeout_seconds: float = MIGRATION_LOCK_TIMEOUT_SECONDS,
 ):
     """Serialize Alembic for one SQLite file across both processes and threads."""
-    lock_path = database_path.with_name(f"{database_path.name}.migration.lock")
+    lock_path = _migration_lock_path(database_path)
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     deadline = time.monotonic() + timeout_seconds
 
-    with lock_path.open("a+b") as handle:
+    with _securely_open_migration_lock(lock_path) as handle:
         handle.seek(0, os.SEEK_END)
         if handle.tell() == 0:
             handle.write(b"\0")
@@ -66,7 +191,9 @@ def _migration_file_lock(
                 handle.seek(0)
                 try:
                     msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
-                except OSError:
+                except OSError as error:
+                    if not _is_retryable_lock_error(error):
+                        raise
                     return False
                 return True
 
@@ -79,7 +206,9 @@ def _migration_file_lock(
             def try_lock() -> bool:
                 try:
                     fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-                except BlockingIOError:
+                except OSError as error:
+                    if not _is_retryable_lock_error(error):
+                        raise
                     return False
                 return True
 

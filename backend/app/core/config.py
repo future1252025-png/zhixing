@@ -1,7 +1,9 @@
 from collections.abc import Mapping
 from dataclasses import dataclass
+from ipaddress import IPv4Address, IPv6Address, ip_address
 import os
 from pathlib import Path
+import re
 from typing import Final
 from urllib.parse import urlsplit
 
@@ -20,12 +22,125 @@ MIN_JWT_SECRET_BYTES: Final = 32
 # credential exposure and catches the common seconds-vs-minutes configuration error.
 MAX_ACCESS_TOKEN_EXPIRE_MINUTES: Final = 24 * 60
 _UNSET: Final = object()
+_DOMAIN_LABEL = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
 
 
 def _parse_cors_allow_origins(configured: str | None) -> tuple[str, ...]:
     if configured is None:
         return DEFAULT_CORS_ALLOW_ORIGINS
     return tuple(origin.strip() for origin in configured.split(",") if origin.strip())
+
+
+def _parse_legacy_ipv4(hostname: str) -> IPv4Address | None:
+    """Parse browser-compatible decimal/octal/hex IPv4 forms safely."""
+    raw_parts = hostname.split(".")
+    if not 1 <= len(raw_parts) <= 4:
+        return None
+    parts: list[int] = []
+    for raw_part in raw_parts:
+        lowered = raw_part.casefold()
+        if lowered.startswith("0x"):
+            digits, base = lowered[2:], 16
+        elif len(lowered) > 1 and lowered.startswith("0"):
+            digits, base = lowered[1:], 8
+        else:
+            digits, base = lowered, 10
+        if not digits:
+            digits = "0"
+        valid_digits = {
+            8: r"[0-7]+",
+            10: r"\d+",
+            16: r"[0-9a-f]+",
+        }[base]
+        if not re.fullmatch(valid_digits, digits):
+            return None
+        parts.append(int(digits, base))
+
+    limits = {
+        1: (0xFFFFFFFF,),
+        2: (0xFF, 0xFFFFFF),
+        3: (0xFF, 0xFF, 0xFFFF),
+        4: (0xFF, 0xFF, 0xFF, 0xFF),
+    }[len(parts)]
+    if any(part > limit for part, limit in zip(parts, limits, strict=True)):
+        return None
+    if len(parts) == 1:
+        value = parts[0]
+    elif len(parts) == 2:
+        value = (parts[0] << 24) | parts[1]
+    elif len(parts) == 3:
+        value = (parts[0] << 24) | (parts[1] << 16) | parts[2]
+    else:
+        value = (
+            (parts[0] << 24)
+            | (parts[1] << 16)
+            | (parts[2] << 8)
+            | parts[3]
+        )
+    return IPv4Address(value)
+
+
+def _normalize_hostname(
+    hostname: str,
+) -> tuple[str, IPv4Address | IPv6Address | None] | None:
+    hostname = hostname.casefold().rstrip(".")
+    if not hostname or "%" in hostname:
+        return None
+    try:
+        address = ip_address(hostname)
+    except ValueError:
+        address = _parse_legacy_ipv4(hostname)
+    if address is not None:
+        return str(address), address
+    if re.fullmatch(r"[\d.]+", hostname):
+        return None
+    try:
+        ascii_hostname = hostname.encode("idna").decode("ascii").casefold()
+    except UnicodeError:
+        return None
+    labels = ascii_hostname.split(".")
+    if (
+        len(ascii_hostname) > 253
+        or any(not label or not _DOMAIN_LABEL.fullmatch(label) for label in labels)
+    ):
+        return None
+    return ascii_hostname, None
+
+
+def _normalize_cors_origin(origin: str) -> str | None:
+    origin = origin.strip()
+    if not origin or origin == "*":
+        return None
+    try:
+        parsed = urlsplit(origin)
+        port = parsed.port
+    except ValueError:
+        return None
+    scheme = parsed.scheme.casefold()
+    if scheme not in {"http", "https"} or parsed.hostname is None:
+        return None
+    if parsed.username is not None or parsed.password is not None:
+        return None
+    if parsed.path not in {"", "/"} or parsed.query or parsed.fragment:
+        return None
+    authority = parsed.netloc.rsplit("@", 1)[-1]
+    if authority.endswith(":"):
+        return None
+
+    normalized_host = _normalize_hostname(parsed.hostname)
+    if normalized_host is None:
+        return None
+    hostname, address = normalized_host
+    rendered_host = f"[{hostname}]" if isinstance(address, IPv6Address) else hostname
+    if port is not None and not (
+        (scheme == "http" and port == 80) or (scheme == "https" and port == 443)
+    ):
+        rendered_host = f"{rendered_host}:{port}"
+    return f"{scheme}://{rendered_host}"
+
+
+def _normalize_configured_origins(origins: tuple[str, ...]) -> tuple[str, ...]:
+    return tuple(_normalize_cors_origin(origin) or origin.strip() for origin in origins)
 
 
 def get_cors_allow_origins(
@@ -95,6 +210,7 @@ class Settings:
             if cors_allow_origins is _UNSET
             else tuple(str(origin).strip() for origin in cors_allow_origins if str(origin).strip())
         )
+        resolved_cors = _normalize_configured_origins(resolved_cors)
 
         object.__setattr__(self, "app_name", app_name)
         object.__setattr__(self, "app_env", str(resolved_app_env).strip().lower())
@@ -122,9 +238,20 @@ class Settings:
 settings = Settings()
 
 
-def _is_loopback_origin(origin: str) -> bool:
-    hostname = urlsplit(origin).hostname
-    return hostname is not None and hostname.lower() in {"localhost", "127.0.0.1"}
+def _is_remote_https_origin(origin: str) -> bool:
+    normalized = _normalize_cors_origin(origin)
+    if normalized is None:
+        return False
+    parsed = urlsplit(normalized)
+    if parsed.scheme != "https" or parsed.hostname is None:
+        return False
+    normalized_host = _normalize_hostname(parsed.hostname)
+    if normalized_host is None:
+        return False
+    hostname, address = normalized_host
+    if address is not None:
+        return not address.is_loopback
+    return hostname != "localhost" and not hostname.endswith(".localhost")
 
 
 def validate_settings(config: Settings | None = None) -> None:
@@ -153,9 +280,12 @@ def validate_settings(config: Settings | None = None) -> None:
     if (
         not current.cors_allow_origins_explicit
         or not current.cors_allow_origins
-        or all(_is_loopback_origin(origin) for origin in current.cors_allow_origins)
+        or any(
+            not _is_remote_https_origin(origin)
+            for origin in current.cors_allow_origins
+        )
     ):
         raise RuntimeError(
-            "CORS_ALLOW_ORIGINS must be explicitly configured with at least one "
-            "non-loopback origin in production."
+            "CORS_ALLOW_ORIGINS must contain only explicit, valid, remote HTTPS "
+            "origins in production."
         )

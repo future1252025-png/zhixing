@@ -101,6 +101,93 @@ def test_validate_settings_rejects_missing_or_local_only_production_cors(
         validate_settings(config)
 
 
+@pytest.mark.parametrize(
+    "origin",
+    [
+        "https://LOCALHOST.",
+        "https://app.localhost",
+        "https://deep.app.localhost.:8443",
+        "https://127.1",
+        "https://127.0.0.2",
+        "https://127.255.255.255",
+        "https://0177.0.0.1",
+        "https://0x7f.0.0.1",
+        "https://[::1]",
+        "https://[::ffff:127.0.0.1]",
+    ],
+)
+def test_validate_settings_rejects_every_loopback_origin_variant(
+    origin: str,
+) -> None:
+    config = Settings(
+        app_env="production",
+        jwt_secret_key="x" * 32,
+        cors_allow_origins=(origin,),
+    )
+
+    with pytest.raises(RuntimeError, match="CORS_ALLOW_ORIGINS"):
+        validate_settings(config)
+
+
+@pytest.mark.parametrize(
+    "origin",
+    [
+        "*",
+        "ftp://campus.example.edu",
+        "campus.example.edu",
+        "https:///missing-host",
+        "https://user@campus.example.edu",
+        "https://user:password@campus.example.edu",
+        "https://campus.example.edu/course",
+        "https://campus.example.edu?debug=true",
+        "https://campus.example.edu#fragment",
+        "http://campus.example.edu",
+    ],
+)
+def test_validate_settings_rejects_invalid_or_non_https_production_origin(
+    origin: str,
+) -> None:
+    config = Settings(
+        app_env="production",
+        jwt_secret_key="x" * 32,
+        cors_allow_origins=(origin,),
+    )
+
+    with pytest.raises(RuntimeError, match="CORS_ALLOW_ORIGINS"):
+        validate_settings(config)
+
+
+def test_validate_settings_rejects_local_origin_mixed_with_remote_https() -> None:
+    config = Settings(
+        app_env="production",
+        jwt_secret_key="x" * 32,
+        cors_allow_origins=(
+            "https://localhost:5173",
+            "https://campus.example.edu",
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="CORS_ALLOW_ORIGINS"):
+        validate_settings(config)
+
+
+def test_settings_normalizes_valid_https_origin_host_port_and_trailing_dot() -> None:
+    config = Settings(
+        app_env="production",
+        jwt_secret_key="x" * 32,
+        cors_allow_origins=(
+            "HTTPS://CAMPUS.EXAMPLE.EDU.:443/",
+            "https://API.Example.edu:8443",
+        ),
+    )
+
+    assert config.cors_allow_origins == (
+        "https://campus.example.edu",
+        "https://api.example.edu:8443",
+    )
+    validate_settings(config)
+
+
 def test_validate_settings_rejects_implicit_production_cors(monkeypatch) -> None:
     monkeypatch.setenv("APP_ENV", "production")
     monkeypatch.setenv("JWT_SECRET_KEY", "x" * 32)
@@ -134,10 +221,7 @@ def test_validate_settings_accepts_complete_production_configuration() -> None:
         app_env="production",
         jwt_secret_key="  " + "x" * 32 + "  ",
         access_token_expire_minutes=1440,
-        cors_allow_origins=(
-            "http://localhost:5173",
-            "https://campus.example.edu",
-        ),
+        cors_allow_origins=("https://campus.example.edu",),
     )
 
     validate_settings(config)

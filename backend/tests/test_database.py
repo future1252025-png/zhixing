@@ -1,6 +1,9 @@
 from datetime import date
+import errno
+import os
 from pathlib import Path
 from threading import Event, Thread
+from urllib.parse import quote
 
 import pytest
 from sqlalchemy import inspect, select
@@ -15,6 +18,8 @@ from app.db.database import (
 )
 from app.db.seed import (
     DEMO_BUILDINGS,
+    DEMO_COURSES,
+    DEMO_MESSAGES,
     DEMO_PASSWORD,
     DEMO_USERNAME,
     MAP_POINTS_SEED_FILE,
@@ -32,10 +37,17 @@ from app.models import (
     User,
 )
 from app.core.security import hash_password, verify_password
+import app.db.database as database_module
 
 
 def make_test_database_url(path: Path) -> str:
     return f"sqlite:///{path.as_posix()}"
+
+
+def make_test_database_uri_url(path: Path) -> str:
+    encoded_path = quote(path.as_posix(), safe="/:")
+    uri_path = f"/{encoded_path}" if path.drive else encoded_path
+    return f"sqlite:///file:{uri_path}?mode=rwc&uri=true"
 
 
 def test_database_tables_can_be_created(tmp_path: Path) -> None:
@@ -91,13 +103,43 @@ def test_sqlite_file_engine_uses_wal_and_busy_timeout(tmp_path: Path) -> None:
     assert int(busy_timeout) >= 5000
 
 
-def test_sqlite_file_path_skips_memory_and_uri_databases() -> None:
+def test_sqlite_file_path_skips_only_memory_databases(tmp_path: Path) -> None:
     assert _sqlite_file_path("sqlite:///:memory:") is None
     assert (
         _sqlite_file_path(
             "sqlite:///file:shared-memory?mode=memory&cache=shared&uri=true"
         )
         is None
+    )
+    assert _sqlite_file_path("sqlite:///file::memory:?cache=shared&uri=true") is None
+    database_path = tmp_path / "uri" / "nested" / "database.db"
+    assert _sqlite_file_path(make_test_database_uri_url(database_path)) == (
+        database_path.resolve()
+    )
+
+
+def test_sqlite_file_path_canonicalizes_aliases_and_symlinks(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    real_directory = tmp_path / "real"
+    real_directory.mkdir()
+    real_path = real_directory / "database.db"
+    alias_path = real_directory / "child" / ".." / "database.db"
+
+    assert _sqlite_file_path(make_test_database_uri_url(alias_path)) == real_path.resolve()
+    assert _sqlite_file_path(make_test_database_url(real_path)) == real_path.resolve()
+
+    monkeypatch.chdir(tmp_path)
+    assert _sqlite_file_path("sqlite:///real/database.db") == real_path.resolve()
+
+    symlink = tmp_path / "linked"
+    try:
+        symlink.symlink_to(real_directory, target_is_directory=True)
+    except OSError:
+        pytest.skip("directory symlinks are unavailable on this platform")
+    assert _sqlite_file_path(make_test_database_uri_url(symlink / "database.db")) == (
+        real_path.resolve()
     )
 
 
@@ -133,6 +175,113 @@ def test_migration_file_lock_has_an_explicit_timeout(tmp_path: Path) -> None:
         release.set()
         holder.join(timeout=2)
     assert not holder.is_alive()
+
+
+def test_migration_lock_uses_dedicated_noncolliding_sidecar(tmp_path: Path) -> None:
+    database_path = tmp_path / "database.db"
+    legacy_collision = tmp_path / "database.db.migration.lock"
+    legacy_collision.write_bytes(b"legitimate application data")
+    lock_path = database_module._migration_lock_path(database_path)
+
+    with _migration_file_lock(database_path, timeout_seconds=0.2):
+        assert lock_path.exists()
+
+    assert legacy_collision.read_bytes() == b"legitimate application data"
+    assert lock_path != legacy_collision
+    assert lock_path.name.startswith(".campusmind-migration-")
+
+
+def test_migration_lock_rejects_precreated_directory_without_waiting(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "database.db"
+    lock_path = database_module._migration_lock_path(database_path)
+    lock_path.mkdir()
+
+    with pytest.raises(OSError) as caught:
+        with _migration_file_lock(database_path, timeout_seconds=30):
+            pass
+
+    assert not isinstance(caught.value, TimeoutError)
+
+
+def test_migration_lock_rejects_symlink_without_modifying_target(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "database.db"
+    lock_path = database_module._migration_lock_path(database_path)
+    protected_target = tmp_path / "protected.txt"
+    protected_target.write_bytes(b"protected-content")
+    try:
+        lock_path.symlink_to(protected_target)
+    except OSError:
+        pytest.skip("file symlinks are unavailable on this platform")
+
+    with pytest.raises(OSError):
+        with _migration_file_lock(database_path, timeout_seconds=0.2):
+            pass
+
+    assert protected_target.read_bytes() == b"protected-content"
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows reparse-point guard")
+def test_migration_lock_rejects_windows_reparse_point_before_open(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    database_path = tmp_path / "database.db"
+    lock_path = database_module._migration_lock_path(database_path)
+    original_lstat = os.lstat
+    lock_opened = False
+
+    class ReparsePoint:
+        st_mode = 0o100600
+        st_file_attributes = 0x400
+
+    def fake_lstat(path):
+        if Path(path) == lock_path:
+            return ReparsePoint()
+        return original_lstat(path)
+
+    def fail_if_opened(*_args, **_kwargs):
+        nonlocal lock_opened
+        lock_opened = True
+        raise AssertionError("reparse-point sidecar must not be opened")
+
+    monkeypatch.setattr(database_module.os, "lstat", fake_lstat)
+    monkeypatch.setattr(database_module.os, "open", fail_if_opened)
+
+    with pytest.raises(OSError) as caught:
+        with _migration_file_lock(database_path, timeout_seconds=0.2):
+            pass
+
+    assert caught.value.errno == errno.ELOOP
+    assert lock_opened is False
+
+
+def test_migration_lock_does_not_turn_permanent_os_error_into_timeout(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    database_path = tmp_path / "database.db"
+
+    def fail_permanently(*_args) -> None:
+        raise OSError(errno.EBADF, "simulated permanent lock failure")
+
+    if os.name == "nt":
+        import msvcrt
+
+        monkeypatch.setattr(msvcrt, "locking", fail_permanently)
+    else:
+        import fcntl
+
+        monkeypatch.setattr(fcntl, "flock", fail_permanently)
+
+    with pytest.raises(OSError) as caught:
+        with _migration_file_lock(database_path, timeout_seconds=0.05):
+            pass
+
+    assert caught.value.errno == errno.EBADF
 
 
 def test_map_points_seed_file_loads_common_campus_points() -> None:
@@ -186,15 +335,44 @@ def test_seed_demo_data_preserves_real_demo_account_password_hash(tmp_path: Path
     real_hash = hash_password("owner-chosen-password")
 
     with SessionLocal() as session:
-        session.add(
-            User(
-                student_id="existing-demo",
-                username=DEMO_USERNAME,
-                password_hash=real_hash,
-                nickname="Real demo owner",
-            )
+        user = User(
+            student_id="existing-demo",
+            username=DEMO_USERNAME,
+            password_hash=real_hash,
+            nickname="Real demo owner",
         )
+        building = Building(
+            name="Real demo private building",
+            type="private",
+            description="must remain untouched",
+            latitude=1,
+            longitude=2,
+            map_x=3,
+            map_y=4,
+        )
+        session.add_all([user, building])
+        session.flush()
+        private_course = Course(
+            user_id=user.id,
+            building_id=building.id,
+            course_name="数据库原理",
+            weekday=1,
+            start_time="10:10",
+            end_time="12:34",
+            room_name="private-room",
+            teacher="private-teacher",
+            weeks="2-3",
+        )
+        private_message = Message(
+            building_id=building.id,
+            user_id=user.id,
+            content="private message",
+            display_name="private owner",
+        )
+        session.add_all([private_course, private_message])
         session.commit()
+        private_course_id = private_course.id
+        private_message_id = private_message.id
         seed_demo_data(session)
         session.expire_all()
         user = session.scalar(select(User).where(User.username == DEMO_USERNAME))
@@ -203,6 +381,18 @@ def test_seed_demo_data_preserves_real_demo_account_password_hash(tmp_path: Path
         assert user.password_hash == real_hash
         assert verify_password("owner-chosen-password", user.password_hash)
         assert not verify_password(DEMO_PASSWORD, user.password_hash)
+        user_courses = session.scalars(
+            select(Course).where(Course.user_id == user.id)
+        ).all()
+        user_messages = session.scalars(
+            select(Message).where(Message.user_id == user.id)
+        ).all()
+        assert [course.id for course in user_courses] == [private_course_id]
+        assert [message.id for message in user_messages] == [private_message_id]
+        assert user_courses[0].end_time == "12:34"
+        assert user_courses[0].room_name == "private-room"
+        assert user_courses[0].teacher == "private-teacher"
+        assert user_courses[0].weeks == "2-3"
 
 
 def test_seed_demo_data_repairs_only_known_legacy_placeholder(tmp_path: Path) -> None:
@@ -226,6 +416,12 @@ def test_seed_demo_data_repairs_only_known_legacy_placeholder(tmp_path: Path) ->
 
         assert user is not None
         assert verify_password(DEMO_PASSWORD, user.password_hash)
+        assert len(
+            session.scalars(select(Course).where(Course.user_id == user.id)).all()
+        ) == len(DEMO_COURSES)
+        assert len(
+            session.scalars(select(Message).where(Message.user_id == user.id)).all()
+        ) == len(DEMO_MESSAGES)
 
 
 def test_seed_demo_data_preserves_unknown_invalid_demo_hash(tmp_path: Path) -> None:
@@ -263,6 +459,12 @@ def test_new_demo_user_password_and_repeated_seed_are_stable(tmp_path: Path) -> 
         assert user is not None
         first_hash = user.password_hash
         assert verify_password(DEMO_PASSWORD, first_hash)
+        assert len(
+            session.scalars(select(Course).where(Course.user_id == user.id)).all()
+        ) == len(DEMO_COURSES)
+        assert len(
+            session.scalars(select(Message).where(Message.user_id == user.id)).all()
+        ) == len(DEMO_MESSAGES)
 
         seed_demo_data(session)
         session.expire_all()
@@ -289,6 +491,35 @@ def test_initialize_database_creates_custom_sqlite_parent_directories(
     initialize_database(make_test_database_url(database_path))
 
     assert database_path.exists()
+
+
+def test_initialize_database_creates_file_backed_sqlite_uri_parent_directories(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "custom-uri" / "nested" / "100%campusmind.db"
+
+    initialize_database(make_test_database_uri_url(database_path))
+
+    assert database_path.exists()
+
+
+def test_initialize_custom_database_never_touches_default_database_parent(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    blocking_file = tmp_path / "default-parent-is-a-file"
+    blocking_file.write_text("do not touch", encoding="utf-8")
+    monkeypatch.setattr(
+        "app.db.seed.DEFAULT_DATABASE_PATH",
+        blocking_file / "nested" / "default.db",
+        raising=False,
+    )
+    custom_path = tmp_path / "custom-only" / "database.db"
+
+    initialize_database(make_test_database_url(custom_path))
+
+    assert custom_path.exists()
+    assert blocking_file.is_file()
 
 
 def test_model_relationships_are_available(tmp_path: Path) -> None:
