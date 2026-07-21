@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
+from app.core import errors
 from app.db.database import get_session
 from app.schemas.building import BuildingRead
 from app.schemas.location_preset import LocationPresetRead
@@ -27,7 +28,7 @@ def read_building(
     if building is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Building not found",
+            detail=errors.BUILDING_NOT_FOUND,
         )
     return building
 

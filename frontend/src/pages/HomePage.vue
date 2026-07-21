@@ -408,7 +408,7 @@ onMounted(initializeHome)
 .home-brand small,
 .home-top time {
   color: var(--fresh-muted);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .home-top time {
@@ -497,19 +497,20 @@ onMounted(initializeHome)
 
 .today-location small {
   color: var(--fresh-muted);
-  font-size: 9px;
+  font-size: 12px;
+  font-weight: 680;
 }
 
 .today-location strong {
   color: var(--fresh-green-dark);
-  font-size: 13px;
+  font-size: 16px;
   line-height: 1.35;
   overflow-wrap: anywhere;
 }
 
 .today-location em {
   color: var(--fresh-text);
-  font-size: 11px;
+  font-size: 13px;
   font-style: normal;
   font-weight: 700;
 }
@@ -642,7 +643,7 @@ onMounted(initializeHome)
 
 .note small {
   color: rgba(38, 54, 42, 0.62);
-  font-size: 9px;
+  font-size: 12px;
   line-height: 1.45;
 }
 
@@ -711,7 +712,8 @@ onMounted(initializeHome)
 }
 
 .search-results strong { font-size: 13px; }
-.search-results small { color: var(--fresh-muted); font-size: 10px; }
+.search-results strong { font-size: 15px; }
+.search-results small { color: var(--fresh-muted); font-size: 13px; }
 
 .place-mark {
   position: relative;
@@ -770,11 +772,11 @@ onMounted(initializeHome)
   color: #56808a;
 }
 
-.recent-row strong { font-size: 11px; }
+.recent-row strong { font-size: 13px; font-weight: 720; }
 
 .places-section .fresh-section-heading > span {
   color: var(--fresh-muted);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .place-grid {
@@ -820,12 +822,12 @@ onMounted(initializeHome)
   left: 14px;
   color: rgba(38, 54, 42, 0.42);
   font-family: ui-monospace, monospace;
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .place-grid small {
   color: rgba(38, 54, 42, 0.58);
-  font-size: 9px;
+  font-size: 12px;
 }
 
 .place-grid strong {
@@ -842,7 +844,7 @@ onMounted(initializeHome)
   gap: 5px;
   margin-top: 11px;
   color: var(--fresh-green-dark);
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
 }
 
@@ -857,7 +859,7 @@ onMounted(initializeHome)
   justify-items: center;
   gap: 13px;
   color: var(--fresh-muted);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .home-loading > span {
@@ -895,7 +897,7 @@ onMounted(initializeHome)
   .today-card { min-height: 345px; padding-right: 18px; padding-left: 18px; }
   .quick-notes { gap: 6px; }
   .note { min-height: 128px; padding: 12px 9px; }
-  .note small { font-size: 8px; }
+  .note small { font-size: 12px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

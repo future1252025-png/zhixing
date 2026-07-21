@@ -10,6 +10,8 @@ from app.schemas.message import (
     MessageCreate,
     MessageRead,
 )
+from app.core import errors
+from app.core.errors import MESSAGE_LOCATION_TOO_FAR
 from app.services.location_service import haversine_distance_meters
 
 
@@ -17,7 +19,9 @@ MAX_MESSAGE_DISTANCE_METERS = 500
 
 
 class MessageLocationTooFarError(ValueError):
-    pass
+    def __init__(self, distance_meters: int | None = None) -> None:
+        self.distance_meters = distance_meters
+        super().__init__(MESSAGE_LOCATION_TOO_FAR)
 
 
 def normalize_utc_datetime(value: datetime) -> datetime:
@@ -52,12 +56,19 @@ def list_building_messages(
     limit: int = 50,
     offset: int = 0,
 ) -> list[MessageRead]:
+    """List messages for one channel.
+
+    - room_name is None → 建筑总聊 (only messages with room_name IS NULL)
+    - room_name is set  → that classroom channel only
+    """
     statement = (
         select(Message)
         .where(Message.building_id == building_id, Message.status == "normal")
         .order_by(Message.created_at.desc(), Message.id.desc())
     )
-    if room_name is not None:
+    if room_name is None:
+        statement = statement.where(Message.room_name.is_(None))
+    else:
         statement = statement.where(Message.room_name == room_name)
 
     statement = statement.limit(limit).offset(offset)
@@ -83,7 +94,10 @@ def list_building_chatrooms(session: Session, building_id: int) -> list[ChatRoom
         for room_name, count in message_count_rows
         if room_name is not None
     }
-    general_count = sum(int(count) for _, count in message_count_rows)
+    # 建筑总聊 only counts messages that belong to the general channel.
+    general_count = sum(
+        int(count) for room_name, count in message_count_rows if room_name is None
+    )
     room_names = sorted(course_rooms | set(message_counts.keys()))
 
     return [
@@ -113,7 +127,7 @@ def create_building_message(
 ) -> MessageRead:
     building = get_building(session, building_id)
     if building is None:
-        raise ValueError("Building not found")
+        raise ValueError(errors.BUILDING_NOT_FOUND)
 
     distance = haversine_distance_meters(
         payload.latitude,
@@ -122,9 +136,7 @@ def create_building_message(
         building.longitude,
     )
     if distance > MAX_MESSAGE_DISTANCE_METERS:
-        raise MessageLocationTooFarError(
-            f"Location is too far from this building: {distance} meters"
-        )
+        raise MessageLocationTooFarError(distance)
 
     message = Message(
         building_id=building_id,

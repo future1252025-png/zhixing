@@ -9,6 +9,7 @@ import { createCourse, previewCourseImport } from '@/api/courses'
 import type { CourseImportPreviewItem } from '@/types/course'
 import { filterBuildingsByKeyword, includeSelectedBuilding } from '@/utils/buildings'
 import { WEEKDAYS, validateCourseForm } from '@/utils/course'
+import { useKeyboardAwarePage } from '@/utils/keyboardInset'
 
 const router = useRouter()
 const buildings = ref<Building[]>([])
@@ -18,6 +19,7 @@ const loading = ref(false)
 const importing = ref(false)
 const errorMessage = ref('')
 const buildingKeyword = ref('')
+const { pageStyle, onFieldFocus } = useKeyboardAwarePage({ basePaddingPx: 34 })
 
 const matchedCount = computed(() => previewItems.value.filter((item) => item.building_id).length)
 const needsReviewCount = computed(() => previewItems.value.filter((item) => !item.building_id).length)
@@ -118,7 +120,7 @@ onMounted(loadBuildings)
   <section class="page course-import-page">
     <van-nav-bar title="导入课表" left-arrow @click-left="router.push('/courses')" />
 
-    <main class="page-content import-content">
+    <main class="page-content import-content" :style="pageStyle" @focusin="onFieldFocus">
       <header v-reveal="{ from: 'left', distance: 34, stagger: 45 }" class="import-hero">
         <div class="hero-copy">
           <span class="eyebrow">省一点手动录入的时间</span>
@@ -438,13 +440,13 @@ onMounted(loadBuildings)
   border-radius: 99px;
   background: #e4efdc;
   color: #557454;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
 }
 .upload-card h2,
 .report-card h2 { margin: 0; color: #384e3c; font-size: 18px; }
 .upload-card header p,
-.report-card header p { margin: 4px 0 0; color: #879188; font-size: 11px; }
+.report-card header p { margin: 4px 0 0; color: #879188; font-size: 12px; }
 
 .file-picker {
   position: relative;
@@ -495,7 +497,7 @@ onMounted(loadBuildings)
 .reading .file-flower { animation: flower-spin 2.3s linear infinite; }
 .file-copy { display: grid; min-width: 0; gap: 6px; }
 .file-copy strong { overflow: hidden; color: #3c513f; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
-.file-copy small { color: #849087; font-size: 11px; }
+.file-copy small { color: #849087; font-size: 12px; }
 .choose-word {
   min-height: 38px;
   border-radius: 12px;
@@ -521,7 +523,7 @@ onMounted(loadBuildings)
   gap: 12px;
   margin-top: 13px;
 }
-.preview-action > span { color: #849087; font-size: 11px; }
+.preview-action > span { color: #849087; font-size: 12px; }
 
 .report-numbers { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px; }
 .report-numbers > div {
@@ -535,9 +537,9 @@ onMounted(loadBuildings)
 .report-numbers > div:nth-child(2) { background: #e7f2ee; }
 .report-numbers > div.warning { background: #fff0d5; }
 .report-numbers strong { color: #405941; font-family: Georgia, serif; font-size: 26px; }
-.report-numbers span { margin-top: 3px; color: #7d8b7d; font-size: 10px; }
+.report-numbers span { margin-top: 3px; color: #7d8b7d; font-size: 12px; }
 .match-progress { margin-top: 13px; }
-.match-progress > div { display: flex; justify-content: space-between; color: #758276; font-size: 10px; }
+.match-progress > div { display: flex; justify-content: space-between; color: #758276; font-size: 12px; }
 .match-progress strong { color: #5d8259; }
 .progress-track { display: block; height: 7px; overflow: hidden; margin-top: 7px; border-radius: 99px; background: #e4eadf; }
 .progress-track i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #9fc495, #70a994); transition: width .5s cubic-bezier(.22, 1, .36, 1); }
@@ -563,7 +565,7 @@ onMounted(loadBuildings)
   font-size: 23px;
 }
 .building-search > span:nth-child(2) { display: grid; min-width: 0; gap: 5px; }
-.building-search strong { color: #506752; font-size: 11px; }
+.building-search strong { color: #506752; font-size: 12px; }
 .building-search input {
   width: 100%;
   min-height: 36px;
@@ -577,13 +579,13 @@ onMounted(loadBuildings)
   padding: 0 10px;
 }
 .building-search input:focus { border-color: #7fa17a; box-shadow: 0 0 0 3px rgba(105, 146, 99, .13); }
-.building-search > small { color: #789078; font-size: 11px; }
+.building-search > small { color: #789078; font-size: 12px; }
 
 .preview-section { display: grid; gap: 12px; }
 .section-heading { display: flex; align-items: end; justify-content: space-between; gap: 12px; padding: 5px 3px; }
-.section-heading span { color: #789076; font-size: 10px; font-weight: 700; }
+.section-heading span { color: #789076; font-size: 12px; font-weight: 700; }
 .section-heading h2 { margin: 4px 0 0; color: #354b39; font-size: 20px; }
-.section-heading p { margin: 0; color: #899389; font-size: 10px; }
+.section-heading p { margin: 0; color: #899389; font-size: 12px; }
 .preview-list { display: grid; gap: 13px; }
 .preview-card {
   position: relative;
@@ -625,17 +627,21 @@ onMounted(loadBuildings)
 }
 .preview-heading > div { min-width: 0; }
 .preview-heading strong { display: block; overflow: hidden; color: #35493a; font-size: 15px; text-overflow: ellipsis; white-space: nowrap; }
-.preview-heading p { overflow: hidden; margin: 4px 0 0; color: #8a938a; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.preview-heading p { overflow: hidden; margin: 4px 0 0; color: #8a938a; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .match-badge {
   border-radius: 99px;
   background: #e5f1df;
   color: #577752;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
   padding: 7px 9px;
 }
 .match-badge.warning { background: #ffedc9; color: #946d2e; }
-.edit-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.edit-grid { display: grid; grid-template-columns: 1fr; gap: 8px; }
+
+@media (min-width: 420px) {
+  .edit-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 .edit-grid :deep(.van-cell) {
   min-width: 0;
   border: 1px solid #e0e8dc;
@@ -644,18 +650,18 @@ onMounted(loadBuildings)
   padding: 11px;
 }
 .edit-grid :deep(.van-cell::after) { display: none; }
-.edit-grid :deep(.van-field__label) { width: 65px; color: #718073; font-size: 11px; }
-.edit-grid :deep(.van-field__control) { color: #304537; font-size: 12px; }
+.edit-grid :deep(.van-field__label) { width: 72px; color: #718073; font-size: 13px; }
+.edit-grid :deep(.van-field__control) { color: #304537; font-size: 16px; }
 .edit-grid .wide-field { grid-column: 1 / -1; }
 .form-select {
   width: 100%;
-  min-height: 36px;
+  min-height: 44px;
   border: 1px solid #d8e4d5;
   border-radius: 10px;
   background: #fff;
   color: #304537;
   font: inherit;
-  font-size: 12px;
+  font-size: 15px;
   outline: none;
   padding: 0 30px 0 9px;
 }
@@ -671,7 +677,7 @@ onMounted(loadBuildings)
   padding: 17px;
 }
 .import-actions strong { color: #405643; font-size: 15px; }
-.import-actions p { margin: 5px 0 0; color: #7d897e; font-size: 11px; line-height: 1.5; }
+.import-actions p { margin: 5px 0 0; color: #7d897e; font-size: 12px; line-height: 1.5; }
 
 @keyframes import-leaf {
   0%, 100% { transform: rotate(24deg) translateY(0); }

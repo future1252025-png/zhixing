@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile, status
 from sqlalchemy.orm import Session
 
+from app.core import errors
 from app.core.security import get_current_user
 from app.db.database import get_session
 from app.models import User
@@ -23,7 +24,7 @@ def require_building(session: Session, building_id: int) -> None:
     if not building_exists(session, building_id):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Building not found",
+            detail=errors.BUILDING_NOT_FOUND,
         )
 
 
@@ -32,7 +33,7 @@ def require_course_for_user(session: Session, course_id: int, user_id: int):
     if course is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Course not found",
+            detail=errors.COURSE_NOT_FOUND,
         )
     return course
 
@@ -82,7 +83,14 @@ def update_current_user_course(
     course = require_course_for_user(session, course_id, current_user.id)
     if payload.building_id is not None:
         require_building(session, payload.building_id)
-    return update_course(session, course, payload)
+    try:
+        return update_course(session, course, payload)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=str(exc),
+        ) from exc
+
 
 
 @router.delete("/{course_id}", status_code=status.HTTP_204_NO_CONTENT)

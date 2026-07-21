@@ -13,6 +13,7 @@ import { useLocationStore } from '@/stores/location'
 import type { Course } from '@/types/course'
 import type { CampusMapPoint } from '@/types/map'
 import type { ScheduleSuggestion } from '@/types/schedule'
+import { readSelectedWeek } from '@/utils/course'
 import {
   filterScheduleLocations,
   formatDistance,
@@ -40,6 +41,8 @@ const suggestion = ref<ScheduleSuggestion | null>(null)
 const loading = ref(true)
 const generating = ref(false)
 const errorMessage = ref('')
+/** Route map is secondary to the departure card; start collapsed after a suggestion. */
+const mapExpanded = ref(true)
 
 const hasCourses = computed(() => courses.value.length > 0)
 const startLocations = computed<ScheduleLocationOption[]>(() =>
@@ -94,7 +97,9 @@ const routeReady = computed(() => Boolean(routeFromPoint.value && suggestionRout
 function getErrorMessage(error: unknown): string {
   if (isAxiosError(error)) {
     const detail = error.response?.data?.detail
-    if (detail === 'No upcoming course found') return '暂无后续课程，请先添加课程'
+    if (detail === '暂无后续课程' || detail === 'No upcoming course found') {
+      return '暂无后续课程，请先添加课程'
+    }
     if (typeof detail === 'string') return detail
   }
   return '出发建议生成失败，请稍后重试'
@@ -188,13 +193,24 @@ async function generateSuggestion() {
   generating.value = true
   errorMessage.value = ''
   try {
-    suggestion.value = await getScheduleSuggestion(payload)
+    const currentWeek =
+      typeof window === 'undefined' ? 1 : readSelectedWeek(window.localStorage)
+    suggestion.value = await getScheduleSuggestion({
+      ...payload,
+      current_week: currentWeek
+    })
+    // Keep the departure time first; map is one tap away.
+    mapExpanded.value = false
   } catch (error) {
     suggestion.value = null
     errorMessage.value = getErrorMessage(error)
   } finally {
     generating.value = false
   }
+}
+
+function toggleRouteMap() {
+  mapExpanded.value = !mapExpanded.value
 }
 
 onMounted(loadScheduleData)
@@ -388,24 +404,6 @@ onMounted(loadScheduleData)
       </section>
 
       <section
-        v-if="routeReady"
-        v-reveal="{ from: 'left', distance: 42 }"
-        class="map-card fresh-card"
-      >
-        <div class="fresh-section-heading">
-          <div><h2>沿着这条路走</h2><p>校园步行路线仅供参考</p></div>
-        </div>
-        <RealCampusMap
-          title=""
-          subtitle=""
-          :from-point="routeFromPoint"
-          :to-point="suggestionRouteToPoint"
-          :walking-route="true"
-          height="300px"
-        />
-      </section>
-
-      <section
         v-if="suggestion && statusMeta"
         v-reveal="{ from: 'right', distance: 42, stagger: 55 }"
         class="departure-card"
@@ -448,6 +446,41 @@ onMounted(loadScheduleData)
 
         <p class="suggestion-text">{{ suggestion.text }}</p>
         <p v-if="suggestion.warning" class="warning-text">{{ suggestion.warning }}</p>
+      </section>
+
+      <section
+        v-if="routeReady"
+        v-reveal="{ from: 'left', distance: 42 }"
+        class="map-card fresh-card"
+        :class="{ collapsed: !mapExpanded }"
+      >
+        <button
+          type="button"
+          class="map-toggle"
+          :aria-expanded="mapExpanded"
+          @click="toggleRouteMap"
+        >
+          <div class="fresh-section-heading">
+            <div>
+              <h2>沿着这条路走</h2>
+              <p>{{ mapExpanded ? '校园步行路线仅供参考' : '点开查看路线预览' }}</p>
+            </div>
+          </div>
+          <span class="map-toggle-action">
+            {{ mapExpanded ? '收起地图' : '展开地图' }}
+            <TechIcon name="arrow" :size="16" />
+          </span>
+        </button>
+        <div v-show="mapExpanded" class="map-body">
+          <RealCampusMap
+            title=""
+            subtitle=""
+            :from-point="routeFromPoint"
+            :to-point="suggestionRouteToPoint"
+            :walking-route="true"
+            height="300px"
+          />
+        </div>
       </section>
     </div>
   </section>
@@ -614,13 +647,13 @@ onMounted(loadScheduleData)
 
 .journey-meta span {
   color: var(--fresh-muted);
-  font-size: 8px;
+  font-size: 12px;
 }
 
 .journey-meta strong {
   overflow: hidden;
   color: var(--fresh-ink);
-  font-size: 11px;
+  font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -639,7 +672,7 @@ onMounted(loadScheduleData)
 
 .planner-heading > div > span {
   color: var(--fresh-green);
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 720;
 }
 
@@ -652,7 +685,7 @@ onMounted(loadScheduleData)
 .planner-heading p {
   margin: 5px 0 0;
   color: var(--fresh-muted);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .planner-heading > button {
@@ -675,7 +708,7 @@ onMounted(loadScheduleData)
   justify-items: center;
   gap: 12px;
   color: var(--fresh-muted);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .planner-loading > span {
@@ -758,7 +791,7 @@ onMounted(loadScheduleData)
   background: transparent;
   color: var(--fresh-green-dark);
   cursor: pointer;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
   padding: 0 3px;
 }
@@ -771,7 +804,7 @@ onMounted(loadScheduleData)
 
 .node-label > small {
   color: var(--fresh-muted);
-  font-size: 9px;
+  font-size: 12px;
 }
 
 .location-result-list {
@@ -821,8 +854,8 @@ onMounted(loadScheduleData)
   white-space: nowrap;
 }
 
-.location-result-list strong { font-size: 10px; }
-.location-result-list small { color: var(--fresh-muted); font-size: 8px; }
+.location-result-list strong { font-size: 14px; }
+.location-result-list small { color: var(--fresh-muted); font-size: 12px; }
 
 .location-result-list > button.active {
   border-color: #96b39a;
@@ -869,9 +902,9 @@ onMounted(loadScheduleData)
   gap: 2px;
 }
 
-.selected-place small { color: var(--fresh-green); font-size: 8px; }
-.selected-place strong { overflow: hidden; color: var(--fresh-ink); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
-.selected-place p { overflow: hidden; margin: 0; color: var(--fresh-muted); font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+.selected-place small { color: var(--fresh-green); font-size: 12px; font-weight: 720; }
+.selected-place strong { overflow: hidden; color: var(--fresh-ink); font-size: 15px; text-overflow: ellipsis; white-space: nowrap; }
+.selected-place p { overflow: hidden; margin: 0; color: var(--fresh-muted); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
 
 .selected-destination {
   grid-template-columns: auto minmax(0, 1fr) auto;
@@ -919,7 +952,7 @@ onMounted(loadScheduleData)
   gap: 11px;
   align-items: center;
   width: 100%;
-  min-height: 64px;
+  min-height: 68px;
   margin-top: 17px;
   overflow: hidden;
   border: 0;
@@ -927,7 +960,7 @@ onMounted(loadScheduleData)
   background: var(--fresh-green-dark);
   color: #fff;
   cursor: pointer;
-  padding: 9px 15px 9px 10px;
+  padding: 12px 15px 12px 10px;
   text-align: left;
   box-shadow: 0 13px 28px rgba(49, 91, 59, 0.2);
 }
@@ -946,8 +979,8 @@ onMounted(loadScheduleData)
   gap: 3px;
 }
 
-.generate-button strong { font-size: 13px; }
-.generate-button small { color: rgba(255, 255, 255, 0.7); font-size: 9px; }
+.generate-button strong { font-size: 16px; font-weight: 760; }
+.generate-button small { color: rgba(255, 255, 255, 0.82); font-size: 13px; }
 
 .generate-button:disabled {
   background: #86988a;
@@ -968,11 +1001,58 @@ onMounted(loadScheduleData)
 
 .map-card {
   overflow: hidden;
-  padding: 18px;
+  padding: 14px 16px 16px;
 }
 
-.map-card .fresh-section-heading {
-  margin-bottom: 13px;
+.map-card.collapsed {
+  padding-bottom: 12px;
+}
+
+.map-toggle {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  width: 100%;
+  min-height: 52px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  padding: 4px 2px 10px;
+  text-align: left;
+}
+
+.map-toggle .fresh-section-heading {
+  margin: 0;
+}
+
+.map-toggle-action {
+  display: inline-flex;
+  min-height: 36px;
+  align-items: center;
+  gap: 4px;
+  border-radius: 999px;
+  background: #eaf2e6;
+  color: var(--fresh-green-dark);
+  font-size: 13px;
+  font-weight: 720;
+  padding: 0 12px;
+  white-space: nowrap;
+}
+
+.map-card.collapsed .map-toggle-action :deep(svg) {
+  transform: rotate(90deg);
+}
+
+.map-card:not(.collapsed) .map-toggle-action :deep(svg) {
+  transform: rotate(-90deg);
+}
+
+.map-body {
+  margin-top: 2px;
+  overflow: hidden;
+  border-radius: 18px;
 }
 
 .departure-card {
@@ -1007,7 +1087,7 @@ onMounted(loadScheduleData)
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.65);
   color: var(--fresh-green-dark);
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 720;
   padding: 5px 9px;
 }
@@ -1016,19 +1096,20 @@ onMounted(loadScheduleData)
 .departure-time > span.late { color: #ad5e56; }
 
 .departure-time p {
-  margin: 15px 0 0;
+  margin: 12px 0 0;
   color: var(--fresh-text);
-  font-size: 11px;
+  font-size: 14px;
+  font-weight: 680;
 }
 
 .departure-time > strong {
   display: block;
-  margin-top: 2px;
+  margin-top: 4px;
   color: var(--fresh-ink);
   font-family: "STKaiti", "KaiTi", sans-serif;
-  font-size: clamp(51px, 14vw, 70px);
+  font-size: clamp(44px, 12vw, 58px);
   line-height: 1;
-  letter-spacing: -0.06em;
+  letter-spacing: -0.04em;
 }
 
 .course-destination {
@@ -1038,10 +1119,10 @@ onMounted(loadScheduleData)
   padding: 14px;
 }
 
-.course-destination small { color: var(--fresh-green); font-size: 9px; font-weight: 720; }
+.course-destination small { color: var(--fresh-green); font-size: 12px; font-weight: 720; }
 .course-destination h2 { margin: 4px 0 0; color: var(--fresh-ink); font-size: 18px; }
-.course-destination p { margin: 6px 0 0; color: var(--fresh-text); font-size: 10px; line-height: 1.55; }
-.course-destination > span { display: inline-block; margin-top: 7px; margin-right: 6px; border-radius: 999px; background: #fff; color: var(--fresh-muted); font-size: 8px; padding: 4px 7px; }
+.course-destination p { margin: 6px 0 0; color: var(--fresh-text); font-size: 14px; line-height: 1.55; }
+.course-destination > span { display: inline-block; margin-top: 7px; margin-right: 6px; border-radius: 999px; background: #fff; color: var(--fresh-muted); font-size: 12px; padding: 5px 9px; }
 
 .route-summary {
   display: grid;
@@ -1060,8 +1141,8 @@ onMounted(loadScheduleData)
   padding: 11px;
 }
 
-.route-summary article span { color: var(--fresh-muted); font-size: 8px; }
-.route-summary article strong { overflow: hidden; color: var(--fresh-ink); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.route-summary article span { color: var(--fresh-muted); font-size: 12px; }
+.route-summary article strong { overflow: hidden; color: var(--fresh-ink); font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
 .route-summary > i { color: var(--fresh-green); }
 
 .walking-metrics {
@@ -1079,13 +1160,13 @@ onMounted(loadScheduleData)
 }
 
 .walking-metrics div + div { border-left: 1px solid rgba(79, 125, 88, 0.13); }
-.walking-metrics span { color: var(--fresh-muted); font-size: 8px; }
-.walking-metrics strong { color: var(--fresh-ink); font-size: 12px; }
+.walking-metrics span { color: var(--fresh-muted); font-size: 12px; }
+.walking-metrics strong { color: var(--fresh-ink); font-size: 15px; font-weight: 760; }
 
 .suggestion-text {
   margin: 14px 0 0;
   color: var(--fresh-text);
-  font-size: 11px;
+  font-size: 14px;
   line-height: 1.65;
 }
 
@@ -1094,9 +1175,9 @@ onMounted(loadScheduleData)
   border-radius: 14px;
   background: #fae8df;
   color: #9e5f55;
-  font-size: 10px;
+  font-size: 13px;
   line-height: 1.55;
-  padding: 10px;
+  padding: 12px;
 }
 
 @keyframes journey-grow {

@@ -348,7 +348,7 @@ async function handleLogout() {
 
 .profile-copy > span {
   color: var(--fresh-green);
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 720;
 }
 
@@ -363,7 +363,7 @@ async function handleLogout() {
 .profile-copy p {
   margin: 6px 0 0;
   color: var(--fresh-muted);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .edit-profile-button {
@@ -382,7 +382,7 @@ async function handleLogout() {
   background: rgba(255, 255, 255, 0.58);
   color: var(--fresh-green-dark);
   cursor: pointer;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 720;
   padding: 0 11px;
 }
@@ -409,8 +409,8 @@ async function handleLogout() {
   border-left: 1px solid rgba(79, 125, 88, 0.12);
 }
 
-.profile-hero footer span { color: var(--fresh-muted); font-size: 8px; }
-.profile-hero footer strong { color: var(--fresh-ink); font-size: 10px; }
+.profile-hero footer span { color: var(--fresh-muted); font-size: 12px; }
+.profile-hero footer strong { color: var(--fresh-ink); font-size: 14px; }
 
 .profile-editor,
 .account-card {
@@ -473,7 +473,7 @@ async function handleLogout() {
   border-radius: 999px;
   background: var(--fresh-mint);
   color: var(--fresh-green-dark);
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 720;
   padding: 6px 9px;
 }
@@ -521,8 +521,8 @@ async function handleLogout() {
   gap: 3px;
 }
 
-.account-list small { color: var(--fresh-muted); font-size: 9px; }
-.account-list strong { overflow: hidden; color: var(--fresh-ink); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.account-list small { color: var(--fresh-muted); font-size: 12px; }
+.account-list strong { overflow: hidden; color: var(--fresh-ink); font-size: 15px; text-overflow: ellipsis; white-space: nowrap; }
 
 .data-note {
   display: grid;
@@ -544,8 +544,8 @@ async function handleLogout() {
   color: #5c8790;
 }
 
-.data-note strong { color: var(--fresh-ink); font-size: 12px; }
-.data-note p { margin: 4px 0 0; color: var(--fresh-text); font-size: 9px; line-height: 1.55; }
+.data-note strong { color: var(--fresh-ink); font-size: 15px; }
+.data-note p { margin: 4px 0 0; color: var(--fresh-text); font-size: 13px; line-height: 1.55; }
 
 .logout-wrap {
   min-width: 0;
@@ -581,8 +581,8 @@ async function handleLogout() {
   gap: 3px;
 }
 
-.logout-button strong { font-size: 12px; }
-.logout-button small { color: #a87b75; font-size: 9px; }
+.logout-button strong { font-size: 15px; }
+.logout-button small { color: #a87b75; font-size: 13px; }
 
 .editor-panel-enter-active,
 .editor-panel-leave-active {

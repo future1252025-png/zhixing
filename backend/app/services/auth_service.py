@@ -1,10 +1,15 @@
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.security import hash_password, verify_password
 from app.models import User
 from app.schemas.auth import RegisterRequest
 from app.schemas.user import UserProfileUpdate
+
+
+class DuplicateUserError(ValueError):
+    """Raised when username or student_id collides on insert."""
 
 
 def get_user_by_username(session: Session, username: str) -> User | None:
@@ -26,7 +31,11 @@ def create_user(session: Session, payload: RegisterRequest) -> User:
         role="student",
     )
     session.add(user)
-    session.commit()
+    try:
+        session.commit()
+    except IntegrityError as exc:
+        session.rollback()
+        raise DuplicateUserError() from exc
     session.refresh(user)
     return user
 

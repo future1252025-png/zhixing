@@ -1,9 +1,11 @@
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
+from app.core.config import settings
 from app.models import Building, Course
 from app.schemas.course import parse_course_time
 from app.schemas.schedule import (
@@ -19,10 +21,19 @@ from app.services.location_service import (
     estimate_walk_minutes,
     haversine_distance_meters,
 )
+from app.services.weeks import (
+    is_course_active_in_week,
+    parse_semester_start,
+    resolve_teaching_week,
+)
 
 
 DEFAULT_BUFFER_MINUTES = 10
 SAME_TIME_WARNING = "该时间段有多门课程，已选择最先创建的一门。"
+# Course times are campus wall-clock times (no timezone stored).
+CAMPUS_TZ = ZoneInfo("Asia/Shanghai")
+# Look ahead far enough to reach later teaching weeks (e.g. 9-16 only courses).
+MAX_LOOKAHEAD_DAYS = 16 * 7
 
 
 class CurrentBuildingNotFound(LookupError):
@@ -42,32 +53,50 @@ class NextCourseCandidate:
     course: Course
     starts_at: datetime
     same_time_course_count: int
+    teaching_week: int | None
 
 
 def _normalize_now(now: datetime | None = None) -> datetime:
-    current = now or datetime.now()
-    if current.tzinfo is not None:
-        return current.replace(tzinfo=None)
-    return current
+    """Normalize to naive campus local time for comparison with HH:MM course slots."""
+    if now is None:
+        return datetime.now(CAMPUS_TZ).replace(tzinfo=None)
+    if now.tzinfo is not None:
+        return now.astimezone(CAMPUS_TZ).replace(tzinfo=None)
+    return now
 
 
-def _course_start_datetime(base_date, start_time: str) -> datetime:
+def _course_start_datetime(base_date: date, start_time: str) -> datetime:
     return datetime.combine(base_date, parse_course_time(start_time))
+
+
+def _semester_start() -> date | None:
+    return parse_semester_start(settings.semester_start_date)
 
 
 def find_next_course(
     session: Session,
     user_id: int,
     now: datetime | None = None,
+    *,
+    current_week: int | None = None,
+    semester_start: date | None = None,
 ) -> NextCourseCandidate | None:
     current = _normalize_now(now)
+    start = semester_start if semester_start is not None else _semester_start()
 
-    for day_offset in range(0, 8):
+    for day_offset in range(0, MAX_LOOKAHEAD_DAYS):
         course_date = current.date() + timedelta(days=day_offset)
         weekday = course_date.isoweekday()
+        teaching_week = resolve_teaching_week(
+            target_date=course_date,
+            now=current,
+            current_week=current_week,
+            semester_start=start,
+        )
         courses = list(
             session.scalars(
                 select(Course)
+                .options(selectinload(Course.building))
                 .where(Course.user_id == user_id, Course.weekday == weekday)
                 .order_by(Course.start_time.asc(), Course.id.asc())
             ).all()
@@ -76,6 +105,7 @@ def find_next_course(
             course
             for course in courses
             if _course_start_datetime(course_date, course.start_time) > current
+            and is_course_active_in_week(course.weeks, teaching_week)
         ]
         if not future_courses:
             continue
@@ -89,6 +119,7 @@ def find_next_course(
             course=next_course,
             starts_at=starts_at,
             same_time_course_count=same_time_count,
+            teaching_week=teaching_week,
         )
 
     return None
@@ -159,7 +190,12 @@ def build_schedule_suggestion(
         latitude=request.latitude,
         longitude=request.longitude,
     )
-    next_candidate = find_next_course(session, user_id, now=current)
+    next_candidate = find_next_course(
+        session,
+        user_id,
+        now=current,
+        current_week=request.current_week,
+    )
     if next_candidate is None:
         raise NoUpcomingCourseFound
 
@@ -184,6 +220,12 @@ def build_schedule_suggestion(
     warning = (
         SAME_TIME_WARNING if next_candidate.same_time_course_count > 1 else None
     )
+    resolved_current_week = resolve_teaching_week(
+        target_date=current.date(),
+        now=current,
+        current_week=request.current_week,
+        semester_start=_semester_start(),
+    )
 
     return ScheduleSuggestionResponse(
         next_course=NextCourseInfo(
@@ -195,6 +237,7 @@ def build_schedule_suggestion(
             room_name=course.room_name,
             teacher=course.teacher,
             weeks=course.weeks,
+            teaching_week=next_candidate.teaching_week,
         ),
         from_location=from_location,
         target_building=BuildingInfo(
@@ -217,4 +260,5 @@ def build_schedule_suggestion(
             buffer_minutes=DEFAULT_BUFFER_MINUTES,
         ),
         warning=warning,
+        current_week=resolved_current_week,
     )

@@ -344,7 +344,7 @@ def test_create_message_too_far_from_building_fails(
     )
 
     assert response.status_code == 400
-    assert "too far" in response.json()["detail"].lower()
+    assert "过远" in response.json()["detail"]
 
 
 def test_create_empty_message_fails(
@@ -443,3 +443,51 @@ def test_room_messages_are_filtered_by_room_name(
     assert response.status_code == 200
     assert [message["content"] for message in response.json()] == ["203 教室有人吗"]
     assert response.json()[0]["room_name"] == "教4-203"
+
+
+def test_general_channel_excludes_classroom_messages_and_counts_only_general(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    client, SessionLocal = client_and_session
+    building = get_first_building(client)
+    headers = auth_headers(client, "channel_user")
+    location = message_location_payload(building)
+
+    general = client.post(
+        f"/api/buildings/{building['id']}/messages",
+        json={"content": "总频道留言", **location},
+        headers=headers,
+    )
+    room = client.post(
+        f"/api/buildings/{building['id']}/messages",
+        json={"content": "教室留言", "room_name": "教4-101", **location},
+        headers=headers,
+    )
+    assert general.status_code == 201
+    assert room.status_code == 201
+
+    with SessionLocal() as session:
+        session.query(Message).filter(
+            Message.building_id == building["id"],
+            Message.content.notin_(["总频道留言", "教室留言"]),
+        ).delete(synchronize_session=False)
+        session.commit()
+
+    general_list = client.get(
+        f"/api/buildings/{building['id']}/messages",
+        headers=headers,
+    )
+    assert general_list.status_code == 200
+    assert [message["content"] for message in general_list.json()] == ["总频道留言"]
+    assert all(message["room_name"] is None for message in general_list.json())
+
+    rooms = client.get(
+        f"/api/buildings/{building['id']}/chatrooms",
+        headers=headers,
+    )
+    assert rooms.status_code == 200
+    data = rooms.json()
+    assert data[0]["is_general"] is True
+    assert data[0]["message_count"] == 1
+    classroom = next(room for room in data if room["room_name"] == "教4-101")
+    assert classroom["message_count"] == 1

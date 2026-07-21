@@ -1,5 +1,5 @@
 from sqlalchemy import select
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.models import Building, Course
 from app.schemas.course import CourseCreate, CourseUpdate, ensure_end_after_start
@@ -13,6 +13,7 @@ def list_courses(session: Session, user_id: int) -> list[Course]:
     return list(
         session.scalars(
             select(Course)
+            .options(selectinload(Course.building))
             .where(Course.user_id == user_id)
             .order_by(Course.weekday.asc(), Course.start_time.asc(), Course.id.asc())
         ).all()
@@ -25,7 +26,9 @@ def get_course_for_user(
     user_id: int,
 ) -> Course | None:
     return session.scalar(
-        select(Course).where(Course.id == course_id, Course.user_id == user_id)
+        select(Course)
+        .options(selectinload(Course.building))
+        .where(Course.id == course_id, Course.user_id == user_id)
     )
 
 

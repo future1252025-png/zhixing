@@ -1,12 +1,14 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
+from app.core import errors
 from app.core.security import create_access_token, get_current_user
 from app.db.database import get_session
 from app.models import User
-from app.schemas.auth import LoginRequest, LoginResponse, RegisterRequest, TokenResponse
+from app.schemas.auth import LoginRequest, LoginResponse, RegisterRequest
 from app.schemas.user import UserProfileUpdate, UserRead
 from app.services.auth_service import (
+    DuplicateUserError,
     authenticate_user,
     create_user,
     get_user_by_student_id,
@@ -22,14 +24,20 @@ def register(payload: RegisterRequest, session: Session = Depends(get_session)) 
     if get_user_by_username(session, payload.username) is not None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Username already exists",
+            detail=errors.USERNAME_EXISTS,
         )
     if payload.student_id and get_user_by_student_id(session, payload.student_id) is not None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Student ID already exists",
+            detail=errors.STUDENT_ID_EXISTS,
         )
-    return create_user(session, payload)
+    try:
+        return create_user(session, payload)
+    except DuplicateUserError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=errors.DUPLICATE_USER,
+        ) from exc
 
 
 @router.post("/login", response_model=LoginResponse)
@@ -38,7 +46,7 @@ def login(payload: LoginRequest, session: Session = Depends(get_session)) -> Log
     if user is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid username or password",
+            detail=errors.INVALID_CREDENTIALS,
             headers={"WWW-Authenticate": "Bearer"},
         )
     return LoginResponse(

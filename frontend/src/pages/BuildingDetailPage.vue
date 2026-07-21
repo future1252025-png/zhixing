@@ -155,7 +155,7 @@ onMounted(loadBuilding)
 .place-loading i:nth-child(2) { height: 27px; animation-delay: 150ms; }
 .place-loading i:nth-child(3) { height: 19px; animation-delay: 300ms; }
 .place-loading strong { display: block; color: var(--fresh-ink); font-size: 13px; }
-.place-loading p { margin: 4px 0 0; color: var(--fresh-muted); font-size: 10px; }
+.place-loading p { margin: 4px 0 0; color: var(--fresh-muted); font-size: 12px; }
 
 .place-hero {
   position: relative;
@@ -271,8 +271,14 @@ onMounted(loadBuilding)
 }
 
 .place-walk > div { display: grid; min-width: 0; gap: 3px; }
-.place-walk small { color: var(--fresh-muted); font-size: 8px; }
-.place-walk strong { overflow: hidden; color: var(--fresh-ink); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.place-walk small { color: var(--fresh-muted); font-size: 12px; }
+.place-walk strong {
+  color: var(--fresh-ink);
+  font-size: 13px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
 
 .place-map {
   overflow: hidden;
@@ -317,8 +323,14 @@ onMounted(loadBuilding)
 }
 
 .place-facts article > div { display: grid; min-width: 0; gap: 3px; }
-.place-facts small { color: var(--fresh-muted); font-size: 8px; }
-.place-facts strong { overflow: hidden; color: var(--fresh-ink); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.place-facts small { color: var(--fresh-muted); font-size: 12px; }
+.place-facts strong {
+  color: var(--fresh-ink);
+  font-size: 14px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
 
 .place-actions {
   display: grid;
@@ -354,8 +366,8 @@ onMounted(loadBuilding)
 
 .route-action > span:first-child { color: #5a838c; }
 .place-actions button > span:nth-child(2) { display: grid; gap: 3px; }
-.place-actions strong { font-size: 12px; }
-.place-actions small { color: var(--fresh-muted); font-size: 9px; }
+.place-actions strong { font-size: 15px; }
+.place-actions small { color: var(--fresh-muted); font-size: 12px; line-height: 1.4; }
 
 @keyframes place-load {
   to { transform: scaleY(1.4); }
