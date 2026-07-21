@@ -484,6 +484,107 @@ def test_api_retry_busy_once_then_commits_once(
     assert session.commit.call_count == 1
 
 
+def test_api_helper_rolls_back_failed_shrink_and_reuses_the_same_session(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    _, SessionLocal = client_and_session
+    with SessionLocal() as session:
+        user = User(
+            username="helper-shrink",
+            student_id="helper-shrink-2026",
+            nickname="Helper Shrink",
+            password_hash="unused",
+            role="student",
+        )
+        building = Building(
+            name="Helper building",
+            type="teaching",
+            description="test",
+            latitude=0,
+            longitude=0,
+            map_x=0,
+            map_y=0,
+        )
+        session.add_all([user, building])
+        session.flush()
+        user_id = user.id
+        session.add_all(
+            [
+                SemesterSetting(
+                    user_id=user_id,
+                    start_date=date(2026, 8, 31),
+                    total_weeks=20,
+                ),
+                Course(
+                    user_id=user_id,
+                    course_name="Long course",
+                    weekday=1,
+                    start_time="08:00",
+                    end_time="09:40",
+                    building_id=building.id,
+                    room_name="A101",
+                    weeks="1-20",
+                ),
+            ]
+        )
+        session.commit()
+        session.rollback = Mock(wraps=session.rollback)  # type: ignore[method-assign]
+
+        with pytest.raises(BusinessError) as raised:
+            semester_api.persist_semester_setting_with_retry(
+                session,
+                user_id=user_id,
+                start_date=date(2026, 8, 31),
+                total_weeks=16,
+            )
+
+        assert raised.value.code == "semester_courses_out_of_range"
+        assert session.rollback.call_count == 1
+        assert session.in_transaction() is False
+
+        semester_api.persist_semester_setting_with_retry(
+            session,
+            user_id=user_id,
+            start_date=date(2026, 9, 7),
+            total_weeks=20,
+        )
+
+        assert session.rollback.call_count == 1
+        assert session.in_transaction() is False
+
+    with SessionLocal() as verification_session:
+        setting = verification_session.scalar(
+            select(SemesterSetting).where(SemesterSetting.user_id == user_id)
+        )
+        assert setting is not None
+        assert setting.start_date == date(2026, 9, 7)
+
+
+def test_api_helper_rolls_back_other_business_error_exactly_once(
+    client_and_session: tuple[TestClient, sessionmaker],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, SessionLocal = client_and_session
+    error = BusinessError(409, "other_business_error", "Other business error")
+    monkeypatch.setattr(semester_api, "upsert_setting", Mock(side_effect=error))
+
+    with SessionLocal() as session:
+        session.execute(select(1))
+        session.rollback = Mock(wraps=session.rollback)  # type: ignore[method-assign]
+
+        with pytest.raises(BusinessError) as raised:
+            semester_api.persist_semester_setting_with_retry(
+                session,
+                user_id=17,
+                start_date=date(2026, 8, 31),
+                total_weeks=20,
+            )
+
+        assert raised.value is error
+        assert session.rollback.call_count == 1
+        assert session.in_transaction() is False
+
+
 def test_api_retry_stops_after_bounded_busy_failures(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

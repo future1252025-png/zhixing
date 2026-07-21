@@ -55,6 +55,9 @@ def persist_semester_setting_with_retry(
             session.rollback()
             if not _is_retryable_sqlite_lock(error) or attempt == SQLITE_BUSY_RETRY_ATTEMPTS - 1:
                 raise
+        except Exception:
+            session.rollback()
+            raise
 
 
 def _is_retryable_sqlite_lock(error: OperationalError) -> bool:
