@@ -112,7 +112,9 @@ def test_validate_settings_rejects_missing_or_local_only_production_cors(
         "https://127.255.255.255",
         "https://0177.0.0.1",
         "https://0x7f.0.0.1",
+        "https://0.0.0.0",
         "https://[::1]",
+        "https://[::]",
         "https://[::ffff:127.0.0.1]",
     ],
 )

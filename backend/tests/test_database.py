@@ -143,6 +143,38 @@ def test_sqlite_file_path_canonicalizes_aliases_and_symlinks(
     )
 
 
+def test_plain_sqlite_percent_path_is_literal_while_file_uri_decodes_once(
+    tmp_path: Path,
+) -> None:
+    literal_path = tmp_path / "parent%20literal" / "100%file%20.db"
+    decoded_path = tmp_path / "parent literal" / "100%file .db"
+    plain_url = make_test_database_url(literal_path)
+    encoded_file_uri = make_test_database_uri_url(literal_path)
+    decoded_file_uri = make_test_database_uri_url(decoded_path)
+
+    plain_canonical = _sqlite_file_path(plain_url)
+    literal_uri_canonical = _sqlite_file_path(encoded_file_uri)
+    decoded_uri_canonical = _sqlite_file_path(decoded_file_uri)
+
+    assert plain_canonical == literal_path.resolve()
+    assert literal_uri_canonical == literal_path.resolve()
+    assert decoded_uri_canonical == decoded_path.resolve()
+    assert database_module._migration_lock_path(plain_canonical) == (
+        database_module._migration_lock_path(literal_uri_canonical)
+    )
+    assert database_module._migration_lock_path(plain_canonical) != (
+        database_module._migration_lock_path(decoded_uri_canonical)
+    )
+
+    initialize_database(plain_url)
+    initialize_database(encoded_file_uri)
+
+    assert literal_path.exists()
+    assert not decoded_path.exists()
+    assert literal_path.parent.exists()
+    assert not decoded_path.parent.exists()
+
+
 def test_migration_file_lock_is_released_when_upgrade_raises(tmp_path: Path) -> None:
     database_path = tmp_path / "exception" / "database.db"
 
@@ -496,11 +528,17 @@ def test_initialize_database_creates_custom_sqlite_parent_directories(
 def test_initialize_database_creates_file_backed_sqlite_uri_parent_directories(
     tmp_path: Path,
 ) -> None:
-    database_path = tmp_path / "custom-uri" / "nested" / "100%campusmind.db"
+    database_path = (
+        tmp_path
+        / "custom-uri%20literal"
+        / "nested%parent"
+        / "100%campusmind.db"
+    )
 
     initialize_database(make_test_database_uri_url(database_path))
 
     assert database_path.exists()
+    assert not (tmp_path / "custom-uri literal").exists()
 
 
 def test_initialize_custom_database_never_touches_default_database_parent(

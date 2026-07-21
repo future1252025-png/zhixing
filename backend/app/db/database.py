@@ -44,8 +44,8 @@ def _resolve_directory_aliases(directory: Path) -> Path:
     return _resolve_directory_aliases(directory.parent) / directory.name
 
 
-def _canonicalize_sqlite_path(raw_path: str) -> Path:
-    decoded_path = unquote(raw_path)
+def _canonicalize_sqlite_path(raw_path: str, *, decode_uri: bool = False) -> Path:
+    decoded_path = unquote(raw_path) if decode_uri else raw_path
     if (
         os.name == "nt"
         and len(decoded_path) >= 3
@@ -94,7 +94,7 @@ def _sqlite_file_path(database_url: str) -> Path | None:
     raw_path = parsed_uri.path
     if parsed_uri.netloc and parsed_uri.netloc.casefold() != "localhost":
         raw_path = f"//{parsed_uri.netloc}{raw_path}"
-    return _canonicalize_sqlite_path(raw_path)
+    return _canonicalize_sqlite_path(raw_path, decode_uri=True)
 
 
 def _ensure_sqlite_parent(database_url: str) -> Path | None:
