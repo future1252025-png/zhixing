@@ -250,6 +250,8 @@ def _is_remote_https_origin(origin: str) -> bool:
         return False
     hostname, address = normalized_host
     if address is not None:
+        if isinstance(address, IPv6Address) and address.ipv4_mapped is not None:
+            address = address.ipv4_mapped
         return not (address.is_loopback or address.is_unspecified)
     return hostname != "localhost" and not hostname.endswith(".localhost")
 
