@@ -154,6 +154,7 @@ describe('course helpers', () => {
     expect(options[0]).toBe(1)
     expect(options[15]).toBe(16)
     expect(options[19]).toBe(20)
+    expect(getTeachingWeekOptions(8)).toEqual([1, 2, 3, 4, 5, 6, 7, 8])
   })
 
   it('provides compact quick week options around the selected week', () => {

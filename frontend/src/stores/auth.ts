@@ -12,6 +12,7 @@ import {
 } from '@/api/auth'
 import { TOKEN_STORAGE_KEY } from '@/api/request'
 import { extractBusinessError, resetUnauthorizedState } from '@/api/errors'
+import { useSemesterStore } from '@/stores/semester'
 
 type AuthState = {
   token: string | null
@@ -76,6 +77,7 @@ export const useAuthStore = defineStore('auth', {
       this.token = null
       this.currentUser = null
       localStorage.removeItem(TOKEN_STORAGE_KEY)
+      useSemesterStore().reset()
     },
     logout() {
       this.clearSession()

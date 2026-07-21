@@ -52,8 +52,11 @@ export function getCourseTimeSlots(): CourseTimeSlot[] {
   return [...COURSE_TIME_SLOTS]
 }
 
-export function getTeachingWeekOptions(): number[] {
-  return Array.from({ length: MAX_TEACHING_WEEK }, (_, index) => index + 1)
+export function getTeachingWeekOptions(maxWeek = MAX_TEACHING_WEEK): number[] {
+  const safeMaxWeek = Number.isInteger(maxWeek)
+    ? Math.min(Math.max(maxWeek, 1), 30)
+    : MAX_TEACHING_WEEK
+  return Array.from({ length: safeMaxWeek }, (_, index) => index + 1)
 }
 
 export function getQuickWeekOptions(

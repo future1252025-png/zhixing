@@ -1,12 +1,16 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
-import { isAxiosError } from 'axios'
 import { showConfirmDialog, showFailToast, showSuccessToast } from 'vant'
 import { useRouter } from 'vue-router'
 
 import { deleteCourse, getCourses } from '@/api/courses'
+import { extractBusinessError } from '@/api/errors'
 import TechIcon from '@/components/TechIcon.vue'
+import SemesterSettingsCard from '@/components/course/SemesterSettingsCard.vue'
+import { useAuthStore } from '@/stores/auth'
+import { useSemesterStore } from '@/stores/semester'
 import type { Course } from '@/types/course'
+import type { SemesterUpdate } from '@/types/semester'
 import {
   buildCourseCreateQuery,
   buildCourseColorMap,
@@ -14,22 +18,32 @@ import {
   getCourseTimeSlots,
   getQuickWeekOptions,
   getTeachingWeekOptions,
-  readSelectedWeek,
-  WEEKDAYS,
-  writeSelectedWeek
+  WEEKDAYS
 } from '@/utils/course'
 
 const router = useRouter()
+const authStore = useAuthStore()
+const semesterStore = useSemesterStore()
 const courses = ref<Course[]>([])
 const loading = ref(true)
 const deletingId = ref<number | null>(null)
 const activeCourse = ref<Course | null>(null)
 const actionSheetVisible = ref(false)
 const errorMessage = ref('')
-const selectedWeek = ref(
-  typeof window === 'undefined' ? 1 : readSelectedWeek(window.localStorage)
+const semesterErrorMessage = ref('')
+const selectedWeek = computed({
+  get: () => semesterStore.browsingWeek,
+  set: (week: number) => {
+    if (week === semesterStore.browsingWeek) return
+    semesterStore.setBrowsingWeek(week)
+    if (typeof window !== 'undefined') {
+      window.scrollTo({ top: 0, behavior: 'smooth' })
+    }
+  }
+})
+const weekOptions = computed(() =>
+  getTeachingWeekOptions(semesterStore.totalWeeks ?? undefined)
 )
-const weekOptions = getTeachingWeekOptions()
 const timeSlots = getCourseTimeSlots()
 const courseActionOptions = [
   { name: '编辑课程' },
@@ -43,7 +57,13 @@ const orderedVisibleCourses = computed(() =>
     left.id - right.id
   )
 )
-const quickWeekOptions = computed(() => getQuickWeekOptions(selectedWeek.value))
+const quickWeekOptions = computed(() =>
+  getQuickWeekOptions(
+    selectedWeek.value,
+    5,
+    semesterStore.totalWeeks ?? undefined
+  )
+)
 const courseColorMap = computed(() => buildCourseColorMap(visibleCourses.value))
 const courseCountText = computed(() =>
   visibleCourses.value.length > 0 ? `${visibleCourses.value.length} 门课` : '本周暂无课'
@@ -54,13 +74,7 @@ const todayWeekday = computed(() => {
 })
 
 function getErrorMessage(error: unknown): string {
-  if (isAxiosError(error)) {
-    const detail = error.response?.data?.detail
-    if (typeof detail === 'string') {
-      return detail
-    }
-  }
-  return '课程请求失败，请稍后重试'
+  return extractBusinessError(error).message
 }
 
 async function loadCourses() {
@@ -72,6 +86,32 @@ async function loadCourses() {
     errorMessage.value = getErrorMessage(error)
   } finally {
     loading.value = false
+  }
+}
+
+async function loadSemester() {
+  const userId = authStore.currentUser?.id
+  if (!userId) {
+    semesterErrorMessage.value = '登录信息尚未加载完成'
+    return
+  }
+  semesterErrorMessage.value = ''
+  try {
+    await semesterStore.load(userId)
+  } catch (error) {
+    semesterErrorMessage.value = getErrorMessage(error)
+  }
+}
+
+async function saveSemesterSetting(payload: SemesterUpdate) {
+  semesterErrorMessage.value = ''
+  try {
+    await semesterStore.save(payload)
+    showSuccessToast('学期设置已保存')
+  } catch (error) {
+    const message = getErrorMessage(error)
+    semesterErrorMessage.value = message
+    showFailToast(message)
   }
 }
 
@@ -156,19 +196,43 @@ async function confirmDelete(course: Course) {
   }
 }
 
-watch(selectedWeek, (week) => {
-  if (typeof window !== 'undefined') {
-    writeSelectedWeek(window.localStorage, week)
+watch(
+  () => authStore.currentUser?.id,
+  (userId, previousUserId) => {
+    if (userId && userId !== previousUserId) {
+      void loadSemester()
+    }
   }
-})
+)
 
-onMounted(loadCourses)
+onMounted(() => {
+  void Promise.all([loadCourses(), loadSemester()])
+})
 </script>
 
 <template>
   <section class="page courses-page">
     <van-nav-bar title="我的课表" />
     <div class="page-content courses-content">
+      <div v-if="semesterStore.loading" class="semester-loading fresh-card" aria-live="polite">
+        <i aria-hidden="true"></i>
+        <span>正在读取真实教学周...</span>
+      </div>
+      <van-empty
+        v-else-if="semesterErrorMessage && !semesterStore.semester"
+        image="error"
+        :description="semesterErrorMessage"
+      >
+        <van-button type="primary" size="small" @click="loadSemester">重新加载学期</van-button>
+      </van-empty>
+      <SemesterSettingsCard
+        v-else
+        v-reveal="{ from: 'right', distance: 32 }"
+        :semester="semesterStore.semester"
+        :saving="semesterStore.saving"
+        @save="saveSemesterSetting"
+      />
+
       <header
         v-reveal="{ from: 'left', distance: 38, stagger: 55 }"
         class="course-hero"
@@ -178,7 +242,7 @@ onMounted(loadCourses)
           <span class="fresh-kicker">这一周，慢慢来</span>
           <div class="week-number">
             <strong>{{ String(selectedWeek).padStart(2, '0') }}</strong>
-            <span>第 {{ selectedWeek }} 周</span>
+            <span>浏览第 {{ selectedWeek }} 周</span>
           </div>
           <p>{{ courseCountText }} · 点课程可以编辑，点空白格可以添加</p>
         </div>
@@ -252,7 +316,7 @@ onMounted(loadCourses)
       >
         <header class="table-heading">
           <div><h2>一周课表</h2><p>横向滑动，看看每天的安排</p></div>
-          <span><i></i> 第 {{ selectedWeek }} 周</span>
+          <span><i></i> 浏览第 {{ selectedWeek }} 周</span>
         </header>
 
         <div class="table-scroll-hint" aria-hidden="true">
@@ -395,6 +459,26 @@ onMounted(loadCourses)
 .courses-content {
   display: grid;
   gap: 17px;
+}
+
+.semester-loading {
+  display: flex;
+  min-height: 74px;
+  align-items: center;
+  justify-content: center;
+  gap: 11px;
+  color: var(--fresh-green-dark);
+  font-size: 14px;
+  font-weight: 720;
+}
+
+.semester-loading i {
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgba(76, 119, 84, .24);
+  border-top-color: var(--fresh-green);
+  border-radius: 50%;
+  animation: semester-loading-spin 900ms linear infinite;
 }
 
 .course-hero {
@@ -1130,6 +1214,10 @@ onMounted(loadCourses)
   50% { transform: translateX(5px); }
 }
 
+@keyframes semester-loading-spin {
+  to { transform: rotate(360deg); }
+}
+
 @media (max-width: 370px) {
   .course-hero { min-height: 228px; padding: 19px; }
   .course-actions button { padding: 0 8px; }
@@ -1142,7 +1230,8 @@ onMounted(loadCourses)
 @media (prefers-reduced-motion: reduce) {
   .hero-leaves i,
   .course-loading i,
-  .table-scroll-hint i {
+  .table-scroll-hint i,
+  .semester-loading i {
     animation: none;
   }
 }
