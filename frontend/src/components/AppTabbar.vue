@@ -48,7 +48,7 @@ function handleTabClick(path: string) {
   z-index: 1000;
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  height: 70px;
+  height: 74px;
   overflow: hidden;
   border: 1px solid rgba(79, 125, 88, 0.13);
   border-radius: 25px;
@@ -64,10 +64,10 @@ function handleTabClick(path: string) {
   display: grid;
   place-content: center;
   justify-items: center;
-  gap: 4px;
-  color: #879186;
-  font-size: 11px;
-  font-weight: 680;
+  gap: 5px;
+  color: #6d7a6f;
+  font-size: 13px;
+  font-weight: 700;
   -webkit-tap-highlight-color: transparent;
   transition:
     color 380ms var(--fresh-spring),

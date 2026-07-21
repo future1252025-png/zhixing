@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
+from app.core import errors
 from app.core.errors import BusinessError
 from app.db.database import get_session
 from app.schemas.building import BuildingRead
@@ -31,7 +32,7 @@ def read_building(
 ) -> BuildingRead:
     building = get_building(session, building_id)
     if building is None:
-        raise BusinessError(404, "building_not_found", "Building not found")
+        raise BusinessError(404, "building_not_found", errors.BUILDING_NOT_FOUND)
     return building
 
 

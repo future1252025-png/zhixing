@@ -6,17 +6,15 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.config import DEFAULT_DATABASE_PATH, settings
+from app.core.security import hash_password, verify_password
 from app.db.database import create_sqlite_engine, upgrade_database
 from app.models import Building, Course, LocationPreset, Message, User
 
 
-DEMO_USER = {
-    "student_id": "20240001",
-    "username": "demo",
-    "password_hash": "demo-password-hash-placeholder",
-    "nickname": "演示同学",
-    "role": "student",
-}
+DEMO_USERNAME = "demo"
+DEMO_PASSWORD = "demo123"
+DEMO_STUDENT_ID = "20240001"
+DEMO_NICKNAME = "演示同学"
 
 
 MAP_POINTS_SEED_FILE = Path(__file__).with_name("map_points_seed.json")
@@ -145,33 +143,44 @@ DEMO_MESSAGES = [
 ]
 
 def _get_or_create_demo_user(session: Session) -> User:
-    user = session.scalar(select(User).where(User.username == DEMO_USER["username"]))
+    user = session.scalar(select(User).where(User.username == DEMO_USERNAME))
     if user is not None:
+        # Demo account must stay loginable after re-seed / legacy DB repair.
+        if not verify_password(DEMO_PASSWORD, user.password_hash):
+            user.password_hash = hash_password(DEMO_PASSWORD)
+            session.add(user)
+            session.flush()
         return user
 
-    user = User(**DEMO_USER)
+    user = User(
+        student_id=DEMO_STUDENT_ID,
+        username=DEMO_USERNAME,
+        password_hash=hash_password(DEMO_PASSWORD),
+        nickname=DEMO_NICKNAME,
+        role="student",
+    )
     session.add(user)
     session.flush()
     return user
 
 
 def _seed_buildings(session: Session) -> dict[str, Building]:
+    """Upsert buildings by stable name only — never by sequential id."""
     existing = {
         building.name: building
         for building in session.scalars(select(Building)).all()
     }
-    for index, item in enumerate(DEMO_BUILDINGS, start=1):
-        building = session.get(Building, index) or existing.get(item["name"])
+    for item in DEMO_BUILDINGS:
+        building = existing.get(item["name"])
         if building is None:
             building = Building(**item)
             session.add(building)
             session.flush()
         else:
-            old_name = building.name
             for field, value in item.items():
+                if field == "name":
+                    continue
                 setattr(building, field, value)
-            if old_name != building.name:
-                existing.pop(old_name, None)
             session.flush()
         existing[building.name] = building
     return existing
@@ -181,9 +190,9 @@ def seed_demo_data(session: Session) -> dict[str, int]:
     user = _get_or_create_demo_user(session)
     buildings = _seed_buildings(session)
 
-    for index, item in enumerate(DEMO_LOCATION_PRESETS, start=1):
+    for item in DEMO_LOCATION_PRESETS:
         building = buildings[item["building"]]
-        preset = session.get(LocationPreset, index) or session.scalar(
+        preset = session.scalar(
             select(LocationPreset).where(LocationPreset.name == item["name"])
         )
         if preset is None:
@@ -197,7 +206,6 @@ def seed_demo_data(session: Session) -> dict[str, int]:
                 )
             )
         else:
-            preset.name = item["name"]
             preset.building_id = building.id
             preset.latitude = building.latitude
             preset.longitude = building.longitude

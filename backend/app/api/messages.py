@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
+from app.core import errors
 from app.core.security import get_current_user
 from app.db.database import get_session
 from app.models import User
@@ -23,7 +24,7 @@ def require_building(session: Session, building_id: int) -> None:
     if get_building(session, building_id) is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Building not found",
+            detail=errors.BUILDING_NOT_FOUND,
         )
 
 

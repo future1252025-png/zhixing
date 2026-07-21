@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
+from app.core import errors
 from app.core.security import get_current_user
 from app.db.database import get_session
 from app.models import User
@@ -26,15 +27,15 @@ def create_schedule_suggestion(
     except CurrentBuildingNotFound as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Current building not found",
+            detail=errors.CURRENT_BUILDING_NOT_FOUND,
         ) from exc
     except NoUpcomingCourseFound as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="No upcoming course found",
+            detail=errors.NO_UPCOMING_COURSE,
         ) from exc
     except TargetBuildingNotFound as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Target building not found",
+            detail=errors.TARGET_BUILDING_NOT_FOUND,
         ) from exc

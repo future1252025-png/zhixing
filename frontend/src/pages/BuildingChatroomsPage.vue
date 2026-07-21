@@ -214,7 +214,7 @@ onMounted(loadPage)
 .channel-loading i:nth-child(2) { height: 26px; animation-delay: 150ms; }
 .channel-loading i:nth-child(3) { height: 18px; animation-delay: 300ms; }
 .channel-loading strong { display: block; color: var(--fresh-ink); font-size: 13px; }
-.channel-loading p { margin: 4px 0 0; color: var(--fresh-muted); font-size: 10px; }
+.channel-loading p { margin: 4px 0 0; color: var(--fresh-muted); font-size: 12px; }
 
 .channel-hero {
   position: relative;
@@ -258,7 +258,7 @@ onMounted(loadPage)
   max-width: 310px;
   margin: 12px 0 0;
   color: var(--fresh-text);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.7;
 }
 
@@ -304,7 +304,7 @@ onMounted(loadPage)
   gap: 8px;
 }
 
-.channel-count span { color: var(--fresh-muted); font-size: 9px; }
+.channel-count span { color: var(--fresh-muted); font-size: 13px; font-weight: 650; }
 .channel-count strong { color: var(--fresh-ink); font-family: "STKaiti", "KaiTi", serif; font-size: 32px; line-height: 0.8; }
 
 .room-search {
@@ -342,8 +342,8 @@ onMounted(loadPage)
 }
 
 .custom-room > span:nth-child(2) { display: grid; min-width: 0; gap: 3px; }
-.custom-room strong { overflow: hidden; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
-.custom-room small { color: var(--fresh-muted); font-size: 8px; }
+.custom-room strong { overflow: hidden; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
+.custom-room small { color: var(--fresh-muted); font-size: 12px; }
 
 .room-list-section {
   display: grid;
@@ -411,9 +411,10 @@ onMounted(loadPage)
   gap: 3px;
 }
 
-.room-copy small { color: var(--fresh-muted); font-size: 8px; }
+.room-copy strong { font-size: 15px; }
+.room-copy small { color: var(--fresh-muted); font-size: 13px; }
 .room-copy strong { overflow: hidden; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
-.room-copy > span { color: var(--fresh-green); font-size: 9px; }
+.room-copy > span { color: var(--fresh-green); font-size: 12px; }
 
 .room-arrow {
   position: relative;

@@ -8,6 +8,7 @@ import { createBuildingMessage, getBuildingMessages, validateMessageContent, typ
 import TechIcon from '@/components/TechIcon.vue'
 import { parseApiDateTime } from '@/utils/dateTime'
 import { haversineDistanceMeters } from '@/utils/geo'
+import { useKeyboardInset } from '@/utils/keyboardInset'
 import { MESSAGE_PAGE_SIZE, hasMoreMessagePages, mergeOlderMessages } from '@/utils/messagePagination'
 
 const MAX_MESSAGE_DISTANCE_METERS = 500
@@ -59,10 +60,24 @@ const locationText = computed(() => {
   return `${source} · ${currentLocation.value.label}${distance}`
 })
 
+const { keyboardInset } = useKeyboardInset()
+const composerLift = computed(() => Math.max(0, keyboardInset.value))
+const pageStyle = computed(() => ({
+  '--composer-lift': `${composerLift.value}px`,
+  paddingBottom: `calc(188px + env(safe-area-inset-bottom) + ${composerLift.value}px)`,
+  scrollPaddingBottom: `calc(188px + env(safe-area-inset-bottom) + ${composerLift.value}px)`
+}))
+const composerStyle = computed(() => ({
+  bottom: `calc(max(10px, env(safe-area-inset-bottom)) + ${composerLift.value}px)`
+}))
+
 function getErrorMessage(error: unknown): string {
   if (isAxiosError(error) && typeof error.response?.data?.detail === 'string') {
     const detail = error.response.data.detail
-    if (detail.toLowerCase().includes('location is too far')) {
+    if (
+      detail.includes('过远') ||
+      detail.toLowerCase().includes('location is too far')
+    ) {
       return '当前位置距离该建筑过远，不能在这里留言'
     }
     return detail
@@ -143,12 +158,27 @@ async function submitMessage() {
 function handleComposerClick() {
   if (composerDisabled.value) showFailToast(composerPrompt.value)
 }
+
+async function handleComposerFocus() {
+  await nextTick()
+  // Keep the latest messages and the input above the keyboard.
+  await scrollToBottom()
+  window.setTimeout(() => {
+    void scrollToBottom()
+  }, 280)
+}
+
 onMounted(loadPage)
 watch(() => route.query.room_name, () => { void loadPage() })
+watch(composerLift, () => {
+  if (composerLift.value > 0) {
+    void scrollToBottom()
+  }
+})
 </script>
 
 <template>
-  <section class="page message-page">
+  <section class="page message-page" :style="pageStyle">
     <van-nav-bar :title="roomTitle" left-arrow @click-left="router.push(`/buildings/${buildingId}/chats`)" />
     <div class="message-content">
       <header
@@ -251,7 +281,8 @@ watch(() => route.query.room_name, () => { void loadPage() })
 
     <form
       class="message-composer"
-      :class="{ disabled: composerDisabled }"
+      :class="{ disabled: composerDisabled, 'is-lifted': composerLift > 0 }"
+      :style="composerStyle"
       @click.capture="handleComposerClick"
       @submit.prevent="submitMessage"
     >
@@ -268,6 +299,7 @@ watch(() => route.query.room_name, () => { void loadPage() })
         :disabled="composerDisabled"
         :placeholder="composerDisabled ? '先确认你在这个地点附近' : '写下此刻想留在这里的话…'"
         :border="false"
+        @focus="handleComposerFocus"
       />
       <div class="composer-actions">
         <span><i :style="{ width: `${Math.max(2, remainingCount / 2)}%` }"></i></span>
@@ -290,7 +322,7 @@ watch(() => route.query.room_name, () => { void loadPage() })
 <style scoped>
 .message-page {
   min-height: 100dvh;
-  padding-bottom: 166px;
+  /* padding-bottom / scroll-padding-bottom set inline for keyboard lift */
   background:
     radial-gradient(circle at 103% 4%, rgba(183, 167, 200, 0.14), transparent 18rem),
     radial-gradient(circle at -12% 55%, rgba(126, 166, 126, 0.1), transparent 19rem);
@@ -352,9 +384,9 @@ watch(() => route.query.room_name, () => { void loadPage() })
   gap: 3px;
 }
 
-.heading-copy small { color: #82788d; font-size: 8px; }
+.heading-copy small { color: #82788d; font-size: 12px; }
 .heading-copy strong { overflow: hidden; color: var(--fresh-ink); font-size: 17px; text-overflow: ellipsis; white-space: nowrap; }
-.heading-copy span { color: var(--fresh-muted); font-size: 9px; }
+.heading-copy span { color: var(--fresh-muted); font-size: 12px; }
 
 .message-count {
   position: relative;
@@ -370,7 +402,7 @@ watch(() => route.query.room_name, () => { void loadPage() })
   line-height: 1;
 }
 
-.message-count small { color: var(--fresh-muted); font-size: 8px; }
+.message-count small { color: var(--fresh-muted); font-size: 12px; }
 
 .message-sun {
   position: absolute;
@@ -451,39 +483,56 @@ watch(() => route.query.room_name, () => { void loadPage() })
 .location-copy {
   display: grid;
   min-width: 0;
-  gap: 3px;
+  gap: 4px;
 }
 
-.location-copy small { color: var(--fresh-green); font-size: 8px; }
-.location-copy strong { color: var(--fresh-ink); font-size: 12px; }
-.location-copy p { overflow: hidden; margin: 0; color: var(--fresh-muted); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
-.location-copy > span { color: var(--fresh-muted); font-size: 8px; }
+.location-copy small { color: var(--fresh-green); font-size: 12px; font-weight: 720; }
+.location-copy strong { color: var(--fresh-ink); font-size: 15px; line-height: 1.35; }
+.location-copy p {
+  overflow: hidden;
+  margin: 0;
+  color: var(--fresh-muted);
+  font-size: 13px;
+  line-height: 1.45;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.location-copy > span { color: var(--fresh-muted); font-size: 12px; }
 
 .location-actions {
   display: flex;
   grid-column: 1 / -1;
-  gap: 7px;
-  padding-top: 5px;
+  gap: 8px;
+  padding-top: 6px;
 }
 
 .location-actions button {
   display: flex;
   flex: 1;
-  min-height: 37px;
+  min-height: 44px;
   align-items: center;
   justify-content: center;
   gap: 6px;
   border: 1px solid var(--fresh-line);
-  border-radius: 13px;
+  border-radius: 14px;
   background: #fafbf6;
   color: var(--fresh-text);
   cursor: pointer;
-  font-size: 9px;
-  font-weight: 700;
+  font-size: 13px;
+  font-weight: 720;
 }
 
+/* Primary: browser locate */
 .location-actions button:first-child {
+  border-color: var(--fresh-green);
+  background: var(--fresh-green);
+  color: #fff;
+}
+
+/* Secondary: use building location */
+.location-actions button:last-child {
   border-color: #a9c1ad;
+  background: #fff;
   color: var(--fresh-green-dark);
 }
 
@@ -528,7 +577,7 @@ watch(() => route.query.room_name, () => { void loadPage() })
 
 .messages-loading > div i:nth-child(2) { height: 23px; animation-delay: 140ms; }
 .messages-loading > div i:nth-child(3) { height: 16px; animation-delay: 280ms; }
-.messages-loading strong { color: var(--fresh-ink); font-size: 11px; }
+.messages-loading strong { color: var(--fresh-ink); font-size: 12px; }
 
 .message-skeleton {
   display: block;
@@ -566,14 +615,15 @@ watch(() => route.query.room_name, () => { void loadPage() })
 
 .load-more-button {
   justify-self: center;
-  min-height: 32px;
+  min-height: 40px;
   border: 1px solid var(--fresh-line);
   border-radius: 999px;
   background: #fafbf6;
-  color: var(--fresh-muted);
+  color: var(--fresh-text);
   cursor: pointer;
-  font-size: 9px;
-  padding: 0 12px;
+  font-size: 13px;
+  font-weight: 650;
+  padding: 0 14px;
 }
 
 .message-row {
@@ -586,7 +636,8 @@ watch(() => route.query.room_name, () => { void loadPage() })
   align-items: center;
   gap: 8px;
   color: var(--fresh-muted);
-  font-size: 8px;
+  font-size: 12px;
+  flex-wrap: wrap;
 }
 
 .message-author {
@@ -606,14 +657,14 @@ watch(() => route.query.room_name, () => { void loadPage() })
 }
 
 .message-row p {
-  max-width: 90%;
+  max-width: 92%;
   margin: 0;
   border-radius: 8px 19px 19px 19px;
   background: #fff;
   color: var(--fresh-ink);
-  font-size: 12px;
-  line-height: 1.7;
-  padding: 11px 13px;
+  font-size: 15px;
+  line-height: 1.65;
+  padding: 12px 14px;
   box-shadow: 0 7px 19px rgba(49, 72, 49, 0.07);
   overflow-wrap: anywhere;
 }
@@ -631,6 +682,12 @@ watch(() => route.query.room_name, () => { void loadPage() })
   padding: 10px 12px 11px;
   box-shadow: 0 18px 48px rgba(49, 72, 49, 0.16);
   backdrop-filter: blur(16px);
+  transition: bottom 180ms ease;
+}
+
+.message-composer.is-lifted {
+  border-radius: 20px 20px 16px 16px;
+  box-shadow: 0 10px 28px rgba(49, 72, 49, 0.2);
 }
 
 .message-composer.disabled {
@@ -642,9 +699,14 @@ watch(() => route.query.room_name, () => { void loadPage() })
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 0 3px 5px;
-  color: var(--fresh-muted);
-  font-size: 8px;
+  padding: 0 3px 6px;
+  color: var(--fresh-text);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.message-composer.disabled .composer-status {
+  color: #8a5b3d;
 }
 
 .composer-status > span {
@@ -666,10 +728,15 @@ watch(() => route.query.room_name, () => { void loadPage() })
 }
 
 .message-composer :deep(.van-cell) {
-  min-height: 42px;
+  min-height: 48px;
   border-radius: 15px;
   background: #f7f9f3;
-  padding: 8px 10px;
+  padding: 10px 12px;
+}
+
+.message-composer :deep(.van-field__control) {
+  font-size: 16px;
+  line-height: 1.45;
 }
 
 .composer-actions {
@@ -696,8 +763,9 @@ watch(() => route.query.room_name, () => { void loadPage() })
 }
 
 .composer-actions :deep(.van-button) {
-  min-height: 36px;
-  padding: 0 13px;
+  min-height: 44px;
+  padding: 0 16px;
+  font-size: 14px;
 }
 
 @keyframes location-ring {

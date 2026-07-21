@@ -48,6 +48,10 @@ const courseColorMap = computed(() => buildCourseColorMap(visibleCourses.value))
 const courseCountText = computed(() =>
   visibleCourses.value.length > 0 ? `${visibleCourses.value.length} 门课` : '本周暂无课'
 )
+const todayWeekday = computed(() => {
+  const day = new Date().getDay()
+  return day === 0 ? 7 : day
+})
 
 function getErrorMessage(error: unknown): string {
   if (isAxiosError(error)) {
@@ -265,10 +269,11 @@ onMounted(loadCourses)
               v-for="weekday in WEEKDAYS"
               :key="weekday.value"
               class="weekday-head"
+              :class="{ 'is-today': weekday.value === todayWeekday }"
               role="columnheader"
             >
               <small>{{ weekday.label.slice(-1) }}</small>
-              <span>{{ weekday.value }}</span>
+              <span>{{ weekday.value === todayWeekday ? '今' : weekday.value }}</span>
             </div>
 
             <template v-for="slot in timeSlots" :key="slot.section">
@@ -283,7 +288,10 @@ onMounted(loadCourses)
                 v-for="weekday in WEEKDAYS"
                 :key="`${slot.section}-${weekday.value}`"
                 class="course-cell"
-                :class="{ 'has-course': getCellCourses(weekday.value, slot).length > 0 }"
+                :class="{
+                  'has-course': getCellCourses(weekday.value, slot).length > 0,
+                  'is-today': weekday.value === todayWeekday
+                }"
                 role="gridcell"
               >
                 <button
@@ -393,14 +401,14 @@ onMounted(loadCourses)
   position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  min-height: 244px;
+  min-height: 168px;
   align-items: end;
   overflow: hidden;
-  border-radius: 33px 33px 25px 33px;
+  border-radius: 28px 28px 22px 28px;
   background:
     linear-gradient(155deg, rgba(255, 255, 255, 0.38), transparent 45%),
     #e6eee0;
-  padding: 23px;
+  padding: 18px;
   box-shadow: var(--fresh-shadow-soft);
 }
 
@@ -423,17 +431,17 @@ onMounted(loadCourses)
 .week-number {
   display: flex;
   align-items: flex-end;
-  gap: 13px;
-  margin-top: 16px;
+  gap: 10px;
+  margin-top: 10px;
 }
 
 .week-number strong {
   color: var(--fresh-ink);
   font-family: "STKaiti", "KaiTi", "PingFang SC", sans-serif;
-  font-size: clamp(60px, 17vw, 83px);
+  font-size: clamp(40px, 12vw, 52px);
   font-weight: 690;
-  line-height: 0.78;
-  letter-spacing: -0.08em;
+  line-height: 0.85;
+  letter-spacing: -0.06em;
 }
 
 .week-number span {
@@ -443,9 +451,9 @@ onMounted(loadCourses)
 }
 
 .course-hero-copy p {
-  margin: 18px 0 0;
+  margin: 12px 0 0;
   color: var(--fresh-text);
-  font-size: 11px;
+  font-size: 13px;
 }
 
 .course-actions {
@@ -458,7 +466,7 @@ onMounted(loadCourses)
 
 .course-actions button {
   display: flex;
-  min-height: 39px;
+  min-height: 44px;
   align-items: center;
   gap: 6px;
   border: 1px solid rgba(79, 125, 88, 0.17);
@@ -466,9 +474,9 @@ onMounted(loadCourses)
   background: rgba(255, 255, 255, 0.56);
   color: var(--fresh-green-dark);
   cursor: pointer;
-  font-size: 10px;
+  font-size: 13px;
   font-weight: 720;
-  padding: 0 10px;
+  padding: 0 12px;
 }
 
 .course-actions button:last-child {
@@ -525,7 +533,7 @@ onMounted(loadCourses)
 
 .week-book-heading small {
   color: var(--fresh-muted);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .week-book-heading label {
@@ -545,7 +553,7 @@ onMounted(loadCourses)
   outline: none;
   background: transparent;
   color: inherit;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 720;
 }
 
@@ -578,7 +586,7 @@ onMounted(loadCourses)
 
 .week-switcher button small {
   margin-top: 3px;
-  font-size: 9px;
+  font-size: 12px;
 }
 
 .week-switcher button i {
@@ -612,7 +620,7 @@ onMounted(loadCourses)
   border-radius: var(--fresh-radius);
   background: rgba(255, 253, 248, 0.62);
   color: var(--fresh-muted);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .course-loading > span {
@@ -656,7 +664,7 @@ onMounted(loadCourses)
 .table-heading p {
   margin: 4px 0 0;
   color: var(--fresh-muted);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .table-heading > span {
@@ -664,7 +672,7 @@ onMounted(loadCourses)
   align-items: center;
   gap: 6px;
   color: var(--fresh-green-dark);
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 720;
 }
 
@@ -682,7 +690,7 @@ onMounted(loadCourses)
   gap: 7px;
   padding: 0 17px 8px;
   color: var(--fresh-muted);
-  font-size: 8px;
+  font-size: 12px;
 }
 
 .table-scroll-hint i {
@@ -739,7 +747,7 @@ onMounted(loadCourses)
   place-items: center;
   background: #edf2e9;
   color: var(--fresh-green-dark);
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 720;
 }
 
@@ -752,15 +760,25 @@ onMounted(loadCourses)
   color: var(--fresh-text);
 }
 
+.weekday-head.is-today {
+  background: #e5f0e2;
+  color: var(--fresh-green-dark);
+  box-shadow: inset 0 -3px 0 var(--fresh-green);
+}
+
 .weekday-head small {
-  font-size: 11px;
-  font-weight: 720;
+  font-size: 13px;
+  font-weight: 760;
 }
 
 .weekday-head span {
-  color: #a3ada2;
+  color: #6d7a6f;
   font-family: ui-monospace, monospace;
-  font-size: 8px;
+  font-size: 12px;
+}
+
+.weekday-head.is-today span {
+  color: var(--fresh-green-dark);
 }
 
 .time-cell {
@@ -784,7 +802,9 @@ onMounted(loadCourses)
 }
 
 .time-cell time {
-  font-size: 7px;
+  font-size: 11px;
+  font-weight: 650;
+  color: var(--fresh-text);
 }
 
 .time-cell i {
@@ -809,6 +829,10 @@ onMounted(loadCourses)
   background: #f8faf5;
 }
 
+.course-cell.is-today {
+  background: #f3f8f0;
+}
+
 .empty-cell-button {
   position: absolute;
   inset: 0;
@@ -823,13 +847,13 @@ onMounted(loadCourses)
 
 .empty-cell-button span {
   display: grid;
-  width: 24px;
-  height: 24px;
+  width: 28px;
+  height: 28px;
   place-items: center;
   border-radius: 50%;
   background: #edf4e8;
   color: #728d70;
-  font-size: 15px;
+  font-size: 18px;
   transition:
     background 220ms var(--fresh-spring),
     color 220ms var(--fresh-spring),
@@ -874,7 +898,7 @@ onMounted(loadCourses)
 .course-content strong {
   display: -webkit-box;
   overflow: hidden;
-  font-size: 11px;
+  font-size: 13px;
   line-height: 1.35;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
@@ -887,7 +911,7 @@ onMounted(loadCourses)
   gap: 3px;
   margin-top: 5px;
   color: var(--fresh-muted);
-  font-size: 8px;
+  font-size: 12px;
 }
 
 .compact-location > i {
@@ -904,7 +928,7 @@ onMounted(loadCourses)
 .compact-location b {
   display: -webkit-box;
   overflow: hidden;
-  font-size: 8px;
+  font-size: 12px;
   font-weight: 650;
   line-height: 1.25;
   overflow-wrap: anywhere;
@@ -915,7 +939,7 @@ onMounted(loadCourses)
 .compact-location small {
   overflow: hidden;
   color: var(--fresh-ink);
-  font-size: 8px;
+  font-size: 12px;
   font-weight: 760;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -924,7 +948,7 @@ onMounted(loadCourses)
 .course-content time {
   margin-top: auto;
   color: color-mix(in srgb, var(--course-accent) 72%, var(--fresh-ink));
-  font-size: 7px;
+  font-size: 12px;
   font-weight: 720;
 }
 
@@ -946,7 +970,7 @@ onMounted(loadCourses)
 
 .course-place-index > header span {
   color: var(--fresh-green);
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 760;
 }
 
@@ -958,7 +982,7 @@ onMounted(loadCourses)
 
 .course-place-index > header > small {
   color: var(--fresh-muted);
-  font-size: 8px;
+  font-size: 12px;
 }
 
 .place-course-list {
@@ -988,7 +1012,7 @@ onMounted(loadCourses)
   border-radius: 12px;
   background: var(--fresh-mint);
   color: var(--fresh-green-dark);
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 760;
   padding: 0 7px;
 }
@@ -1001,7 +1025,7 @@ onMounted(loadCourses)
 
 .place-course-copy > strong {
   color: var(--fresh-ink);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .place-course-copy > span {
@@ -1009,7 +1033,7 @@ onMounted(loadCourses)
   align-items: flex-start;
   gap: 4px;
   color: var(--fresh-green-dark);
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1.4;
 }
 
@@ -1020,7 +1044,7 @@ onMounted(loadCourses)
 
 .place-course-copy small {
   color: var(--fresh-text);
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 700;
 }
 
@@ -1029,7 +1053,7 @@ onMounted(loadCourses)
   border-radius: 9px;
   background: #eef3e9;
   color: var(--fresh-text);
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 720;
   padding: 6px 7px;
 }
@@ -1066,8 +1090,8 @@ onMounted(loadCourses)
   color: var(--fresh-green-dark);
 }
 
-.empty-week strong { color: var(--fresh-ink); font-size: 12px; }
-.empty-week p { margin: 3px 0 0; color: var(--fresh-muted); font-size: 9px; }
+.empty-week strong { color: var(--fresh-ink); font-size: 15px; }
+.empty-week p { margin: 5px 0 0; color: var(--fresh-muted); font-size: 13px; line-height: 1.55; }
 
 .empty-week button {
   min-height: 34px;
@@ -1076,7 +1100,7 @@ onMounted(loadCourses)
   background: #fff;
   color: var(--fresh-green-dark);
   cursor: pointer;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 720;
   padding: 0 10px;
 }

@@ -3,9 +3,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from types import MappingProxyType
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.engine import Engine
-from sqlalchemy import event
 from sqlalchemy import inspect
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
@@ -21,7 +20,7 @@ def create_sqlite_engine(database_url: str = settings.database_url) -> Engine:
         database_url,
         connect_args={"check_same_thread": False},
     )
-    if database_url.startswith("sqlite:///"):
+    if database_url.startswith("sqlite"):
         configure_sqlite_pragmas(sqlite_engine)
     return sqlite_engine
 
@@ -42,10 +41,18 @@ SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
 
 def init_db(bind: Engine | None = None) -> None:
+    """Initialize schema.
+
+    - With an explicit bind (tests): create tables from models (fast, isolated).
+    - Default engine (app runtime): Alembic migrations to head.
+    """
     from app import models  # noqa: F401
 
-    target_engine = bind or engine
-    Base.metadata.create_all(bind=target_engine)
+    if bind is not None:
+        Base.metadata.create_all(bind=bind)
+        return
+
+    upgrade_database(settings.database_url)
 
 
 @dataclass(frozen=True)

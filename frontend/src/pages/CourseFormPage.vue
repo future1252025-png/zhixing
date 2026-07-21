@@ -19,6 +19,7 @@ import {
   parseWeeksRangeToPicker,
   validateCourseForm
 } from '@/utils/course'
+import { useKeyboardAwarePage } from '@/utils/keyboardInset'
 
 const route = useRoute()
 const router = useRouter()
@@ -32,6 +33,7 @@ const weekOptions = getTeachingWeekOptions()
 const weekRangeStart = ref(1)
 const weekRangeEnd = ref(16)
 const buildingKeyword = ref('')
+const { pageStyle, onFieldFocus } = useKeyboardAwarePage({ basePaddingPx: 34 })
 
 const courseId = computed(() => {
   const id = Number(route.params.id)
@@ -149,7 +151,7 @@ onMounted(loadFormData)
   <section class="page course-form-page">
     <van-nav-bar :title="pageTitle" left-arrow @click-left="router.push('/courses')" />
 
-    <main class="page-content form-content">
+    <main class="page-content form-content" :style="pageStyle" @focusin="onFieldFocus">
       <header v-reveal="{ from: 'left', distance: 34, stagger: 45 }" class="form-hero">
         <div class="hero-copy">
           <span class="eyebrow">{{ isEdit ? '整理旧笔记' : '写下一门新课' }}</span>
@@ -558,7 +560,7 @@ onMounted(loadFormData)
   font-weight: 700;
 }
 .sheet-heading h2 { margin: 0; color: #354a39; font-size: 19px; }
-.sheet-heading p { margin: 4px 0 0; color: #849087; font-size: 11px; }
+.sheet-heading p { margin: 4px 0 0; color: #849087; font-size: 13px; }
 .tape {
   position: absolute;
   top: -23px;
@@ -585,7 +587,7 @@ onMounted(loadFormData)
 }
 .form-sheet :deep(.van-cell::after) { display: none; }
 .form-sheet :deep(.van-field__label) { width: 74px; color: #65736a; font-size: 13px; }
-.form-sheet :deep(.van-field__control) { color: #2f4234; font-size: 14px; }
+.form-sheet :deep(.van-field__control) { color: #2f4234; font-size: 16px; }
 
 .form-select,
 .building-search input {
@@ -614,7 +616,7 @@ onMounted(loadFormData)
 }
 .week-planner-title { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
 .week-planner-title strong { color: #486248; font-size: 13px; }
-.week-planner-title span { color: #899488; font-size: 10px; }
+.week-planner-title span { color: #899488; font-size: 13px; }
 .week-range {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 26px minmax(0, 1fr) auto;
@@ -623,7 +625,7 @@ onMounted(loadFormData)
   margin-top: 12px;
 }
 .week-range label { display: grid; gap: 6px; }
-.week-range label > span { color: #718171; font-size: 10px; }
+.week-range label > span { color: #718171; font-size: 13px; }
 .range-path { display: grid; height: 40px; place-items: center; }
 .range-path i { width: 17px; height: 2px; border-radius: 2px; background: #a7bfa0; }
 .write-range {
@@ -637,12 +639,12 @@ onMounted(loadFormData)
 }
 .week-presets { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 11px; }
 .week-presets button {
-  min-height: 34px;
+  min-height: 44px;
   border: 1px solid #d6e3d1;
   border-radius: 99px;
   background: #fffdf8;
   color: #5e735e;
-  font-size: 11px;
+  font-size: 12px;
   padding: 0 12px;
   transition: transform .2s ease, background .2s ease, color .2s ease;
 }
@@ -673,7 +675,8 @@ onMounted(loadFormData)
   transform: translateY(-52%);
 }
 .building-search input { padding-left: 36px; }
-.building-picker small { color: #899388; font-size: 10px; }
+.building-picker strong { font-size: 15px; }
+.building-picker small { color: #899388; font-size: 13px; }
 
 .form-actions {
   display: grid;
@@ -688,7 +691,7 @@ onMounted(loadFormData)
 }
 .form-actions > div { grid-row: 1 / 3; }
 .form-actions strong { color: #405642; font-size: 15px; }
-.form-actions p { margin: 5px 0 0; color: #7f8c80; font-size: 11px; }
+.form-actions p { margin: 5px 0 0; color: #7f8c80; font-size: 13px; line-height: 1.5; }
 
 @keyframes notebook-float {
   0%, 100% { transform: rotate(3deg) translateY(0); }

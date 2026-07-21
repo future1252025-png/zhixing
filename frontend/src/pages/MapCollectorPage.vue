@@ -1047,7 +1047,7 @@ onBeforeUnmount(() => {
   background: #1f6feb;
   box-shadow: 0 6px 14px rgb(15 23 42 / 24%);
   color: #ffffff;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 800;
 }
 
@@ -1061,7 +1061,7 @@ onBeforeUnmount(() => {
   background: #13a46b;
   box-shadow: 0 6px 14px rgb(15 23 42 / 24%);
   color: #ffffff;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 800;
 }
 

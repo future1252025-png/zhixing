@@ -78,7 +78,7 @@ def test_get_missing_building_returns_404(seeded_client: TestClient) -> None:
     assert response.status_code == 404
     assert response.json() == {
         "code": "building_not_found",
-        "message": "Building not found",
+        "message": "建筑不存在",
         "fields": [],
         "details": {},
     }

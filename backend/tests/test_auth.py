@@ -76,7 +76,7 @@ def test_register_duplicate_username_fails(
 
     assert first.status_code == 201
     assert second.status_code == 400
-    assert second.json()["detail"] == "Username already exists"
+    assert second.json()["detail"] == "用户名已存在"
 
 
 def test_login_success_returns_bearer_token(
@@ -110,7 +110,7 @@ def test_login_wrong_password_fails(
     )
 
     assert response.status_code == 401
-    assert response.json()["detail"] == "Invalid username or password"
+    assert response.json()["detail"] == "用户名或密码错误"
 
 
 def test_me_with_valid_token_returns_current_user(
@@ -202,3 +202,28 @@ def test_update_profile_requires_login(
     )
 
     assert response.status_code == 401
+
+
+def test_verify_password_rejects_invalid_hash_without_raising() -> None:
+    from app.core.security import verify_password
+
+    assert verify_password("demo123", "demo-password-hash-placeholder") is False
+    assert verify_password("demo123", "") is False
+
+
+def test_demo_seed_user_can_login(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    from app.db.seed import DEMO_PASSWORD, DEMO_USERNAME, seed_demo_data
+
+    client, SessionLocal = client_and_session
+    with SessionLocal() as session:
+        seed_demo_data(session)
+
+    response = client.post(
+        "/api/auth/login",
+        json={"username": DEMO_USERNAME, "password": DEMO_PASSWORD},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["user"]["username"] == DEMO_USERNAME

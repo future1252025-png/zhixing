@@ -110,6 +110,7 @@ def add_course(
     weekday: int,
     start_time: str,
     end_time: str = "11:40",
+    weeks: str | None = None,
 ) -> Course:
     course = Course(
         user_id=user.id,
@@ -119,6 +120,7 @@ def add_course(
         end_time=end_time,
         building_id=building.id,
         room_name="A101",
+        weeks=weeks,
     )
     session.add(course)
     session.commit()
@@ -221,7 +223,7 @@ def test_schedule_suggestion_without_courses_returns_404(
     )
 
     assert response.status_code == 404
-    assert response.json()["detail"] == "No upcoming course found"
+    assert response.json()["detail"] == "暂无后续课程"
 
 
 def test_schedule_suggestion_with_missing_current_building_returns_404(
@@ -360,3 +362,95 @@ def test_departure_status_levels() -> None:
     assert get_departure_status(now, datetime(2026, 5, 29, 8, 6)) == "normal"
     assert get_departure_status(now, datetime(2026, 5, 29, 8, 4)) == "tight"
     assert get_departure_status(now, datetime(2026, 5, 29, 7, 59)) == "likely_late"
+
+
+def test_find_next_course_skips_inactive_teaching_weeks(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    _, SessionLocal = client_and_session
+    # Friday of teaching week 8
+    now = datetime(2026, 5, 29, 12, 0)
+
+    with SessionLocal() as session:
+        user = create_service_user(session, "week_filter_user")
+        building = session.query(Building).first()
+        assert building is not None
+        add_course(
+            session,
+            user,
+            building,
+            course_name="Only First Half",
+            weekday=1,  # next Monday would be week 9
+            start_time="10:00",
+            weeks="1-8",
+        )
+        later = add_course(
+            session,
+            user,
+            building,
+            course_name="Only Second Half",
+            weekday=1,
+            start_time="14:00",
+            weeks="9-16",
+        )
+
+        result = find_next_course(session, user.id, now=now, current_week=8)
+
+    assert result is not None
+    assert result.course.id == later.id
+    assert result.course.course_name == "Only Second Half"
+    assert result.teaching_week == 9
+    assert result.starts_at == datetime(2026, 6, 1, 14, 0)
+
+
+def test_find_next_course_looks_beyond_one_week_for_later_weeks(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    _, SessionLocal = client_and_session
+    now = datetime(2026, 5, 29, 9, 0)  # Friday, treat as teaching week 1
+
+    with SessionLocal() as session:
+        user = create_service_user(session, "lookahead_user")
+        building = session.query(Building).first()
+        assert building is not None
+        target = add_course(
+            session,
+            user,
+            building,
+            course_name="Late Semester Only",
+            weekday=1,
+            start_time="08:00",
+            weeks="9-16",
+        )
+
+        result = find_next_course(session, user.id, now=now, current_week=1)
+
+    assert result is not None
+    assert result.course.id == target.id
+    assert result.teaching_week == 9
+
+
+def test_schedule_suggestion_accepts_current_week(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    client, _ = client_and_session
+    from_building_id, target_building_id = first_two_building_ids(client)
+    headers = auth_headers(client, "week_api_user")
+    created = client.post(
+        "/api/courses",
+        json=create_course_payload(target_building_id, weeks="9-16"),
+        headers=headers,
+    )
+    assert created.status_code == 201
+
+    response = client.post(
+        "/api/schedule/suggestion",
+        json={"current_building_id": from_building_id, "current_week": 9},
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["current_week"] == 9
+    assert data["next_course"]["weeks"] == "9-16"
+    assert data["next_course"]["teaching_week"] is not None

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { reactive, ref } from 'vue'
+import { computed, reactive, ref } from 'vue'
 import { isAxiosError } from 'axios'
 import { showFailToast, showSuccessToast } from 'vant'
 import { useRoute, useRouter } from 'vue-router'
@@ -7,6 +7,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { getCourses } from '@/api/courses'
 import TechIcon from '@/components/TechIcon.vue'
 import { useAuthStore } from '@/stores/auth'
+import { useKeyboardAwarePage } from '@/utils/keyboardInset'
 import { prepareLoginIntro } from '@/utils/loginIntro'
 
 const router = useRouter()
@@ -14,6 +15,11 @@ const route = useRoute()
 const authStore = useAuthStore()
 const submitting = ref(false)
 const form = reactive({ username: '', password: '' })
+const { keyboardInset, onFieldFocus } = useKeyboardAwarePage({ basePaddingPx: 24 })
+const pageStyle = computed(() => ({
+  paddingBottom: `calc(24px + env(safe-area-inset-bottom, 0px) + ${keyboardInset.value}px)`,
+  scrollPaddingBottom: `calc(24px + env(safe-area-inset-bottom, 0px) + ${keyboardInset.value}px)`
+}))
 
 function getErrorMessage(error: unknown): string {
   if (isAxiosError(error)) {
@@ -40,7 +46,7 @@ async function handleSubmit() {
 </script>
 
 <template>
-  <main class="auth-page">
+  <main class="auth-page" :style="pageStyle" @focusin="onFieldFocus">
     <span class="wash wash-one" aria-hidden="true"></span>
     <span class="wash wash-two" aria-hidden="true"></span>
 
@@ -203,7 +209,7 @@ async function handleSubmit() {
 .auth-brand small {
   justify-self: end;
   color: var(--fresh-muted);
-  font-size: 11px;
+  font-size: 13px;
 }
 
 .brand-mark {
@@ -244,7 +250,7 @@ async function handleSubmit() {
 
 .welcome-copy > span {
   color: var(--fresh-green-dark);
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 720;
 }
 
@@ -390,7 +396,7 @@ async function handleSubmit() {
   border-radius: 999px;
   background: rgba(255, 253, 248, 0.72);
   color: var(--fresh-muted);
-  font-size: 9px;
+  font-size: 13px;
   font-weight: 700;
   opacity: 0;
   padding: 5px 8px;
@@ -424,7 +430,7 @@ async function handleSubmit() {
 
 .card-heading span {
   color: var(--fresh-green);
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 720;
 }
 
@@ -448,6 +454,10 @@ async function handleSubmit() {
   min-height: 58px;
 }
 
+.auth-form :deep(.van-field__control) {
+  font-size: 16px;
+}
+
 .auth-form :deep(.van-field__label) {
   width: 43px;
 }
@@ -458,7 +468,7 @@ async function handleSubmit() {
   gap: 7px;
   margin: 12px 3px 0;
   color: var(--fresh-muted);
-  font-size: 10px;
+  font-size: 13px;
 }
 
 .privacy-note i {

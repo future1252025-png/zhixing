@@ -15,16 +15,18 @@ const themeVars = {
   buttonPrimaryColor: '#ffffff',
   cellBackground: 'transparent',
   cellTextColor: '#26362a',
-  cellLabelColor: '#728074',
+  cellLabelColor: '#5f6f62',
   fieldLabelColor: '#536657',
   fieldInputTextColor: '#26362a',
-  navBarTitleFontSize: '16px',
+  fieldLabelWidth: '4.2em',
+  fontSize: '15px',
+  navBarTitleFontSize: '17px',
   navBarIconColor: '#426d4b',
   background: '#f4f6ef',
   background2: '#fffdf8',
   textColor: '#26362a',
   textColor2: '#536657',
-  textColor3: '#7c897d',
+  textColor3: '#5f6f62',
   borderColor: '#dde5da'
 }
 </script>

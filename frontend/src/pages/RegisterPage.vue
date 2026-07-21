@@ -6,11 +6,13 @@ import { useRouter } from 'vue-router'
 
 import TechIcon from '@/components/TechIcon.vue'
 import { useAuthStore } from '@/stores/auth'
+import { useKeyboardAwarePage } from '@/utils/keyboardInset'
 
 const router = useRouter()
 const authStore = useAuthStore()
 const submitting = ref(false)
 const form = reactive({ username: '', password: '', nickname: '', student_id: '' })
+const { pageStyle, onFieldFocus } = useKeyboardAwarePage({ basePaddingPx: 34 })
 
 function getErrorMessage(error: unknown): string {
   if (isAxiosError(error) && typeof error.response?.data?.detail === 'string') {
@@ -42,7 +44,7 @@ async function handleSubmit() {
   <section class="page register-page">
     <van-nav-bar title="创建账号" left-arrow @click-left="router.push('/login')" />
 
-    <div class="page-content register-content">
+    <div class="page-content register-content" :style="pageStyle" @focusin="onFieldFocus">
       <header v-reveal="{ from: 'left', distance: 34 }" class="register-hero">
         <div>
           <span class="fresh-kicker">从今天开始记录</span>
@@ -261,7 +263,7 @@ async function handleSubmit() {
 
 .form-heading span {
   color: var(--fresh-green);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 720;
 }
 
@@ -309,7 +311,7 @@ async function handleSubmit() {
 .gentle-note p {
   margin: 0;
   color: var(--fresh-muted);
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1.55;
 }
 

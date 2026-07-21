@@ -359,6 +359,31 @@ def test_delete_missing_course_returns_404(
     assert response.status_code == 404
 
 
+def test_update_course_with_invalid_time_range_returns_422(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    client, _ = client_and_session
+    headers = auth_headers(client)
+    building_id = get_first_building_id(client)
+    created = client.post(
+        "/api/courses",
+        json=course_payload(building_id, start_time="08:00", end_time="09:40"),
+        headers=headers,
+    )
+    assert created.status_code == 201
+
+    response = client.put(
+        f"/api/courses/{created.json()['id']}",
+        json={"start_time": "10:00"},
+        headers=headers,
+    )
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "invalid_course_time"
+    assert response.json()["fields"] == ["start_time", "end_time"]
+    assert "end_time" in response.json()["message"].lower()
+
+
 def test_user_cannot_access_another_users_course(
     client_and_session: tuple[TestClient, sessionmaker],
 ) -> None:
