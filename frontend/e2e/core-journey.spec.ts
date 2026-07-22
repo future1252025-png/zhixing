@@ -16,7 +16,7 @@ async function settleMotion(page: Page): Promise<void> {
 
 async function screenshot(page: Page, testInfo: TestInfo, name: string): Promise<void> {
   await settleMotion(page)
-  await page.screenshot({ path: testInfo.outputPath(name), fullPage: true })
+  await page.screenshot({ path: testInfo.outputPath(name) })
 }
 
 async function expectAccessible(page: Page): Promise<void> {
@@ -131,8 +131,6 @@ test('mobile core journey keeps weeks, locations, sessions, text, and actions tr
   await page.getByTestId('preview-import').click()
   await expect(page.getByTestId('raw-location')).toHaveText('教4')
   await page.getByTestId('raw-location').scrollIntoViewIfNeeded()
-  await settleMotion(page)
-  await page.evaluate(() => window.scrollTo(0, 0))
   await screenshot(page, testInfo, 'import-needs-resolution.png')
   await page.locator('input[name="room_name"]').fill(fullImportRoom)
   const buildingSelect = page.locator('select[name="building_id"]')
@@ -147,6 +145,7 @@ test('mobile core journey keeps weeks, locations, sessions, text, and actions tr
 
   await expect(page.getByText(`湖北大学武昌校区国际教育学院 · ${fullManualRoom}`)).toBeVisible()
   await expect(page.getByText(`湖北大学(武昌主校区)-教4 · ${fullImportRoom}`)).toBeVisible()
+  await page.getByText(`湖北大学(武昌主校区)-教4 · ${fullImportRoom}`).scrollIntoViewIfNeeded()
   await screenshot(page, testInfo, 'course-list.png')
   await assertPageQuality(page)
 
@@ -166,6 +165,7 @@ test('mobile core journey keeps weeks, locations, sessions, text, and actions tr
   await page.waitForURL('**/schedule')
   await page.getByRole('button', { name: /看看什么时候出发/ }).click()
   await expect(page.getByText(`湖北大学武昌校区国际教育学院 · ${fullManualRoom}`)).toBeVisible()
+  await page.getByText(`湖北大学武昌校区国际教育学院 · ${fullManualRoom}`).scrollIntoViewIfNeeded()
   await screenshot(page, testInfo, 'departure-advice.png')
   await assertPageQuality(page)
 

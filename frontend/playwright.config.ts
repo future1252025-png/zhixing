@@ -14,6 +14,10 @@ const sharedPython = process.platform === 'win32'
   : resolve(frontendDir, '../../../backend/.venv/bin/python')
 const python = process.env.E2E_PYTHON
   ?? (existsSync(localPython) ? localPython : existsSync(sharedPython) ? sharedPython : 'python')
+const viewport = {
+  width: Number.parseInt(process.env.E2E_VIEWPORT_WIDTH ?? '390', 10),
+  height: Number.parseInt(process.env.E2E_VIEWPORT_HEIGHT ?? '844', 10)
+}
 
 export default defineConfig({
   testDir: './e2e',
@@ -26,7 +30,7 @@ export default defineConfig({
   reporter: [['list'], ['html', { open: 'never' }]],
   use: {
     baseURL: 'http://127.0.0.1:5179',
-    viewport: { width: 390, height: 844 },
+    viewport,
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure'
   },
@@ -51,7 +55,7 @@ export default defineConfig({
       name: 'mobile-chromium',
       use: {
         ...devices['Desktop Chrome'],
-        viewport: { width: 390, height: 844 }
+        viewport
       }
     }
   ]
