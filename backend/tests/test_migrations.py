@@ -140,6 +140,43 @@ def test_upgrade_adopts_complete_unversioned_legacy_database(tmp_path: Path) -> 
         engine.dispose()
 
 
+def test_upgrade_adopts_database_stamped_by_previous_initial_migration(
+    tmp_path: Path,
+) -> None:
+    database_url = make_database_url(tmp_path / "previous-version.db")
+    upgrade_to_baseline(database_url)
+    insert_legacy_course(database_url, drop_version=False)
+    engine = create_engine(database_url)
+    try:
+        with engine.begin() as connection:
+            connection.execute(text("DROP INDEX ix_messages_room_name"))
+            connection.execute(
+                text(
+                    "UPDATE alembic_version SET version_num = '0001_initial'"
+                )
+            )
+    finally:
+        engine.dispose()
+
+    upgrade_database(database_url)
+
+    engine = create_engine(database_url)
+    try:
+        inspector = inspect(engine)
+        with engine.connect() as connection:
+            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260721_03"
+            assert connection.scalar(text("SELECT COUNT(*) FROM courses")) == 1
+            assert connection.scalar(text("SELECT weeks FROM courses WHERE id = 1")) == "1-20"
+        assert {"semester_settings", "course_import_sources"} <= set(
+            inspector.get_table_names()
+        )
+        assert "ix_messages_room_name" in {
+            index["name"] for index in inspector.get_indexes("messages")
+        }
+    finally:
+        engine.dispose()
+
+
 def test_upgrade_rejects_incomplete_unversioned_legacy_schema(tmp_path: Path) -> None:
     database_url = make_database_url(tmp_path / "incomplete.db")
     upgrade_to_baseline(database_url)

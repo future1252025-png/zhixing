@@ -10,7 +10,7 @@ import time
 from types import MappingProxyType
 from urllib.parse import unquote, urlsplit
 
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine, event, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.engine.url import make_url
 from sqlalchemy import inspect
@@ -561,12 +561,26 @@ def _actual_table_signature(inspector, table_name: str) -> _TableSignature:
     )
 
 
-def _validate_unversioned_baseline(bind: Engine) -> bool:
+def _validate_unversioned_baseline(
+    bind: Engine,
+    *,
+    accepted_version: str | None = None,
+) -> bool:
     inspector = inspect(bind)
     table_names = set(inspector.get_table_names())
     baseline_tables = set(_BASELINE_SCHEMA)
 
     if "alembic_version" in table_names:
+        if accepted_version is None:
+            return False
+        with bind.connect() as connection:
+            versions = list(
+                connection.scalars(text("SELECT version_num FROM alembic_version"))
+            )
+        if versions != [accepted_version]:
+            return False
+        table_names.remove("alembic_version")
+    elif accepted_version is not None:
         return False
     if not table_names:
         return False
@@ -632,7 +646,16 @@ def _validate_unversioned_baseline(bind: Engine) -> bool:
             actual_keys = {
                 (index.name, index.columns) for index in actual.nonunique_indexes
             }
-            if expected_keys == actual_keys:
+            previous_initial_missing_room_index = (
+                accepted_version == "0001_initial"
+                and table_name == "messages"
+                and expected_keys - actual_keys
+                == {("ix_messages_room_name", ("room_name",))}
+                and not (actual_keys - expected_keys)
+            )
+            if previous_initial_missing_room_index:
+                pass
+            elif expected_keys == actual_keys:
                 details.append("索引谓词或方言选项（index predicates/dialect options）")
             else:
                 details.append("普通索引（nonunique indexes）")
@@ -659,7 +682,15 @@ def upgrade_database(database_url: str = settings.database_url) -> None:
         # Every waiter therefore re-reads the state left by the previous upgrader.
         inspection_engine = create_sqlite_engine(database_url)
         try:
-            is_unversioned_baseline = _validate_unversioned_baseline(inspection_engine)
+            is_previous_initial = _validate_unversioned_baseline(
+                inspection_engine,
+                accepted_version="0001_initial",
+            )
+            is_unversioned_baseline = (
+                False
+                if is_previous_initial
+                else _validate_unversioned_baseline(inspection_engine)
+            )
         finally:
             inspection_engine.dispose()
 
@@ -667,7 +698,29 @@ def upgrade_database(database_url: str = settings.database_url) -> None:
         config = Config(str(backend_dir / "alembic.ini"))
         config.set_main_option("script_location", str(backend_dir / "migrations"))
         config.set_main_option("sqlalchemy.url", database_url.replace("%", "%%"))
-        if is_unversioned_baseline:
+        if is_previous_initial:
+            adoption_engine = create_sqlite_engine(database_url)
+            try:
+                with adoption_engine.begin() as connection:
+                    connection.execute(
+                        text(
+                            "CREATE INDEX IF NOT EXISTS ix_messages_room_name "
+                            "ON messages (room_name)"
+                        )
+                    )
+                    result = connection.execute(
+                        text(
+                            "UPDATE alembic_version SET version_num = '20260720_00' "
+                            "WHERE version_num = '0001_initial'"
+                        )
+                    )
+                    if result.rowcount != 1:
+                        raise RuntimeError(
+                            "旧版数据库迁移标记已变化，请重新启动后再试。"
+                        )
+            finally:
+                adoption_engine.dispose()
+        elif is_unversioned_baseline:
             command.stamp(config, "20260720_00")
         command.upgrade(config, "head")
 
