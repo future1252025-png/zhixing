@@ -32,10 +32,9 @@ describe('mobile input policy', () => {
     expect(source).toMatch(/\.form-select,[\s\S]*?min-height:\s*44px;[\s\S]*?font-size:\s*16px;/)
   })
 
-  it('keeps CourseImport search and select controls at least 16px high and 44px tall', () => {
-    const source = frontendFile('src/pages/CourseImportPage.vue')
-    expect(source).toMatch(/\.building-search input \{[\s\S]*?min-height:\s*44px;[\s\S]*?font-size:\s*16px;/)
-    expect(source).toMatch(/\.form-select \{[\s\S]*?min-height:\s*44px;[\s\S]*?font-size:\s*16px;/)
+  it('keeps import mapping controls at least 16px high and 44px tall', () => {
+    const source = frontendFile('src/components/import/ImportCandidateCard.vue')
+    expect(source).toMatch(/\.mapping-panel select,[\s\S]*?\.mapping-panel input \{[\s\S]*?min-height:\s*4[4-9]px;[\s\S]*?font-size:\s*16px;/)
   })
 
   it('provides a coarse-pointer fallback for text fields, selects and textareas', () => {
@@ -71,7 +70,7 @@ describe('mobile input policy', () => {
 describe('readability policy', () => {
   it.each([
     ['#635b6b', '#fffdf8'],
-    ['#657067', '#fffdf8'],
+    ['#68716a', '#faf8f1'],
     ['#5f6e62', '#fffdf7']
   ])('keeps %s readable on %s', (foreground, background) => {
     expect(contrastRatio(foreground, background)).toBeGreaterThanOrEqual(4.5)
@@ -79,7 +78,7 @@ describe('readability policy', () => {
 
   it('applies the audited readable colors to their small-text surfaces', () => {
     expect(frontendFile('src/pages/BuildingMessagesPage.vue')).toContain('.heading-copy small { color: #635b6b;')
-    expect(frontendFile('src/pages/CourseImportPage.vue')).toContain('color: #657067; font-size: 12px;')
+    expect(frontendFile('src/components/import/ImportCandidateCard.vue')).toContain('.panel-title small { color: #68716a; font-size: 12px; }')
     expect(frontendFile('src/components/RealCampusMap.vue')).toContain('.map-selected-card div > span { color: #5f6e62;')
   })
 

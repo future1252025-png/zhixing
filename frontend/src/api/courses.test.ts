@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import request from './request'
 import {
+  commitCourseImport,
   createCourse,
   deleteCourse,
   getCourses,
@@ -95,10 +96,9 @@ describe('courses api', () => {
     const file = new File(['<table></table>'], 'schedule.html', { type: 'text/html' })
     vi.mocked(request.post).mockResolvedValue({
       data: {
-        total: 0,
-        matched_count: 0,
-        needs_review_count: 0,
-        items: []
+        file: { filename: 'schedule.html', sha256: 'a'.repeat(64), candidate_count: 0 },
+        candidates: [],
+        can_commit: false
       }
     })
 
@@ -111,6 +111,31 @@ describe('courses api', () => {
         headers: { 'Content-Type': 'multipart/form-data' }
       })
     )
-    expect(result.total).toBe(0)
+    expect(result.file.filename).toBe('schedule.html')
+  })
+
+  it('commits the original file once with one complete manifest', async () => {
+    const file = new File(['original'], 'schedule.xlsx')
+    vi.mocked(request.post).mockResolvedValue({
+      data: { created_count: 1, course_ids: [17] }
+    })
+
+    const result = await commitCourseImport(file, 'b'.repeat(64), [
+      { row_ref: 'row-1', building_id: 3, room_name: '完整实验室 301' }
+    ])
+
+    expect(request.post).toHaveBeenCalledTimes(1)
+    const [path, body] = vi.mocked(request.post).mock.calls[0]!
+    expect(path).toBe('/api/courses/import')
+    expect(body).toBeInstanceOf(FormData)
+    const form = body as FormData
+    expect(form.get('file')).toBe(file)
+    expect(JSON.parse(String(form.get('manifest')))).toEqual({
+      sha256: 'b'.repeat(64),
+      resolutions: [
+        { row_ref: 'row-1', building_id: 3, room_name: '完整实验室 301' }
+      ]
+    })
+    expect(result).toEqual({ created_count: 1, course_ids: [17] })
   })
 })
