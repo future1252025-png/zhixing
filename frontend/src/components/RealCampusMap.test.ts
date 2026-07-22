@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createApp, nextTick } from 'vue'
 
 import { isAMapConfigured, loadAMapPlugin, loadAMapSdk } from '@/utils/amap'
+import { MAP_DRAG_HOLD_DELAY_MS } from '@/utils/mapInteraction'
 import RealCampusMap from './RealCampusMap.vue'
 
 
@@ -29,6 +30,21 @@ async function settle(): Promise<void> {
   await Promise.resolve()
   await Promise.resolve()
   await nextTick()
+}
+
+function dispatchPointer(
+  target: Element,
+  type: string,
+  values: { pointerId: number; pointerType: string; clientX: number; clientY: number }
+): void {
+  const event = new Event(type, { bubbles: true, cancelable: true })
+  Object.defineProperties(event, {
+    pointerId: { value: values.pointerId },
+    pointerType: { value: values.pointerType },
+    clientX: { value: values.clientX },
+    clientY: { value: values.clientY }
+  })
+  target.dispatchEvent(event)
 }
 
 
@@ -167,5 +183,94 @@ describe('RealCampusMap async lifecycle', () => {
     expect(host.querySelectorAll('img')[1]?.getAttribute('alt')).toBe('')
 
     application.unmount()
+  })
+
+  it('requires a steady touch hold before manually panning the map', async () => {
+    vi.useFakeTimers()
+    const originalMatchMedia = window.matchMedia
+    Object.defineProperty(window, 'matchMedia', {
+      configurable: true,
+      value: vi.fn(() => ({ matches: true }))
+    })
+
+    const mapInstance = {
+      add: vi.fn(),
+      remove: vi.fn(),
+      addControl: vi.fn(),
+      on: vi.fn(),
+      off: vi.fn(),
+      getZoom: vi.fn(() => 16),
+      setCenter: vi.fn(),
+      setStatus: vi.fn(),
+      panBy: vi.fn(),
+      destroy: vi.fn()
+    }
+    const amap = {
+      Map: vi.fn(function FakeMap() {
+        return mapInstance
+      }),
+      Marker: vi.fn(),
+      Scale: vi.fn(),
+      ToolBar: vi.fn()
+    }
+    vi.mocked(loadAMapSdk).mockResolvedValue(amap)
+    vi.mocked(loadAMapPlugin).mockResolvedValue(amap)
+    const application = createApp(RealCampusMap)
+
+    try {
+      application.mount(host)
+      await settle()
+      const container = host.querySelector('.real-map-container')!
+
+      expect(amap.Map).toHaveBeenCalledWith(
+        container,
+        expect.objectContaining({ dragEnable: false })
+      )
+      dispatchPointer(container, 'pointerdown', {
+        pointerId: 6,
+        pointerType: 'mouse',
+        clientX: 18,
+        clientY: 28
+      })
+      expect(mapInstance.setStatus).toHaveBeenLastCalledWith({ dragEnable: true })
+      dispatchPointer(container, 'pointerdown', {
+        pointerId: 7,
+        pointerType: 'touch',
+        clientX: 20,
+        clientY: 30
+      })
+      await nextTick()
+      expect(mapInstance.setStatus).toHaveBeenLastCalledWith({ dragEnable: false })
+      expect(host.textContent).toContain('继续按住以拖动地图')
+      expect(mapInstance.panBy).not.toHaveBeenCalled()
+
+      await vi.advanceTimersByTimeAsync(MAP_DRAG_HOLD_DELAY_MS)
+      await nextTick()
+      expect(host.textContent).toContain('现在可以拖动地图')
+      dispatchPointer(container, 'pointermove', {
+        pointerId: 7,
+        pointerType: 'touch',
+        clientX: 34,
+        clientY: 38
+      })
+      expect(mapInstance.panBy).toHaveBeenCalledWith(14, 8, 0)
+
+      dispatchPointer(container, 'pointerup', {
+        pointerId: 7,
+        pointerType: 'touch',
+        clientX: 34,
+        clientY: 38
+      })
+      await nextTick()
+      expect(host.textContent).not.toContain('现在可以拖动地图')
+      expect(mapInstance.setStatus).toHaveBeenLastCalledWith({ dragEnable: false })
+    } finally {
+      application.unmount()
+      Object.defineProperty(window, 'matchMedia', {
+        configurable: true,
+        value: originalMatchMedia
+      })
+      vi.useRealTimers()
+    }
   })
 })

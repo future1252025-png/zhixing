@@ -8,6 +8,8 @@ import { wgs84ToGcj02 } from '@/utils/geo'
 import {
   getBuildingHitZoneSize,
   getMapInteractionLevel,
+  hasMapPointerMovedBeyondTolerance,
+  MAP_DRAG_HOLD_DELAY_MS,
   shouldShowBuildingHighlight
 } from '@/utils/mapInteraction'
 import { filterMapBuildings } from '@/utils/mapSearch'
@@ -52,10 +54,16 @@ const errorMessage = shallowRef('')
 const searchQuery = ref('')
 const selectedSearchBuildingId = ref<number | null>(null)
 const currentZoom = ref(props.zoom)
+const dragGestureState = shallowRef<'idle' | 'holding' | 'active'>('idle')
 let disposed = false
 let initializationGeneration = 0
 let zoomEndHandler: (() => void) | null = null
 let mapAccessibilityObserver: MutationObserver | null = null
+let longPressDragEnabled = false
+let dragPointerId: number | null = null
+let dragPointerStart: { x: number; y: number } | null = null
+let dragPointerLast: { x: number; y: number } | null = null
+let dragHoldTimer: ReturnType<typeof setTimeout> | null = null
 
 const hasConfig = computed(() => isAMapConfigured())
 const markerBuildings = computed(() =>
@@ -68,6 +76,104 @@ const selectedBuilding = computed(() =>
   markerBuildings.value.find((building) => building.id === selectedSearchBuildingId.value) ?? null
 )
 const interactionLevel = computed(() => getMapInteractionLevel(currentZoom.value))
+const dragGestureMessage = computed(() =>
+  dragGestureState.value === 'active' ? '现在可以拖动地图' : '继续按住以拖动地图'
+)
+
+function shouldUseLongPressDrag(): boolean {
+  return typeof window !== 'undefined' && (
+    window.matchMedia?.('(pointer: coarse)').matches ||
+    navigator.maxTouchPoints > 0
+  )
+}
+
+function setMapDragEnabled(enabled: boolean) {
+  map.value?.setStatus?.({ dragEnable: enabled })
+}
+
+function clearDragHoldTimer() {
+  if (dragHoldTimer !== null) {
+    clearTimeout(dragHoldTimer)
+    dragHoldTimer = null
+  }
+}
+
+function resetTouchDragGesture(pointerId?: number) {
+  if (pointerId !== undefined && dragPointerId !== pointerId) {
+    return
+  }
+  clearDragHoldTimer()
+  dragPointerId = null
+  dragPointerStart = null
+  dragPointerLast = null
+  dragGestureState.value = 'idle'
+  if (longPressDragEnabled) {
+    setMapDragEnabled(false)
+  }
+}
+
+function handleMapPointerDown(event: PointerEvent) {
+  if (event.pointerType === 'mouse') {
+    setMapDragEnabled(true)
+    return
+  }
+  if (!longPressDragEnabled || dragPointerId !== null) {
+    return
+  }
+
+  // Hybrid devices may have enabled native dragging during a previous mouse interaction.
+  // Touch input still needs to wait for the deliberate hold gesture.
+  setMapDragEnabled(false)
+  dragPointerId = event.pointerId
+  dragPointerStart = { x: event.clientX, y: event.clientY }
+  dragPointerLast = { x: event.clientX, y: event.clientY }
+  dragGestureState.value = 'holding'
+  clearDragHoldTimer()
+  dragHoldTimer = setTimeout(() => {
+    if (dragPointerId !== event.pointerId) {
+      return
+    }
+    dragGestureState.value = 'active'
+  }, MAP_DRAG_HOLD_DELAY_MS)
+}
+
+function handleMapPointerMove(event: PointerEvent) {
+  if (
+    dragGestureState.value === 'active' &&
+    dragPointerId === event.pointerId &&
+    dragPointerLast
+  ) {
+    event.preventDefault()
+    const deltaX = event.clientX - dragPointerLast.x
+    const deltaY = event.clientY - dragPointerLast.y
+    if (deltaX !== 0 || deltaY !== 0) {
+      map.value?.panBy?.(deltaX, deltaY, 0)
+      dragPointerLast = { x: event.clientX, y: event.clientY }
+    }
+    return
+  }
+  if (
+    dragGestureState.value !== 'holding' ||
+    dragPointerId !== event.pointerId ||
+    !dragPointerStart
+  ) {
+    return
+  }
+  if (hasMapPointerMovedBeyondTolerance(
+    dragPointerStart.x,
+    dragPointerStart.y,
+    event.clientX,
+    event.clientY
+  )) {
+    resetTouchDragGesture(event.pointerId)
+  }
+}
+
+function handleMapPointerEnd(event: PointerEvent) {
+  if (event.pointerType !== 'mouse') {
+    resetTouchDragGesture(event.pointerId)
+  }
+}
 
 function pointToLngLat(point: Pick<CampusMapPoint, 'longitude' | 'latitude'>): [number, number] {
   return wgs84ToGcj02(point.latitude, point.longitude)
@@ -353,6 +459,7 @@ async function initMap() {
       zoom: props.zoom,
       viewMode: '2D',
       resizeEnable: true,
+      dragEnable: !shouldUseLongPressDrag(),
       mapStyle: 'amap://styles/normal'
     })
     if (!initializationIsActive(generation)) {
@@ -361,6 +468,10 @@ async function initMap() {
     }
     amap.value = loadedAMap
     map.value = targetMap
+    longPressDragEnabled = shouldUseLongPressDrag()
+    if (longPressDragEnabled) {
+      setMapDragEnabled(false)
+    }
     observeGeneratedMapElements()
     void installMapControls(generation, targetMap)
     zoomEndHandler = () => {
@@ -400,6 +511,7 @@ onBeforeUnmount(() => {
   initializationGeneration += 1
   mapAccessibilityObserver?.disconnect()
   mapAccessibilityObserver = null
+  resetTouchDragGesture()
   clearWalkingRoute()
   clearOverlays()
   if (map.value) {
@@ -478,7 +590,27 @@ onBeforeUnmount(() => {
         :class="`level-${interactionLevel}`"
         :style="{ height }"
       >
-        <div ref="mapContainer" class="real-map-container" />
+        <div
+          ref="mapContainer"
+          class="real-map-container"
+          @pointerdown.capture="handleMapPointerDown"
+          @pointermove.capture="handleMapPointerMove"
+          @pointerup.capture="handleMapPointerEnd"
+          @pointercancel.capture="handleMapPointerEnd"
+          @contextmenu.prevent
+          @dragstart.prevent
+        />
+
+        <div
+          v-if="dragGestureState !== 'idle'"
+          class="map-drag-feedback"
+          :class="{ 'map-drag-feedback--active': dragGestureState === 'active' }"
+          role="status"
+          aria-live="polite"
+        >
+          <i aria-hidden="true" />
+          {{ dragGestureMessage }}
+        </div>
 
         <div v-if="loading" class="map-state map-state--loading">
           <div class="state-radar" aria-hidden="true">
@@ -1024,6 +1156,8 @@ onBeforeUnmount(() => {
 .real-map-container {
   width: 100%;
   height: 100%;
+  -webkit-touch-callout: none;
+  user-select: none;
   background:
     radial-gradient(circle at 50% 45%, #132949, #07101e 65%),
     #07101e;
@@ -2056,7 +2190,7 @@ onBeforeUnmount(() => {
   border-radius: 99px;
   background: rgba(255, 253, 247, .9);
   box-shadow: 0 3px 10px rgba(64, 83, 61, .08);
-  color: #667b67;
+  color: #566b57;
   font-family: inherit;
   font-size: 12px;
   letter-spacing: 0;
@@ -2089,6 +2223,46 @@ onBeforeUnmount(() => {
 .map-search :deep(.van-field__control) {
   caret-color: #658d61;
   font-size: 16px;
+}
+
+.real-map-container :deep(img),
+.real-map-container :deep(canvas) {
+  -webkit-user-drag: none;
+  -webkit-touch-callout: none;
+  user-select: none;
+}
+
+.map-drag-feedback {
+  position: absolute;
+  z-index: 12;
+  right: 12px;
+  bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid rgba(83, 118, 82, .2);
+  border-radius: 999px;
+  background: rgba(255, 253, 248, .92);
+  box-shadow: 0 7px 18px rgba(59, 74, 57, .14);
+  color: #415846;
+  font-size: 12px;
+  font-weight: 650;
+  padding: 8px 11px;
+  pointer-events: none;
+  backdrop-filter: blur(12px);
+}
+
+.map-drag-feedback i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #d6a758;
+  box-shadow: 0 0 0 5px rgba(214, 167, 88, .14);
+}
+
+.map-drag-feedback--active i {
+  background: #16877e;
+  box-shadow: 0 0 0 5px rgba(22, 135, 126, .14);
 }
 .map-search :deep(.van-icon-search) { filter: none; font-size: 18px; }
 .map-search :deep(.van-icon-clear) { color: #849285; }

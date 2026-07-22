@@ -1,5 +1,18 @@
 export type MapInteractionLevel = 'area' | 'mixed' | 'building'
 
+export const MAP_DRAG_HOLD_DELAY_MS = 360
+export const MAP_DRAG_MOVE_TOLERANCE_PX = 10
+
+export function hasMapPointerMovedBeyondTolerance(
+  startX: number,
+  startY: number,
+  currentX: number,
+  currentY: number,
+  tolerance = MAP_DRAG_MOVE_TOLERANCE_PX
+): boolean {
+  return Math.hypot(currentX - startX, currentY - startY) > tolerance
+}
+
 export function getMapInteractionLevel(zoom: number): MapInteractionLevel {
   if (zoom < 15.5) {
     return 'area'
