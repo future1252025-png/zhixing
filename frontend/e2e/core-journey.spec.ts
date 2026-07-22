@@ -175,22 +175,37 @@ test('mobile core journey keeps weeks, locations, sessions, text, and actions tr
   await expect(manualCourseCard.locator('time')).toHaveText('09:00—10:40')
   await expect(importedCourseCard.locator('time')).toHaveCount(0)
   await expect(page.locator('.course-place-index')).toHaveCount(0)
+  await settleMotion(page)
   await expect(page.locator('.week-head .weekday-head')).toHaveCount(7)
+  await expect(page.locator('.week-head time')).toHaveText([
+    '8/31', '9/1', '9/2', '9/3', '9/4', '9/5', '9/6'
+  ])
   await expect(page.locator('.timetable-slot').first().locator('.course-cell')).toHaveCount(7)
-  if (await page.locator('.mobile-weekday-label').first().isVisible()) {
-    await expect(page.locator('.mobile-weekday-label:visible')).toHaveCount(35)
-  } else {
-    await expect(page.locator('.mobile-weekday-label:visible')).toHaveCount(0)
-    await expect(page.locator('.week-head .weekday-head:visible')).toHaveCount(7)
-  }
+  await expect(page.locator('.week-head .weekday-head:visible')).toHaveCount(7)
   const timetableFitsViewport = await page.locator('.timetable-viewport').evaluate((viewport) =>
     viewport.scrollWidth <= viewport.clientWidth + 1
   )
   expect(timetableFitsViewport).toBe(true)
-  const courseAccents = await page.locator('.timetable-course').evaluateAll((cards) =>
-    cards.map((card) => getComputedStyle(card).getPropertyValue('--course-accent').trim())
+  const timetableBounds = await page.locator('.timetable-shell').evaluate((timetable) => {
+    const bounds = timetable.getBoundingClientRect()
+    return { left: bounds.left, right: bounds.right, viewportWidth: window.innerWidth }
+  })
+  expect(timetableBounds.left).toBeGreaterThanOrEqual(-1)
+  expect(timetableBounds.right).toBeLessThanOrEqual(timetableBounds.viewportWidth + 1)
+  const coursePalette = await page.locator('.timetable-course').evaluateAll((cards) =>
+    cards.map((card) => ({
+      subject: card.querySelector('strong')?.textContent?.trim() ?? '',
+      accent: getComputedStyle(card).getPropertyValue('--course-accent').trim()
+    }))
   )
-  expect(new Set(courseAccents).size).toBe(courseAccents.length)
+  const subjectAccents = new Map<string, Set<string>>()
+  for (const entry of coursePalette) {
+    const accents = subjectAccents.get(entry.subject) ?? new Set<string>()
+    accents.add(entry.accent)
+    subjectAccents.set(entry.subject, accents)
+  }
+  expect([...subjectAccents.values()].every((accents) => accents.size === 1)).toBe(true)
+  expect(new Set(coursePalette.map((entry) => entry.accent)).size).toBe(subjectAccents.size)
   const courseCardHeights = await page.locator('.timetable-course').evaluateAll((cards) =>
     cards.map((card) => Math.round(card.getBoundingClientRect().height))
   )
@@ -215,6 +230,13 @@ test('mobile core journey keeps weeks, locations, sessions, text, and actions tr
   const scrollBeforeWeekChange = await page.evaluate(() => window.scrollY)
   await page.locator('#courseWeekSelect').selectOption('9')
   await expect(page.locator('.week-forward-enter-active')).toHaveCount(1)
+  const weekAnimationDuration = await page.locator('.week-forward-enter-active').evaluate((stage) =>
+    Math.max(...getComputedStyle(stage).transitionDuration.split(',').map((duration) => {
+      const value = Number.parseFloat(duration)
+      return duration.trim().endsWith('ms') ? value : value * 1000
+    }))
+  )
+  expect(weekAnimationDuration).toBeGreaterThanOrEqual(700)
   await expect(page.locator('.timetable-week-stage[data-week="9"]')).toBeVisible()
   expect(await page.evaluate(() => window.scrollY)).toBe(scrollBeforeWeekChange)
   await settleMotion(page)

@@ -63,6 +63,17 @@ function normalizeLocationPart(value: string): string {
   return value.replace(/[\s·()（）\-—_]/g, '').toLocaleLowerCase('zh-Hans-CN')
 }
 
+function roomNamesTeachingBuilding(building: string, room: string): boolean {
+  const buildingNumber = building.match(/(?:^|\D)(\d+)\s*号?\s*教学楼/u)?.[1]
+  if (!buildingNumber) return false
+
+  const roomBuildingPattern = new RegExp(
+    `^教\\s*${buildingNumber}(?:\\s*[-—·]\\s*|\\s+|\\s*$)`,
+    'u'
+  )
+  return roomBuildingPattern.test(room)
+}
+
 export function formatTimetableCourseLocation(
   course: Pick<Course, 'building' | 'room_name'>
 ): string {
@@ -71,7 +82,10 @@ export function formatTimetableCourseLocation(
   const normalizedBuilding = normalizeLocationPart(building)
   const normalizedRoom = normalizeLocationPart(room)
 
-  if (normalizedBuilding && normalizedRoom.includes(normalizedBuilding)) {
+  if (
+    (normalizedBuilding && normalizedRoom.includes(normalizedBuilding)) ||
+    roomNamesTeachingBuilding(building, room)
+  ) {
     return room
   }
   return `${building} · ${room}`

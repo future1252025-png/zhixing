@@ -89,6 +89,40 @@ const todayWeekday = computed(() => {
   const day = new Date().getDay()
   return day === 0 ? 7 : day
 })
+const selectedWeekDates = computed(() => {
+  const startDate = semesterStore.semester?.start_date
+  if (!startDate) {
+    return WEEKDAYS.map((weekday) => ({
+      iso: '',
+      label: String(weekday.value)
+    }))
+  }
+
+  const [year, month, day] = startDate.split('-').map(Number)
+  const semesterStart = new Date(year, month - 1, day)
+  return WEEKDAYS.map((weekday) => {
+    const date = new Date(semesterStart)
+    date.setDate(date.getDate() + (selectedWeek.value - 1) * 7 + weekday.value - 1)
+    return {
+      iso: [
+        date.getFullYear(),
+        String(date.getMonth() + 1).padStart(2, '0'),
+        String(date.getDate()).padStart(2, '0')
+      ].join('-'),
+      label: `${date.getMonth() + 1}/${date.getDate()}`
+    }
+  })
+})
+const selectedWeekDateRange = computed(() => {
+  const first = selectedWeekDates.value[0]
+  const last = selectedWeekDates.value[6]
+  if (!first?.iso || !last?.iso) return '周一至周日'
+  return `${first.iso.replace(/-/g, '.')} — ${last.iso.replace(/-/g, '.')}`
+})
+
+function isTodayColumn(weekday: number): boolean {
+  return semesterStore.currentWeek === selectedWeek.value && weekday === todayWeekday.value
+}
 
 function getErrorMessage(error: unknown): string {
   return extractBusinessError(error).message
@@ -328,8 +362,8 @@ onMounted(() => {
         class="timetable-shell fresh-card"
       >
         <header class="table-heading">
-          <div><h2>一周课表</h2><p>周一到周日一次看全，课程名和地点完整显示</p></div>
-          <span><i></i> 浏览第 {{ selectedWeek }} 周</span>
+          <div><h2>第 {{ selectedWeek }} 周课表</h2><p>{{ selectedWeekDateRange }}</p></div>
+          <span><i></i> {{ courseCountText }}</span>
         </header>
 
         <Transition :name="weekTransitionName">
@@ -345,10 +379,17 @@ onMounted(() => {
                   v-for="weekday in WEEKDAYS"
                   :key="weekday.value"
                   class="weekday-head"
-                  :class="{ 'is-today': weekday.value === todayWeekday }"
+                  :class="{ 'is-today': isTodayColumn(weekday.value) }"
                 >
                   <small>{{ weekday.label.slice(-1) }}</small>
-                  <span>{{ weekday.value === todayWeekday ? '今' : weekday.value }}</span>
+                  <time
+                    v-if="selectedWeekDates[weekday.value - 1]?.iso"
+                    :datetime="selectedWeekDates[weekday.value - 1].iso"
+                  >
+                    {{ selectedWeekDates[weekday.value - 1].label }}
+                  </time>
+                  <span v-else>{{ weekday.value }}</span>
+                  <em v-if="isTodayColumn(weekday.value)">今</em>
                 </div>
               </div>
 
@@ -370,14 +411,9 @@ onMounted(() => {
                       class="course-cell"
                       :class="{
                         'has-course': getCellCourses(weekday.value, slot).length > 0,
-                        'is-today': weekday.value === todayWeekday
+                        'is-today': isTodayColumn(weekday.value)
                       }"
                     >
-                      <span class="mobile-weekday-label">
-                        <b>{{ weekday.label }}</b>
-                        <small v-if="weekday.value === todayWeekday">今天</small>
-                      </span>
-
                       <button
                         v-if="getCellCourses(weekday.value, slot).length === 0"
                         type="button"
@@ -398,13 +434,13 @@ onMounted(() => {
                         <button
                           type="button"
                           class="course-content"
-                          :aria-label="`${course.course_name}，${formatCourseLocation(course)}，点击查看课程操作`"
+                          :aria-label="`${weekday.label}${slot.label}，${course.course_name}，${formatCourseLocation(course)}，点击查看课程操作`"
                           :disabled="deletingId === course.id"
                           @click="openCourseActions(course)"
                         >
                           <strong>{{ course.course_name }}</strong>
                           <span class="compact-location">
-                            <van-icon name="location-o" />
+                            <span class="location-mark" aria-hidden="true">@</span>
                             <span>{{ formatTimetableCourseLocation(course) }}</span>
                           </span>
                           <time v-if="!courseUsesStandardSlotTime(course, slot)" class="exception-time">
@@ -438,8 +474,8 @@ onMounted(() => {
 <style scoped>
 .courses-page {
   background:
-    radial-gradient(circle at 105% 4%, rgba(183, 167, 200, 0.15), transparent 18rem),
-    radial-gradient(circle at -10% 48%, rgba(127, 168, 122, 0.12), transparent 19rem);
+    radial-gradient(circle at 100% 0%, rgba(153, 166, 215, 0.18), transparent 24rem),
+    linear-gradient(180deg, #f8f8f2 0%, #eef2f7 46%, #e7edf6 100%);
 }
 
 .courses-content {
@@ -720,10 +756,15 @@ onMounted(() => {
 .course-loading p { margin: 0; }
 
 .timetable-shell {
+  --time-rail: clamp(44px, 7vw, 58px);
+  --timetable-width: min(920px, calc(100vw - 12px));
   position: relative;
-  container-type: inline-size;
-  overflow: hidden;
-  padding: 0 0 11px;
+  width: var(--timetable-width);
+  justify-self: start;
+  margin-left: calc((100% - var(--timetable-width)) / 2);
+  overflow: clip;
+  border-radius: 24px;
+  padding: 0 0 8px;
 }
 
 .table-heading {
@@ -731,19 +772,20 @@ onMounted(() => {
   align-items: flex-end;
   justify-content: space-between;
   gap: 14px;
-  padding: 18px 18px 13px;
+  padding: 17px 18px 14px;
 }
 
 .table-heading h2 {
   margin: 0;
   color: var(--fresh-ink);
-  font-size: 20px;
+  font-size: clamp(20px, 3vw, 25px);
 }
 
 .table-heading p {
   margin: 4px 0 0;
   color: var(--fresh-muted);
-  font-size: 12px;
+  font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+  font-size: 11px;
 }
 
 .table-heading > span {
@@ -773,25 +815,30 @@ onMounted(() => {
 }
 
 .week-head {
+  position: sticky;
+  top: var(--van-nav-bar-height, 46px);
+  z-index: 6;
   display: grid;
-  grid-template-columns: 64px repeat(7, minmax(0, 1fr));
+  grid-template-columns: var(--time-rail) repeat(7, minmax(0, 1fr));
   width: 100%;
-  background: #fbfcf8;
+  background: rgba(246, 247, 252, 0.96);
+  box-shadow: 0 6px 14px rgba(62, 76, 99, 0.08);
+  backdrop-filter: blur(12px);
 }
 
 .timetable-grid {
   display: grid;
-  grid-template-rows: repeat(5, minmax(154px, 1fr));
+  grid-auto-rows: minmax(170px, 1fr);
   width: 100%;
-  background: #fbfcf8;
+  background: #eef1f7;
 }
 
 .timetable-slot {
   display: grid;
-  grid-template-columns: 64px minmax(0, 1fr);
+  grid-template-columns: var(--time-rail) minmax(0, 1fr);
   height: 100%;
   width: 100%;
-  border-bottom: 1px solid #e4e9e0;
+  border-bottom: 1px solid rgba(111, 126, 151, 0.16);
 }
 
 .slot-days {
@@ -805,68 +852,89 @@ onMounted(() => {
 .weekday-head,
 .time-cell,
 .course-cell {
-  border-right: 1px solid #e4e9e0;
+  border-right: 1px solid rgba(111, 126, 151, 0.14);
 }
 
 .time-head,
 .weekday-head {
-  min-height: 55px;
+  min-height: 62px;
 }
 
 .time-head {
   display: grid;
   place-items: center;
-  background: #edf2e9;
+  background: #e5eaf2;
   color: var(--fresh-green-dark);
   font-size: 12px;
   font-weight: 720;
 }
 
 .weekday-head {
-  display: flex;
+  position: relative;
+  display: grid;
   align-items: center;
   justify-content: center;
-  gap: 5px;
-  background: #f8faf4;
+  align-content: center;
+  gap: 3px;
+  background: #f6f7fb;
   color: var(--fresh-text);
+  text-align: center;
 }
 
 .weekday-head.is-today {
-  background: #e5f0e2;
+  background: #e2ece5;
   color: var(--fresh-green-dark);
   box-shadow: inset 0 -3px 0 var(--fresh-green);
 }
 
 .weekday-head small {
-  font-size: 13px;
+  font-size: clamp(12px, 2vw, 15px);
   font-weight: 760;
 }
 
-.weekday-head span {
-  color: #6d7a6f;
+.weekday-head span,
+.weekday-head time {
+  color: #536158;
   font-family: ui-monospace, monospace;
-  font-size: 12px;
+  font-size: clamp(9px, 1.45vw, 11px);
 }
 
-.weekday-head.is-today span {
+.weekday-head.is-today span,
+.weekday-head.is-today time {
   color: var(--fresh-green-dark);
+}
+
+.weekday-head em {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: grid;
+  width: 16px;
+  height: 16px;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--fresh-green);
+  color: #fff;
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 760;
 }
 
 .time-cell {
   display: grid;
-  min-height: 154px;
+  min-height: 170px;
   align-content: center;
   justify-items: center;
-  background: #edf2e9;
+  background: #e5eaf2;
   color: var(--fresh-muted);
-  padding: 8px 2px;
+  padding: 8px 1px;
 }
 
 .time-cell strong {
   margin-bottom: 7px;
   color: var(--fresh-green-dark);
   font-family: ui-monospace, monospace;
-  font-size: 17px;
+  font-size: clamp(14px, 2.5vw, 18px);
 }
 
 .time-cell time {
@@ -890,25 +958,21 @@ onMounted(() => {
 .course-cell {
   position: relative;
   display: grid;
-  min-height: 154px;
+  min-height: 170px;
   align-content: stretch;
   grid-auto-rows: minmax(0, 1fr);
-  gap: 5px;
-  background: #fbfcf8;
-  padding: 5px;
+  gap: 3px;
+  background: rgba(249, 250, 253, 0.78);
+  padding: clamp(2px, 0.7vw, 5px);
   min-width: 0;
 }
 
-.mobile-weekday-label {
-  display: none;
-}
-
 .course-cell.has-course {
-  background: #f8faf5;
+  background: rgba(240, 244, 249, 0.92);
 }
 
 .course-cell.is-today {
-  background: #f3f8f0;
+  background: rgba(229, 239, 230, 0.86);
 }
 
 .empty-cell-button {
@@ -929,9 +993,10 @@ onMounted(() => {
   height: 28px;
   place-items: center;
   border-radius: 50%;
-  background: #edf4e8;
+  background: #e2e9f0;
   color: #728d70;
-  font-size: 18px;
+  font-size: 16px;
+  opacity: 0;
   transition:
     background 220ms var(--fresh-spring),
     color 220ms var(--fresh-spring),
@@ -943,17 +1008,17 @@ onMounted(() => {
   box-sizing: border-box;
   height: 100%;
   min-width: 0;
-  border: 1px solid color-mix(in srgb, var(--course-accent) 58%, #d8e1d5);
-  border-radius: 14px 14px 11px 14px;
+  border: 1px solid color-mix(in srgb, var(--course-accent) 48%, #dbe3ee);
+  border-radius: clamp(7px, 1.5vw, 12px);
   background:
     linear-gradient(
-      145deg,
-      color-mix(in srgb, var(--course-accent) 27%, #fffdf8),
-      color-mix(in srgb, var(--course-accent) 12%, #fffdf8)
+      155deg,
+      color-mix(in srgb, var(--course-accent) 51%, #ffffff),
+      color-mix(in srgb, var(--course-accent) 35%, #edf3fb)
     );
   box-shadow:
-    inset 4px 0 0 var(--course-accent),
-    0 7px 18px color-mix(in srgb, var(--course-accent) 15%, transparent);
+    inset 0 0 0 1px rgba(255, 255, 255, 0.42),
+    0 4px 10px color-mix(in srgb, var(--course-accent) 14%, transparent);
   transition:
     box-shadow 280ms var(--fresh-spring),
     transform 280ms var(--fresh-spring);
@@ -964,60 +1029,59 @@ onMounted(() => {
   box-sizing: border-box;
   width: 100%;
   height: 100%;
-  min-height: 142px;
+  min-height: 164px;
   scroll-margin-block: 76px 108px;
   flex-direction: column;
-  align-items: stretch;
+  align-items: center;
   border: 0;
   background: transparent;
   color: var(--fresh-ink);
   cursor: pointer;
-  padding: 11px 9px;
-  text-align: left;
+  padding: clamp(6px, 1.2vw, 11px) clamp(3px, 1vw, 8px);
+  text-align: center;
 }
 
 .course-content::before {
-  width: 34px;
-  height: 5px;
-  margin-bottom: 9px;
-  border-radius: 999px;
-  background: var(--course-accent);
-  content: "";
+  content: none;
 }
 
 .course-content strong {
-  font-size: 13px;
-  line-height: 1.35;
+  font-size: clamp(10px, 1.8vw, 14px);
+  line-height: 1.4;
+  font-weight: 780;
   overflow-wrap: anywhere;
 }
 
 .compact-location {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: start;
-  gap: 3px;
-  margin-top: 5px;
-  color: var(--fresh-muted);
-  font-size: 12px;
-  line-height: 1.35;
-}
-
-.compact-location > i {
-  margin-top: 1px;
-  color: color-mix(in srgb, var(--course-accent) 76%, var(--fresh-ink));
-}
-
-.compact-location > span {
+  display: flex;
+  width: 100%;
   min-width: 0;
-  font-size: 12px;
-  font-weight: 650;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 1px;
+  margin-top: auto;
+  color: color-mix(in srgb, var(--course-accent) 52%, #263a32);
+  font-size: clamp(9px, 1.4vw, 12px);
+  line-height: 1.3;
+  text-align: center;
+}
+
+.location-mark {
+  flex: 0 0 auto;
+  font-weight: 800;
+}
+
+.compact-location > span:last-child {
+  min-width: 0;
+  font-size: inherit;
+  font-weight: 680;
   overflow-wrap: anywhere;
 }
 
 .course-content .exception-time {
-  margin-top: auto;
+  margin-top: 5px;
   color: color-mix(in srgb, var(--course-accent) 72%, var(--fresh-ink));
-  font-size: 12px;
+  font-size: clamp(9px, 1.4vw, 11px);
   font-weight: 720;
 }
 
@@ -1054,9 +1118,9 @@ onMounted(() => {
 .week-backward-enter-active,
 .week-backward-leave-active {
   transition:
-    opacity 420ms ease,
-    transform 460ms var(--fresh-spring),
-    filter 420ms ease;
+    opacity 640ms ease,
+    transform 760ms var(--fresh-spring),
+    filter 640ms ease;
 }
 
 .week-forward-leave-active,
@@ -1085,6 +1149,7 @@ onMounted(() => {
   .empty-cell-button:hover span {
     background: var(--fresh-mint);
     color: var(--fresh-green-dark);
+    opacity: 0.8;
     transform: scale(1.08);
   }
 
@@ -1106,106 +1171,32 @@ onMounted(() => {
   to { transform: rotate(360deg); }
 }
 
-@container (max-width: 680px) {
+.empty-cell-button:focus-visible span {
+  opacity: 1;
+}
+
+@media (max-width: 500px) {
   .table-heading {
     align-items: flex-start;
+    padding: 15px 13px 12px;
   }
 
   .table-heading > span {
     flex: 0 0 auto;
-    padding-top: 4px;
+    padding-top: 5px;
+    font-size: 10px;
   }
 
-  .week-head {
-    display: none;
-  }
-
-  .timetable-grid {
-    display: block;
-  }
-
-  .timetable-slot {
-    display: block;
-    padding-bottom: 8px;
-  }
-
-  .time-cell {
-    display: flex;
-    min-height: 48px;
-    align-items: center;
-    justify-content: space-between;
-    border-right: 0;
-    padding: 8px 13px;
-  }
-
-  .time-cell strong {
-    margin: 0;
-    font-size: 15px;
-  }
-
-  .time-cell > span {
-    display: flex;
-    align-items: center;
-    gap: 7px;
-  }
-
-  .time-cell i {
-    width: 12px;
-    height: 1px;
-    margin: 0;
-  }
-
-  .slot-days {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 7px;
-    padding: 8px 8px 0;
+  .weekday-head em {
+    top: 2px;
+    right: 2px;
+    width: 13px;
+    height: 13px;
+    font-size: 8px;
   }
 
   .course-cell {
-    display: grid;
-    min-height: 88px;
-    align-content: stretch;
-    grid-template-rows: auto;
-    grid-auto-rows: minmax(132px, 1fr);
-    border: 1px solid #e1e8de;
-    border-radius: 14px;
-    padding: 5px;
-  }
-
-  .course-cell:not(.has-course) {
-    grid-auto-rows: minmax(60px, 1fr);
-  }
-
-  .mobile-weekday-label {
-    display: flex;
-    min-height: 23px;
-    align-items: center;
-    justify-content: space-between;
-    padding: 0 4px;
-    color: var(--fresh-green-dark);
-    font-size: 12px;
-  }
-
-  .mobile-weekday-label b {
-    font-weight: 760;
-  }
-
-  .mobile-weekday-label small {
-    border-radius: 999px;
-    background: var(--fresh-mint);
-    padding: 2px 6px;
-    font-size: 10px;
-    font-weight: 720;
-  }
-
-  .empty-cell-button {
-    position: static;
-    min-height: 60px;
-    border-radius: 11px;
-  }
-
-  .course-content {
-    min-height: 132px;
+    padding: 0;
   }
 }
 
@@ -1214,7 +1205,6 @@ onMounted(() => {
   .course-actions button { padding: 0 8px; }
   .week-switcher { gap: 5px; }
   .week-switcher button { min-height: 59px; border-radius: 16px; }
-  .slot-days { grid-template-columns: 1fr; }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -242,11 +242,24 @@ describe('course helpers', () => {
       building: { ...baseCourse.building, name: '湖北大学武昌校区国际教育学院' },
       room_name: '东区三层 A101 交互设计实验室'
     }
+    const numberedTeachingBuildingCourse = {
+      ...course,
+      building: { ...baseCourse.building, name: '3号教学楼' },
+      room_name: '教3-205'
+    }
+    const mismatchedTeachingBuildingCourse = {
+      ...numberedTeachingBuildingCourse,
+      building: { ...baseCourse.building, name: '4号教学楼' }
+    }
 
     expect(formatCourseLocation(course)).toBe('湖北大学(武昌主校区)-教4 · 教4-211')
     expect(formatTimetableCourseLocation(course)).toBe('教4-211')
     expect(formatTimetableCourseLocation(detailedCourse)).toBe(
       '国际教育学院 · 东区三层 A101 交互设计实验室'
+    )
+    expect(formatTimetableCourseLocation(numberedTeachingBuildingCourse)).toBe('教3-205')
+    expect(formatTimetableCourseLocation(mismatchedTeachingBuildingCourse)).toBe(
+      '4号教学楼 · 教3-205'
     )
   })
 
