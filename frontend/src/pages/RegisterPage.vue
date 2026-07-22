@@ -1,25 +1,21 @@
 <script setup lang="ts">
 import { reactive, ref } from 'vue'
-import { isAxiosError } from 'axios'
 import { showFailToast, showSuccessToast } from 'vant'
 import { useRouter } from 'vue-router'
 
+import { getCourses } from '@/api/courses'
+import { extractBusinessError } from '@/api/errors'
+import { fetchSemester } from '@/api/semester'
 import TechIcon from '@/components/TechIcon.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useKeyboardAwarePage } from '@/utils/keyboardInset'
+import { prepareLoginIntro } from '@/utils/loginIntro'
 
 const router = useRouter()
 const authStore = useAuthStore()
 const submitting = ref(false)
 const form = reactive({ username: '', password: '', nickname: '', student_id: '' })
 const { pageStyle, onFieldFocus } = useKeyboardAwarePage({ basePaddingPx: 34 })
-
-function getErrorMessage(error: unknown): string {
-  if (isAxiosError(error) && typeof error.response?.data?.detail === 'string') {
-    return error.response.data.detail
-  }
-  return '注册失败，请稍后重试'
-}
 
 async function handleSubmit() {
   submitting.value = true
@@ -30,10 +26,17 @@ async function handleSubmit() {
       nickname: form.nickname,
       student_id: form.student_id || null
     })
-    showSuccessToast('账号创建成功，请登录')
-    await router.replace('/login')
+    try {
+      await authStore.login({ username: form.username, password: form.password })
+      await prepareLoginIntro(getCourses, fetchSemester)
+      showSuccessToast('账号创建成功，欢迎来到智行')
+      await router.replace('/home')
+    } catch {
+      showSuccessToast('账号已创建，请登录')
+      await router.replace('/login')
+    }
   } catch (error) {
-    showFailToast(getErrorMessage(error))
+    showFailToast(extractBusinessError(error).message)
   } finally {
     submitting.value = false
   }

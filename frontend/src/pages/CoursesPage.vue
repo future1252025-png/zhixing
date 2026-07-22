@@ -271,7 +271,11 @@ onMounted(() => {
             <small>左右几周可以快速切换</small>
           </div>
           <label for="courseWeekSelect">
-            <select id="courseWeekSelect" v-model.number="selectedWeek">
+            <select
+              id="courseWeekSelect"
+              v-model.number="selectedWeek"
+              aria-label="选择浏览教学周"
+            >
               <option v-for="week in weekOptions" :key="week" :value="week">
                 第 {{ week }} 周
               </option>
@@ -327,8 +331,8 @@ onMounted(() => {
         </div>
 
         <div class="timetable-viewport" tabindex="0" aria-label="可横向滚动的周课表">
-          <div class="timetable-grid" role="grid" aria-label="周课表">
-            <div class="time-head" role="columnheader">
+          <div class="timetable-grid">
+            <div class="time-head">
               <span>时间</span>
             </div>
             <div
@@ -336,14 +340,13 @@ onMounted(() => {
               :key="weekday.value"
               class="weekday-head"
               :class="{ 'is-today': weekday.value === todayWeekday }"
-              role="columnheader"
             >
               <small>{{ weekday.label.slice(-1) }}</small>
               <span>{{ weekday.value === todayWeekday ? '今' : weekday.value }}</span>
             </div>
 
             <template v-for="slot in timeSlots" :key="slot.section">
-              <div class="time-cell" role="rowheader">
+              <div class="time-cell">
                 <strong>{{ slot.section }}</strong>
                 <time>{{ slot.start_time }}</time>
                 <i></i>
@@ -358,7 +361,6 @@ onMounted(() => {
                   'has-course': getCellCourses(weekday.value, slot).length > 0,
                   'is-today': weekday.value === todayWeekday
                 }"
-                role="gridcell"
               >
                 <button
                   v-if="getCellCourses(weekday.value, slot).length === 0"
@@ -1045,7 +1047,7 @@ onMounted(() => {
 }
 
 .course-place-index > header span {
-  color: var(--fresh-green);
+  color: var(--fresh-green-dark);
   font-size: 12px;
   font-weight: 760;
 }

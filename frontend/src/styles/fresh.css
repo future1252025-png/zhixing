@@ -1,5 +1,15 @@
 :root {
   color-scheme: light;
+  --text-primary: #26362a;
+  --text-secondary: #536657;
+  --surface-page: #f7f5ef;
+  --surface-card: #ffffff;
+  --surface-mint: #f3f7f0;
+  --surface-sun: #fff1d3;
+  --disabled-text: #56645a;
+  --disabled-surface: #edf0e9;
+  --motion-enter-duration: 560ms;
+  --motion-stagger: 72ms;
   --fresh-bg: #f4f6ef;
   --fresh-paper: #fffdf8;
   --fresh-paper-2: #f9faf4;
@@ -161,8 +171,8 @@ body {
 .route-page-enter-active,
 .route-page-leave-active {
   transition:
-    opacity 380ms ease,
-    transform 620ms var(--fresh-spring);
+    opacity var(--motion-enter-duration) ease,
+    transform var(--motion-enter-duration) var(--fresh-spring);
 }
 
 .route-page-enter-from {
@@ -342,8 +352,8 @@ body {
 .van-button:disabled {
   opacity: 1 !important;
   border-color: #d8ded4 !important;
-  background: #edf0e9 !important;
-  color: #839085 !important;
+  background: var(--disabled-surface) !important;
+  color: var(--disabled-text) !important;
   cursor: not-allowed;
   box-shadow: none !important;
 }
@@ -548,9 +558,9 @@ textarea {
   *::before,
   *::after {
     scroll-behavior: auto !important;
-    animation-duration: 0.01ms !important;
+    animation-duration: 1ms !important;
     animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
+    transition-duration: 1ms !important;
   }
 
   .cm-reveal,

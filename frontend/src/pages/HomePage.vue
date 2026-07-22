@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { animate, stagger } from 'animejs'
 
@@ -26,6 +26,11 @@ import {
   findNextCourse
 } from '@/utils/course'
 import { createScopedStorage } from '@/utils/scopedStorage'
+import {
+  consumeLoginIntroFlag,
+  consumeLoginIntroSnapshot,
+  type LoginIntroSnapshot
+} from '@/utils/loginIntro'
 
 const router = useRouter()
 const authStore = useAuthStore()
@@ -37,6 +42,9 @@ const errorMessage = ref('')
 const chatQuery = ref('')
 const recentChats = ref<RecentChatEntry[]>([])
 const homeRoot = ref<HTMLElement | null>(null)
+const loginWelcomeVisible = ref(false)
+const loginWelcomeSnapshot = ref<LoginIntroSnapshot | null>(null)
+let loginWelcomeTimer: number | null = null
 const todayLabel = new Intl.DateTimeFormat('zh-CN', {
   month: 'long',
   day: 'numeric',
@@ -127,6 +135,15 @@ function playHomeIntro() {
 }
 
 async function initializeHome() {
+  const hasLoginIntro = consumeLoginIntroFlag()
+  loginWelcomeSnapshot.value = consumeLoginIntroSnapshot()
+  if (hasLoginIntro) {
+    loginWelcomeVisible.value = true
+    loginWelcomeTimer = window.setTimeout(() => {
+      loginWelcomeVisible.value = false
+      loginWelcomeTimer = null
+    }, 2800)
+  }
   await loadHomeData()
   await nextTick()
   playHomeIntro()
@@ -185,6 +202,9 @@ function openBuilding(buildingId: number) {
 }
 
 onMounted(initializeHome)
+onUnmounted(() => {
+  if (loginWelcomeTimer !== null) window.clearTimeout(loginWelcomeTimer)
+})
 </script>
 
 <template>
@@ -200,6 +220,20 @@ onMounted(initializeHome)
         </div>
         <time>{{ todayLabel }}</time>
       </header>
+
+      <Transition name="login-welcome">
+        <aside v-if="loginWelcomeVisible" class="login-welcome" aria-live="polite">
+          <span class="login-welcome__path" aria-hidden="true"><i></i></span>
+          <div>
+            <small>登录成功 · 校园路线已接上</small>
+            <strong>{{ loginWelcomeSnapshot?.courseName || '欢迎回来，慢慢开始今天' }}</strong>
+            <p v-if="loginWelcomeSnapshot">
+              {{ loginWelcomeSnapshot.startTime }} · {{ loginWelcomeSnapshot.buildingName }} · {{ loginWelcomeSnapshot.roomName }}
+            </p>
+            <p v-else>课表、地点和出发建议已经准备好了。</p>
+          </div>
+        </aside>
+      </Transition>
 
       <div v-if="loading" class="home-semester-loading fresh-card" aria-live="polite">
         <span><i></i><i></i><i></i></span>
@@ -485,6 +519,67 @@ onMounted(initializeHome)
   max-width: 370px;
 }
 
+.login-welcome {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 12px;
+  overflow: hidden;
+  border: 1px solid #cfdfca;
+  border-radius: 21px 21px 17px 21px;
+  background: #edf4e8;
+  box-shadow: 0 12px 30px rgba(55, 81, 57, .09);
+  color: #293b2e;
+  padding: 14px 15px;
+}
+
+.login-welcome__path {
+  position: relative;
+  display: block;
+  width: 42px;
+  height: 42px;
+  border: 2px dashed #86a682;
+  border-radius: 50%;
+}
+
+.login-welcome__path::before,
+.login-welcome__path::after {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #4f7d58;
+  content: '';
+}
+.login-welcome__path::before { top: -4px; left: 15px; }
+.login-welcome__path::after { right: -4px; bottom: 12px; background: #547d86; }
+.login-welcome__path i {
+  position: absolute;
+  top: 13px;
+  left: 13px;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 0 0 4px rgba(79, 125, 88, .13);
+  animation: welcome-pulse 1.15s ease-in-out infinite alternate;
+}
+.login-welcome > div { position: relative; z-index: 1; display: grid; min-width: 0; gap: 3px; }
+.login-welcome small { color: #486650; font-size: 12px; font-weight: 760; }
+.login-welcome strong { color: #293b2e; font-size: 15px; line-height: 1.45; overflow-wrap: anywhere; }
+.login-welcome p { margin: 0; color: #536657; font-size: 12px; line-height: 1.55; overflow-wrap: anywhere; }
+
+.login-welcome-enter-active,
+.login-welcome-leave-active {
+  transition: opacity 620ms ease, transform 720ms var(--fresh-spring);
+}
+.login-welcome-enter-from { opacity: 0; transform: translateX(32px) rotate(.5deg); }
+.login-welcome-leave-to { opacity: 0; transform: translateX(-20px); }
+
+@keyframes welcome-pulse {
+  to { transform: scale(1.18); }
+}
+
 .home-next-course {
   width: min(100%, 350px);
   margin-top: 14px;
@@ -686,7 +781,7 @@ onMounted(initializeHome)
 }
 
 .note small {
-  color: rgba(38, 54, 42, 0.62);
+  color: #536657;
   font-size: 12px;
   line-height: 1.45;
 }
@@ -853,6 +948,7 @@ onMounted(initializeHome)
   border: 18px solid rgba(255, 255, 255, 0.35);
   border-radius: 50%;
   content: "";
+  pointer-events: none;
 }
 
 .place-tone-0 { background: #e3eddd; }
@@ -864,13 +960,13 @@ onMounted(initializeHome)
   position: absolute;
   top: 13px;
   left: 14px;
-  color: rgba(38, 54, 42, 0.42);
+  color: #536657;
   font-family: ui-monospace, monospace;
   font-size: 12px;
 }
 
 .place-grid small {
-  color: rgba(38, 54, 42, 0.58);
+  color: #536657;
   font-size: 12px;
 }
 
@@ -956,7 +1052,8 @@ onMounted(initializeHome)
   .sun-spot,
   .walking-line path,
   .home-loading i,
-  .home-semester-loading i {
+  .home-semester-loading i,
+  .login-welcome__path i {
     animation: none;
   }
 

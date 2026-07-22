@@ -9,7 +9,8 @@ export default mergeConfig(
     test: {
       environment: 'jsdom',
       setupFiles: ['./src/test/setup.ts'],
-      clearMocks: true
+      clearMocks: true,
+      exclude: ['e2e/**', '**/node_modules/**', '**/dist/**', '**/test-results/**']
     }
   })
 )

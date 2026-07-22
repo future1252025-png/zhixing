@@ -65,7 +65,7 @@ function handleTabClick(path: string) {
   place-content: center;
   justify-items: center;
   gap: 5px;
-  color: #6d7a6f;
+  color: #5f6f62;
   font-size: 13px;
   font-weight: 700;
   -webkit-tap-highlight-color: transparent;

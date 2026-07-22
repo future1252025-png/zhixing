@@ -738,8 +738,8 @@ onMounted(loadScheduleData)
 .planner-heading > button {
   display: grid;
   flex: 0 0 auto;
-  width: 39px;
-  height: 39px;
+  width: 44px;
+  height: 44px;
   place-items: center;
   border: 1px solid var(--fresh-line);
   border-radius: 14px;
@@ -831,7 +831,7 @@ onMounted(loadScheduleData)
 
 .node-label > button {
   display: flex;
-  min-height: 30px;
+  min-height: 44px;
   align-items: center;
   gap: 5px;
   border: 0;
@@ -949,7 +949,7 @@ onMounted(loadScheduleData)
   gap: 2px;
 }
 
-.selected-place small { color: var(--fresh-green); font-size: 12px; font-weight: 720; }
+.selected-place small { color: var(--fresh-green-dark); font-size: 12px; font-weight: 720; }
 .selected-place strong { overflow: hidden; color: var(--fresh-ink); font-size: 15px; text-overflow: ellipsis; white-space: nowrap; }
 .selected-place p { overflow: hidden; margin: 0; color: var(--fresh-muted); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
 
@@ -959,6 +959,7 @@ onMounted(loadScheduleData)
 }
 
 .selected-destination > span { color: var(--fresh-blue); }
+.selected-destination small { color: #466e76; }
 
 .selected-destination > button {
   display: grid;

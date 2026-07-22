@@ -470,7 +470,13 @@ onMounted(loadBuildings)
 .commit-sheet button,
 .success-sheet button { display: inline-flex; min-height: 48px; align-items: center; justify-content: center; gap: 9px; border: 1px solid #547d59; border-radius: 14px; background: #608966; color: #fff; cursor: pointer; font-size: 14px; font-weight: 850; padding: 0 17px; }
 .preview-button:disabled,
-.commit-sheet button:disabled { border-color: #c7cec3; background: #e5e8e2; color: #737b74; cursor: not-allowed; }
+.commit-sheet button:disabled {
+  border-color: #d8ded4;
+  background: var(--disabled-surface);
+  color: var(--disabled-text);
+  opacity: 1;
+  cursor: not-allowed;
+}
 .preview-button i,
 .commit-sheet button i { width: 16px; height: 16px; flex: 0 0 auto; border: 2px solid rgba(255,255,255,.45); border-top-color: currentColor; border-radius: 50%; animation: spin 1s linear infinite; }
 

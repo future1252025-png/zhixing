@@ -87,6 +87,7 @@ describe('HomePage', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date('2026-09-21T07:00:00+08:00'))
     localStorage.clear()
+    sessionStorage.clear()
     localStorage.setItem('campusmind:7:browsing-week', '9')
     vi.mocked(getBuildings).mockResolvedValue([
       {
@@ -142,6 +143,28 @@ describe('HomePage', () => {
 
     expect(wrapper.text()).toContain('请先设置学期')
     expect(wrapper.text()).not.toContain('真实第 1 周')
+    wrapper.unmount()
+  })
+
+  it('plays the saved login handoff without covering the page actions', async () => {
+    vi.mocked(getCourses).mockResolvedValue([
+      course({ id: 4, course_name: '真实周课程', weeks: '4' })
+    ])
+    sessionStorage.setItem('campusmind-login-intro-pending', '1')
+    sessionStorage.setItem('campusmind-login-intro-snapshot', JSON.stringify({
+      courseName: '真实周课程',
+      startTime: '09:00',
+      buildingName: '综合教学楼',
+      roomName: '东区三层 A101'
+    }))
+
+    const wrapper = await mountHome()
+
+    expect(wrapper.get('.login-welcome').text()).toContain('真实周课程')
+    expect(wrapper.get('.login-welcome').text()).toContain('综合教学楼 · 东区三层 A101')
+    vi.advanceTimersByTime(2800)
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('.login-welcome').exists()).toBe(false)
     wrapper.unmount()
   })
 })
