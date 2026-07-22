@@ -176,6 +176,10 @@ describe('course helpers', () => {
     const colors = [...new Set(Object.values(colorMap))]
 
     expect(colors).toHaveLength(courses.length)
+    expect(colors.every((color) => {
+      const saturation = color.match(/hsl\(\d+ (\d+)%/)?.[1]
+      return saturation !== undefined && Number(saturation) >= 62
+    })).toBe(true)
   })
 
   it('builds teaching week ranges from picker values', () => {

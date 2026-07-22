@@ -175,6 +175,22 @@ test('mobile core journey keeps weeks, locations, sessions, text, and actions tr
   await expect(manualCourseCard.locator('time')).toHaveText('09:00—10:40')
   await expect(importedCourseCard.locator('time')).toHaveCount(0)
   await expect(page.locator('.course-place-index')).toHaveCount(0)
+  await expect(page.locator('.week-head .weekday-head')).toHaveCount(7)
+  await expect(page.locator('.timetable-slot').first().locator('.course-cell')).toHaveCount(7)
+  if (await page.locator('.mobile-weekday-label').first().isVisible()) {
+    await expect(page.locator('.mobile-weekday-label:visible')).toHaveCount(35)
+  } else {
+    await expect(page.locator('.mobile-weekday-label:visible')).toHaveCount(0)
+    await expect(page.locator('.week-head .weekday-head:visible')).toHaveCount(7)
+  }
+  const timetableFitsViewport = await page.locator('.timetable-viewport').evaluate((viewport) =>
+    viewport.scrollWidth <= viewport.clientWidth + 1
+  )
+  expect(timetableFitsViewport).toBe(true)
+  const courseAccents = await page.locator('.timetable-course').evaluateAll((cards) =>
+    cards.map((card) => getComputedStyle(card).getPropertyValue('--course-accent').trim())
+  )
+  expect(new Set(courseAccents).size).toBe(courseAccents.length)
   const courseCardHeights = await page.locator('.timetable-course').evaluateAll((cards) =>
     cards.map((card) => Math.round(card.getBoundingClientRect().height))
   )
@@ -192,7 +208,17 @@ test('mobile core journey keeps weeks, locations, sessions, text, and actions tr
   await page.goBack()
   await page.waitForURL('**/courses')
 
+  await settleMotion(page)
+  await page.evaluate(() => {
+    document.querySelector('#courseWeekSelect')?.scrollIntoView({ block: 'center' })
+  })
+  const scrollBeforeWeekChange = await page.evaluate(() => window.scrollY)
   await page.locator('#courseWeekSelect').selectOption('9')
+  await expect(page.locator('.week-forward-enter-active')).toHaveCount(1)
+  await expect(page.locator('.timetable-week-stage[data-week="9"]')).toBeVisible()
+  expect(await page.evaluate(() => window.scrollY)).toBe(scrollBeforeWeekChange)
+  await settleMotion(page)
+  expect(await page.evaluate(() => window.scrollY)).toBe(scrollBeforeWeekChange)
   await expect(page.getByText('浏览第 9 周').first()).toBeVisible()
   await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight))
   await page.getByRole('link', { name: /校园/ }).click()

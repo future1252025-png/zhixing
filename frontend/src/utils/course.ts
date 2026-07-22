@@ -207,8 +207,8 @@ export function buildCourseColorMap(
   const total = Math.max(subjectNames.length, 1)
   const subjectColors = subjectNames.reduce<Record<string, string>>((colorMap, subject, index) => {
     const hue = Math.round((index * 360) / total)
-    const saturation = 45 + (index % 3) * 7
-    const lightness = 40 + (index % 4) * 4
+    const saturation = 62 + (index % 3) * 7
+    const lightness = 36 + (index % 4) * 4
     colorMap[subject] = `hsl(${hue} ${saturation}% ${lightness}%)`
     return colorMap
   }, {})

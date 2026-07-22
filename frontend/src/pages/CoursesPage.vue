@@ -33,16 +33,17 @@ const loading = ref(true)
 const deletingId = ref<number | null>(null)
 const activeCourse = ref<Course | null>(null)
 const actionSheetVisible = ref(false)
+const weekTransitionName = ref<'week-forward' | 'week-backward'>('week-forward')
 const errorMessage = ref('')
 const semesterErrorMessage = ref('')
 const selectedWeek = computed({
   get: () => semesterStore.browsingWeek,
   set: (week: number) => {
     if (week === semesterStore.browsingWeek) return
+    weekTransitionName.value = week > semesterStore.browsingWeek
+      ? 'week-forward'
+      : 'week-backward'
     semesterStore.setBrowsingWeek(week)
-    if (typeof window !== 'undefined') {
-      window.scrollTo({ top: 0, behavior: 'smooth' })
-    }
   }
 })
 const weekOptions = computed(() =>
@@ -80,7 +81,7 @@ const quickWeekOptions = computed(() =>
     semesterStore.totalWeeks ?? undefined
   )
 )
-const courseColorMap = computed(() => buildCourseColorMap(visibleCourses.value))
+const courseColorMap = computed(() => buildCourseColorMap(courses.value))
 const courseCountText = computed(() =>
   visibleCourses.value.length > 0 ? `${visibleCourses.value.length} 门课` : '本周暂无课'
 )
@@ -327,94 +328,97 @@ onMounted(() => {
         class="timetable-shell fresh-card"
       >
         <header class="table-heading">
-          <div><h2>一周课表</h2><p>横向滑动，课程名和地点完整显示</p></div>
+          <div><h2>一周课表</h2><p>周一到周日一次看全，课程名和地点完整显示</p></div>
           <span><i></i> 浏览第 {{ selectedWeek }} 周</span>
         </header>
 
-        <div class="table-scroll-hint" aria-hidden="true">
-          <span>向左滑动查看更多</span>
-          <i></i>
-        </div>
-
-        <div class="timetable-viewport" tabindex="0" aria-label="可横向滚动的周课表">
-          <div class="timetable-grid">
-            <div class="time-head">
-              <span>时间</span>
-            </div>
-            <div
-              v-for="weekday in WEEKDAYS"
-              :key="weekday.value"
-              class="weekday-head"
-              :class="{ 'is-today': weekday.value === todayWeekday }"
-            >
-              <small>{{ weekday.label.slice(-1) }}</small>
-              <span>{{ weekday.value === todayWeekday ? '今' : weekday.value }}</span>
-            </div>
-
-            <template v-for="slot in timeSlots" :key="slot.section">
-              <div class="time-cell">
-                <strong>{{ slot.section }}</strong>
-                <time>{{ slot.start_time }}</time>
-                <i></i>
-                <time>{{ slot.end_time }}</time>
+        <Transition :name="weekTransitionName">
+          <div
+            :key="selectedWeek"
+            class="timetable-week-stage"
+            :data-week="selectedWeek"
+          >
+            <div class="timetable-viewport" aria-label="完整展示周一到周日的周课表">
+              <div class="week-head" aria-hidden="true">
+                <div class="time-head"><span>时间</span></div>
+                <div
+                  v-for="weekday in WEEKDAYS"
+                  :key="weekday.value"
+                  class="weekday-head"
+                  :class="{ 'is-today': weekday.value === todayWeekday }"
+                >
+                  <small>{{ weekday.label.slice(-1) }}</small>
+                  <span>{{ weekday.value === todayWeekday ? '今' : weekday.value }}</span>
+                </div>
               </div>
 
-              <div
-                v-for="weekday in WEEKDAYS"
-                :key="`${slot.section}-${weekday.value}`"
-                class="course-cell"
-                :class="{
-                  'has-course': getCellCourses(weekday.value, slot).length > 0,
-                  'is-today': weekday.value === todayWeekday
-                }"
-              >
-                <button
-                  v-if="getCellCourses(weekday.value, slot).length === 0"
-                  type="button"
-                  class="empty-cell-button"
-                  aria-label="在此时间添加课程"
-                  @click="openCreateForSlot(weekday.value, slot)"
+              <div class="timetable-grid">
+                <section
+                  v-for="slot in timeSlots"
+                  :key="slot.section"
+                  class="timetable-slot"
                 >
-                  <span aria-hidden="true">＋</span>
-                </button>
+                  <header class="time-cell">
+                    <strong>{{ slot.section }}</strong>
+                    <span><time>{{ slot.start_time }}</time><i></i><time>{{ slot.end_time }}</time></span>
+                  </header>
 
-                <article
-                  v-for="course in getCellCourses(weekday.value, slot)"
-                  :key="course.id"
-                  class="timetable-course"
-                  :class="{ 'is-deleting': deletingId === course.id }"
-                  :style="getCourseStyle(course)"
-                >
-                  <button
-                    type="button"
-                    class="course-content"
-                    :aria-label="`${course.course_name}，${formatCourseLocation(course)}，点击查看课程操作`"
-                    :disabled="deletingId === course.id"
-                    @click="openCourseActions(course)"
-                  >
-                    <strong>{{ course.course_name }}</strong>
-                    <span class="compact-location">
-                      <van-icon name="location-o" />
-                      <span>{{ formatTimetableCourseLocation(course) }}</span>
-                    </span>
-                    <time v-if="!courseUsesStandardSlotTime(course, slot)" class="exception-time">
-                      {{ course.start_time }}—{{ course.end_time }}
-                    </time>
-                  </button>
-                </article>
+                  <div class="slot-days">
+                    <div
+                      v-for="weekday in WEEKDAYS"
+                      :key="`${slot.section}-${weekday.value}`"
+                      class="course-cell"
+                      :class="{
+                        'has-course': getCellCourses(weekday.value, slot).length > 0,
+                        'is-today': weekday.value === todayWeekday
+                      }"
+                    >
+                      <span class="mobile-weekday-label">
+                        <b>{{ weekday.label }}</b>
+                        <small v-if="weekday.value === todayWeekday">今天</small>
+                      </span>
+
+                      <button
+                        v-if="getCellCourses(weekday.value, slot).length === 0"
+                        type="button"
+                        class="empty-cell-button"
+                        :aria-label="`${weekday.label}${slot.label}添加课程`"
+                        @click="openCreateForSlot(weekday.value, slot)"
+                      >
+                        <span aria-hidden="true">＋</span>
+                      </button>
+
+                      <article
+                        v-for="course in getCellCourses(weekday.value, slot)"
+                        :key="course.id"
+                        class="timetable-course"
+                        :class="{ 'is-deleting': deletingId === course.id }"
+                        :style="getCourseStyle(course)"
+                      >
+                        <button
+                          type="button"
+                          class="course-content"
+                          :aria-label="`${course.course_name}，${formatCourseLocation(course)}，点击查看课程操作`"
+                          :disabled="deletingId === course.id"
+                          @click="openCourseActions(course)"
+                        >
+                          <strong>{{ course.course_name }}</strong>
+                          <span class="compact-location">
+                            <van-icon name="location-o" />
+                            <span>{{ formatTimetableCourseLocation(course) }}</span>
+                          </span>
+                          <time v-if="!courseUsesStandardSlotTime(course, slot)" class="exception-time">
+                            {{ course.start_time }}—{{ course.end_time }}
+                          </time>
+                        </button>
+                      </article>
+                    </div>
+                  </div>
+                </section>
               </div>
-            </template>
+            </div>
           </div>
-        </div>
-
-        <div v-if="visibleCourses.length === 0" class="empty-week">
-          <span><TechIcon name="calendar" :size="22" /></span>
-          <div>
-            <strong>这一周还没有安排</strong>
-            <p>点课表里的空白位置，就能添加课程。</p>
-          </div>
-          <button type="button" @click="openCreateForCurrentWeek">添加课程</button>
-        </div>
+        </Transition>
       </section>
 
       <van-action-sheet
@@ -642,6 +646,12 @@ onMounted(() => {
   background: #fafbf6;
   color: var(--fresh-muted);
   cursor: pointer;
+  transition:
+    background 320ms var(--fresh-spring),
+    border-color 320ms var(--fresh-spring),
+    box-shadow 320ms var(--fresh-spring),
+    color 320ms var(--fresh-spring),
+    transform 320ms var(--fresh-spring);
 }
 
 .week-switcher button > span {
@@ -670,6 +680,7 @@ onMounted(() => {
   background: var(--fresh-mint);
   color: var(--fresh-green-dark);
   box-shadow: inset 0 0 0 1px rgba(79, 125, 88, 0.06);
+  transform: translateY(-2px);
 }
 
 .week-switcher button.active i {
@@ -709,6 +720,8 @@ onMounted(() => {
 .course-loading p { margin: 0; }
 
 .timetable-shell {
+  position: relative;
+  container-type: inline-size;
   overflow: hidden;
   padding: 0 0 11px;
 }
@@ -749,47 +762,43 @@ onMounted(() => {
   background: var(--fresh-leaf);
 }
 
-.table-scroll-hint {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 7px;
-  padding: 0 17px 8px;
-  color: var(--fresh-muted);
-  font-size: 12px;
-}
-
-.table-scroll-hint i {
-  width: 24px;
-  height: 1px;
-  background: var(--fresh-green);
-  animation: hint-slide 1.7s ease-in-out infinite;
-}
-
 .timetable-viewport {
-  overflow-x: auto;
-  overscroll-behavior-x: contain;
   border-top: 1px solid var(--fresh-line);
-  outline: none;
-  scroll-padding-left: 64px;
-  scrollbar-color: #aebca9 transparent;
-  scrollbar-width: thin;
-  scroll-snap-type: x proximity;
+  overflow: visible;
 }
 
-.timetable-viewport:focus-visible {
-  box-shadow: inset 0 0 0 3px rgba(79, 125, 88, 0.14);
+.timetable-week-stage {
+  min-width: 0;
+  transform-origin: center top;
 }
 
-.timetable-viewport::-webkit-scrollbar { height: 5px; }
-.timetable-viewport::-webkit-scrollbar-thumb { border-radius: 999px; background: #aebca9; }
+.week-head {
+  display: grid;
+  grid-template-columns: 64px repeat(7, minmax(0, 1fr));
+  width: 100%;
+  background: #fbfcf8;
+}
 
 .timetable-grid {
   display: grid;
-  grid-template-columns: 64px repeat(7, minmax(128px, 1fr));
-  min-width: 960px;
+  grid-template-rows: repeat(5, minmax(154px, 1fr));
   width: 100%;
   background: #fbfcf8;
+}
+
+.timetable-slot {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  height: 100%;
+  width: 100%;
+  border-bottom: 1px solid #e4e9e0;
+}
+
+.slot-days {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  min-width: 0;
+  align-items: stretch;
 }
 
 .time-head,
@@ -797,7 +806,6 @@ onMounted(() => {
 .time-cell,
 .course-cell {
   border-right: 1px solid #e4e9e0;
-  border-bottom: 1px solid #e4e9e0;
 }
 
 .time-head,
@@ -806,9 +814,6 @@ onMounted(() => {
 }
 
 .time-head {
-  position: sticky;
-  left: 0;
-  z-index: 4;
   display: grid;
   place-items: center;
   background: #edf2e9;
@@ -848,9 +853,6 @@ onMounted(() => {
 }
 
 .time-cell {
-  position: sticky;
-  left: 0;
-  z-index: 3;
   display: grid;
   min-height: 154px;
   align-content: center;
@@ -873,6 +875,11 @@ onMounted(() => {
   color: var(--fresh-text);
 }
 
+.time-cell > span {
+  display: grid;
+  justify-items: center;
+}
+
 .time-cell i {
   width: 1px;
   height: 8px;
@@ -889,7 +896,11 @@ onMounted(() => {
   gap: 5px;
   background: #fbfcf8;
   padding: 5px;
-  scroll-snap-align: start;
+  min-width: 0;
+}
+
+.mobile-weekday-label {
+  display: none;
 }
 
 .course-cell.has-course {
@@ -932,11 +943,20 @@ onMounted(() => {
   box-sizing: border-box;
   height: 100%;
   min-width: 0;
-  border: 1px solid color-mix(in srgb, var(--course-accent) 28%, #d8e1d5);
+  border: 1px solid color-mix(in srgb, var(--course-accent) 58%, #d8e1d5);
   border-radius: 14px 14px 11px 14px;
   background:
-    linear-gradient(145deg, color-mix(in srgb, var(--course-accent) 13%, #fffdf8), #fffdf8);
-  box-shadow: 0 6px 16px rgba(49, 72, 49, 0.07);
+    linear-gradient(
+      145deg,
+      color-mix(in srgb, var(--course-accent) 27%, #fffdf8),
+      color-mix(in srgb, var(--course-accent) 12%, #fffdf8)
+    );
+  box-shadow:
+    inset 4px 0 0 var(--course-accent),
+    0 7px 18px color-mix(in srgb, var(--course-accent) 15%, transparent);
+  transition:
+    box-shadow 280ms var(--fresh-spring),
+    transform 280ms var(--fresh-spring);
 }
 
 .course-content {
@@ -957,8 +977,8 @@ onMounted(() => {
 }
 
 .course-content::before {
-  width: 24px;
-  height: 4px;
+  width: 34px;
+  height: 5px;
   margin-bottom: 9px;
   border-radius: 999px;
   background: var(--course-accent);
@@ -1029,40 +1049,36 @@ onMounted(() => {
   overflow-wrap: anywhere;
 }
 
-.empty-week {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  gap: 10px;
-  align-items: center;
-  margin: 12px;
-  border-radius: 18px;
-  background: var(--fresh-mint);
-  padding: 12px;
+.week-forward-enter-active,
+.week-forward-leave-active,
+.week-backward-enter-active,
+.week-backward-leave-active {
+  transition:
+    opacity 420ms ease,
+    transform 460ms var(--fresh-spring),
+    filter 420ms ease;
 }
 
-.empty-week > span {
-  display: grid;
-  width: 38px;
-  height: 38px;
-  place-items: center;
-  border-radius: 14px;
-  background: #fff;
-  color: var(--fresh-green-dark);
+.week-forward-leave-active,
+.week-backward-leave-active {
+  position: absolute;
+  z-index: 1;
+  right: 0;
+  left: 0;
 }
 
-.empty-week strong { color: var(--fresh-ink); font-size: 15px; }
-.empty-week p { margin: 5px 0 0; color: var(--fresh-muted); font-size: 13px; line-height: 1.55; }
+.week-forward-enter-from,
+.week-backward-leave-to {
+  opacity: 0;
+  filter: blur(2px);
+  transform: translateX(32px) scale(0.985);
+}
 
-.empty-week button {
-  min-height: 34px;
-  border: 1px solid #9eb79f;
-  border-radius: 12px;
-  background: #fff;
-  color: var(--fresh-green-dark);
-  cursor: pointer;
-  font-size: 12px;
-  font-weight: 720;
-  padding: 0 10px;
+.week-forward-leave-to,
+.week-backward-enter-from {
+  opacity: 0;
+  filter: blur(2px);
+  transform: translateX(-32px) scale(0.985);
 }
 
 @media (hover: hover) {
@@ -1086,12 +1102,111 @@ onMounted(() => {
   to { transform: scaleY(1.4); }
 }
 
-@keyframes hint-slide {
-  50% { transform: translateX(5px); }
-}
-
 @keyframes semester-loading-spin {
   to { transform: rotate(360deg); }
+}
+
+@container (max-width: 680px) {
+  .table-heading {
+    align-items: flex-start;
+  }
+
+  .table-heading > span {
+    flex: 0 0 auto;
+    padding-top: 4px;
+  }
+
+  .week-head {
+    display: none;
+  }
+
+  .timetable-grid {
+    display: block;
+  }
+
+  .timetable-slot {
+    display: block;
+    padding-bottom: 8px;
+  }
+
+  .time-cell {
+    display: flex;
+    min-height: 48px;
+    align-items: center;
+    justify-content: space-between;
+    border-right: 0;
+    padding: 8px 13px;
+  }
+
+  .time-cell strong {
+    margin: 0;
+    font-size: 15px;
+  }
+
+  .time-cell > span {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+  }
+
+  .time-cell i {
+    width: 12px;
+    height: 1px;
+    margin: 0;
+  }
+
+  .slot-days {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 7px;
+    padding: 8px 8px 0;
+  }
+
+  .course-cell {
+    display: grid;
+    min-height: 88px;
+    align-content: stretch;
+    grid-template-rows: auto;
+    grid-auto-rows: minmax(132px, 1fr);
+    border: 1px solid #e1e8de;
+    border-radius: 14px;
+    padding: 5px;
+  }
+
+  .course-cell:not(.has-course) {
+    grid-auto-rows: minmax(60px, 1fr);
+  }
+
+  .mobile-weekday-label {
+    display: flex;
+    min-height: 23px;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 4px;
+    color: var(--fresh-green-dark);
+    font-size: 12px;
+  }
+
+  .mobile-weekday-label b {
+    font-weight: 760;
+  }
+
+  .mobile-weekday-label small {
+    border-radius: 999px;
+    background: var(--fresh-mint);
+    padding: 2px 6px;
+    font-size: 10px;
+    font-weight: 720;
+  }
+
+  .empty-cell-button {
+    position: static;
+    min-height: 60px;
+    border-radius: 11px;
+  }
+
+  .course-content {
+    min-height: 132px;
+  }
 }
 
 @media (max-width: 370px) {
@@ -1099,16 +1214,29 @@ onMounted(() => {
   .course-actions button { padding: 0 8px; }
   .week-switcher { gap: 5px; }
   .week-switcher button { min-height: 59px; border-radius: 16px; }
-  .empty-week { grid-template-columns: auto minmax(0, 1fr); }
-  .empty-week button { grid-column: 1 / -1; width: 100%; }
+  .slot-days { grid-template-columns: 1fr; }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .hero-leaves i,
   .course-loading i,
-  .table-scroll-hint i,
   .semester-loading i {
     animation: none;
+  }
+
+  .week-forward-enter-active,
+  .week-forward-leave-active,
+  .week-backward-enter-active,
+  .week-backward-leave-active {
+    transition-duration: 1ms;
+  }
+
+  .week-forward-enter-from,
+  .week-forward-leave-to,
+  .week-backward-enter-from,
+  .week-backward-leave-to {
+    filter: none;
+    transform: none;
   }
 }
 </style>

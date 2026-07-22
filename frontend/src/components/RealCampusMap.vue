@@ -55,6 +55,7 @@ const currentZoom = ref(props.zoom)
 let disposed = false
 let initializationGeneration = 0
 let zoomEndHandler: (() => void) | null = null
+let mapAccessibilityObserver: MutationObserver | null = null
 
 const hasConfig = computed(() => isAMapConfigured())
 const markerBuildings = computed(() =>
@@ -276,6 +277,34 @@ function initializationIsActive(generation: number): boolean {
   return !disposed && generation === initializationGeneration
 }
 
+function labelGeneratedMapElements() {
+  const container = mapContainer.value
+  if (!container) return
+
+  container.querySelectorAll('iframe').forEach((frame) => {
+    if (!frame.title && !frame.getAttribute('aria-label')) {
+      frame.title = `${props.title || '校园地图'}交互辅助框架`
+    }
+  })
+  container.querySelectorAll('img').forEach((image) => {
+    if (!image.hasAttribute('alt')) {
+      image.alt = image.closest('.amap-logo') ? '高德地图' : ''
+    }
+  })
+}
+
+function observeGeneratedMapElements() {
+  mapAccessibilityObserver?.disconnect()
+  labelGeneratedMapElements()
+  if (!mapContainer.value) return
+
+  mapAccessibilityObserver = new MutationObserver(labelGeneratedMapElements)
+  mapAccessibilityObserver.observe(mapContainer.value, {
+    childList: true,
+    subtree: true
+  })
+}
+
 async function installMapControls(generation: number, targetMap: any) {
   if (!initializationIsActive(generation) || map.value !== targetMap) {
     return
@@ -332,6 +361,7 @@ async function initMap() {
     }
     amap.value = loadedAMap
     map.value = targetMap
+    observeGeneratedMapElements()
     void installMapControls(generation, targetMap)
     zoomEndHandler = () => {
       if (map.value === targetMap) {
@@ -368,6 +398,8 @@ watch(
 onBeforeUnmount(() => {
   disposed = true
   initializationGeneration += 1
+  mapAccessibilityObserver?.disconnect()
+  mapAccessibilityObserver = null
   clearWalkingRoute()
   clearOverlays()
   if (map.value) {
@@ -2217,13 +2249,13 @@ onBeforeUnmount(() => {
   backdrop-filter: blur(9px);
 }
 .map-state__copy small {
-  color: #769073;
+  color: #4f6b50;
   font-family: inherit;
   font-size: 12px;
   letter-spacing: .02em;
 }
 .map-state__copy strong { color: #344a39; }
-.map-state__copy span { color: #7a867b; }
+.map-state__copy span { color: #536356; }
 .state-radar {
   border: 0;
   background: #e0edd9;
@@ -2248,7 +2280,7 @@ onBeforeUnmount(() => {
 }
 .state-radar i { display: none; }
 .map-state--error { background: rgba(255, 248, 240, .94); }
-.map-state--error .map-state__copy small { color: #a36756; }
+.map-state--error .map-state__copy small { color: #89503f; }
 .state-alert {
   border: 0;
   border-radius: 50%;
