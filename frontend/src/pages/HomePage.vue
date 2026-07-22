@@ -8,7 +8,9 @@ import { getCourses } from '@/api/courses'
 import RealCampusMap from '@/components/RealCampusMap.vue'
 import TechIcon from '@/components/TechIcon.vue'
 import CourseCard from '@/components/course/CourseCard.vue'
+import SemesterGate from '@/components/course/SemesterGate.vue'
 import { useAuthStore } from '@/stores/auth'
+import { useSemesterStore } from '@/stores/semester'
 import type { Course } from '@/types/course'
 import {
   buildChatSearchResults,
@@ -21,13 +23,13 @@ import {
 } from '@/utils/chat'
 import {
   filterCoursesByWeek,
-  findNextCourse,
-  readSelectedWeek
+  findNextCourse
 } from '@/utils/course'
 import { createScopedStorage } from '@/utils/scopedStorage'
 
 const router = useRouter()
 const authStore = useAuthStore()
+const semesterStore = useSemesterStore()
 const buildings = ref<Building[]>([])
 const courses = ref<Course[]>([])
 const loading = ref(true)
@@ -35,14 +37,22 @@ const errorMessage = ref('')
 const chatQuery = ref('')
 const recentChats = ref<RecentChatEntry[]>([])
 const homeRoot = ref<HTMLElement | null>(null)
-const selectedWeek = typeof window === 'undefined' ? 1 : readSelectedWeek(window.localStorage)
 const todayLabel = new Intl.DateTimeFormat('zh-CN', {
   month: 'long',
   day: 'numeric',
   weekday: 'short'
 }).format(new Date())
 
-const activeCourses = computed(() => filterCoursesByWeek(courses.value, selectedWeek))
+const currentWeek = computed(() =>
+  semesterStore.semester?.status === 'active'
+    ? semesterStore.semester.current_week
+    : null
+)
+const activeCourses = computed(() =>
+  currentWeek.value === null
+    ? []
+    : filterCoursesByWeek(courses.value, currentWeek.value)
+)
 const nextCourse = computed(() => findNextCourse(activeCourses.value))
 const nextCourseChat = computed(() =>
   nextCourse.value ? buildNextCourseChatTarget(nextCourse.value) : null
@@ -79,8 +89,18 @@ function refreshRecentChats() {
 async function loadHomeData() {
   loading.value = true
   errorMessage.value = ''
+  const userId = authStore.currentUser?.id
+  if (!userId) {
+    errorMessage.value = '登录信息尚未加载完成，请重新进入首页'
+    loading.value = false
+    return
+  }
   try {
-    const [buildingResult, courseResult] = await Promise.all([getBuildings(), getCourses()])
+    const [buildingResult, courseResult] = await Promise.all([
+      getBuildings(),
+      getCourses(),
+      semesterStore.load(userId)
+    ])
     buildings.value = buildingResult
     courses.value = courseResult
     refreshRecentChats()
@@ -107,10 +127,9 @@ function playHomeIntro() {
 }
 
 async function initializeHome() {
-  const loadingTask = loadHomeData()
+  await loadHomeData()
   await nextTick()
   playHomeIntro()
-  await loadingTask
 }
 
 function rememberChat(building: Pick<Building, 'id' | 'name'>, roomName: string | null = null) {
@@ -182,42 +201,57 @@ onMounted(initializeHome)
         <time>{{ todayLabel }}</time>
       </header>
 
-      <section class="today-card home-motion-item">
-        <span class="sun-spot" aria-hidden="true"></span>
-        <span class="leaf-cluster leaf-cluster-a" aria-hidden="true"><i></i><i></i><i></i></span>
-        <span class="leaf-cluster leaf-cluster-b" aria-hidden="true"><i></i><i></i></span>
+      <div v-if="loading" class="home-semester-loading fresh-card" aria-live="polite">
+        <span><i></i><i></i><i></i></span>
+        <p>正在对齐真实教学周...</p>
+      </div>
 
-        <div class="today-copy">
-          <span class="fresh-kicker">今天的下一站</span>
-          <template v-if="nextCourse && nextCourseChat">
-            <CourseCard
-              class="home-next-course"
-              :course="nextCourse"
-              compact
-              @select="openNextCourseChat"
-              @edit="openCourseEdit"
-            />
-          </template>
-          <template v-else>
-            <p>第 {{ selectedWeek }} 周</p>
-            <h1>今天还没有安排</h1>
-            <strong>给自己留一点自由时间</strong>
-            <small>导入课表后，下一节课会出现在这里。</small>
-          </template>
-        </div>
+      <van-empty v-else-if="errorMessage || !semesterStore.semester" image="error" :description="errorMessage || '学期状态暂时不可用'">
+        <van-button type="primary" size="small" @click="loadHomeData">重新加载</van-button>
+      </van-empty>
 
-        <div class="walking-line" aria-hidden="true">
-          <svg viewBox="0 0 330 80">
-            <path d="M5 59C70 10 97 72 159 41S247 16 325 43" pathLength="1" />
-          </svg>
-          <i></i><i></i>
-        </div>
+      <SemesterGate
+        v-else
+        :status="semesterStore.semester.status"
+        :current-week="currentWeek"
+      >
+        <section class="today-card home-motion-item">
+          <span class="sun-spot" aria-hidden="true"></span>
+          <span class="leaf-cluster leaf-cluster-a" aria-hidden="true"><i></i><i></i><i></i></span>
+          <span class="leaf-cluster leaf-cluster-b" aria-hidden="true"><i></i><i></i></span>
 
-        <button type="button" class="today-action" @click="openNextCourseChat">
-          <span>{{ nextCourseChat ? '进入地点频道' : '导入我的课表' }}</span>
-          <TechIcon name="arrow" :size="19" />
-        </button>
-      </section>
+          <div class="today-copy">
+            <span class="fresh-kicker">今天的下一站</span>
+            <p>真实第 {{ currentWeek }} 周</p>
+            <template v-if="nextCourse && nextCourseChat">
+              <CourseCard
+                class="home-next-course"
+                :course="nextCourse"
+                compact
+                @select="openNextCourseChat"
+                @edit="openCourseEdit"
+              />
+            </template>
+            <template v-else>
+              <h1>今天还没有安排</h1>
+              <strong>给自己留一点自由时间</strong>
+              <small>本周有新课程时，下一节课会出现在这里。</small>
+            </template>
+          </div>
+
+          <div class="walking-line" aria-hidden="true">
+            <svg viewBox="0 0 330 80">
+              <path d="M5 59C70 10 97 72 159 41S247 16 325 43" pathLength="1" />
+            </svg>
+            <i></i><i></i>
+          </div>
+
+          <button type="button" class="today-action" @click="openNextCourseChat">
+            <span>{{ nextCourseChat ? '进入地点频道' : '导入我的课表' }}</span>
+            <TechIcon name="arrow" :size="19" />
+          </button>
+        </section>
+      </SemesterGate>
 
       <nav
         v-reveal="{ from: 'right', distance: 34, stagger: 70 }"
@@ -862,9 +896,9 @@ onMounted(initializeHome)
   overflow: hidden;
 }
 
-.home-loading {
+.home-loading,
+.home-semester-loading {
   display: grid;
-  min-height: 330px;
   place-content: center;
   justify-items: center;
   gap: 13px;
@@ -872,14 +906,19 @@ onMounted(initializeHome)
   font-size: 12px;
 }
 
-.home-loading > span {
+.home-loading { min-height: 330px; }
+.home-semester-loading { min-height: 210px; }
+
+.home-loading > span,
+.home-semester-loading > span {
   display: flex;
   gap: 5px;
   align-items: flex-end;
   height: 28px;
 }
 
-.home-loading i {
+.home-loading i,
+.home-semester-loading i {
   width: 5px;
   height: 12px;
   border-radius: 999px;
@@ -887,9 +926,12 @@ onMounted(initializeHome)
   animation: loading-grow 1s ease-in-out infinite alternate;
 }
 
-.home-loading i:nth-child(2) { height: 22px; animation-delay: 160ms; }
-.home-loading i:nth-child(3) { height: 16px; animation-delay: 320ms; }
-.home-loading p { margin: 0; }
+.home-loading i:nth-child(2),
+.home-semester-loading i:nth-child(2) { height: 22px; animation-delay: 160ms; }
+.home-loading i:nth-child(3),
+.home-semester-loading i:nth-child(3) { height: 16px; animation-delay: 320ms; }
+.home-loading p,
+.home-semester-loading p { margin: 0; }
 
 @keyframes trail-grow {
   to { stroke-dashoffset: 0; }
@@ -913,7 +955,8 @@ onMounted(initializeHome)
 @media (prefers-reduced-motion: reduce) {
   .sun-spot,
   .walking-line path,
-  .home-loading i {
+  .home-loading i,
+  .home-semester-loading i {
     animation: none;
   }
 

@@ -5,7 +5,8 @@ import {
   formatDistance,
   getLocationDisplayInfo,
   getRouteVisualPoints,
-  getStatusMeta
+  getStatusMeta,
+  toSchedulePageError
 } from './schedule'
 
 describe('schedule helpers', () => {
@@ -26,6 +27,41 @@ describe('schedule helpers', () => {
     expect(getStatusMeta('likely_late')).toEqual({
       label: '可能迟到',
       className: 'status-late'
+    })
+  })
+
+  it('branches schedule recovery only by structured error code', () => {
+    expect(toSchedulePageError({
+      status: 404,
+      code: 'no_upcoming_course',
+      message: 'arbitrary server wording',
+      fields: [],
+      details: {}
+    }).title).toBe('本周暂无后续课程')
+
+    expect(toSchedulePageError({
+      status: 409,
+      code: 'semester_not_active',
+      message: 'same code, unrelated wording',
+      fields: [],
+      details: { semester_status: 'before_term' }
+    })).toMatchObject({
+      title: '学期尚未开始',
+      semesterStatus: 'before_term'
+    })
+  })
+
+  it('keeps the exact course identity for incomplete locations', () => {
+    expect(toSchedulePageError({
+      status: 409,
+      code: 'course_location_incomplete',
+      message: 'location missing',
+      fields: ['building_id', 'room_name'],
+      details: { course_id: 18, course_name: '软件工程' }
+    })).toMatchObject({
+      courseId: 18,
+      courseName: '软件工程',
+      title: '“软件工程”地点不完整'
     })
   })
 

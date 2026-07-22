@@ -13,6 +13,24 @@ export type ScheduleSuggestionPayload = (
 
 export type ScheduleStatus = 'normal' | 'tight' | 'likely_late'
 
+export type SchedulePageErrorCode =
+  | 'semester_unconfigured'
+  | 'semester_not_active'
+  | 'no_upcoming_course'
+  | 'course_location_incomplete'
+  | 'schedule_conflict'
+  | 'course_data_invalid'
+  | 'unexpected_error'
+
+export type SchedulePageError = {
+  code: SchedulePageErrorCode
+  title: string
+  message: string
+  semesterStatus: 'before_term' | 'after_term' | null
+  courseId: number | null
+  courseName: string | null
+}
+
 export type NextCourseInfo = {
   id: number
   course_name: string

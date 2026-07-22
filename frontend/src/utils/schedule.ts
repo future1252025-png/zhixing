@@ -1,8 +1,10 @@
 import type {
   ScheduleBuildingInfo,
   ScheduleLocationInfo,
+  SchedulePageError,
   ScheduleStatus
 } from '@/types/schedule'
+import type { BusinessError } from '@/types/api'
 
 export type StatusMeta = {
   label: string
@@ -57,6 +59,91 @@ export function getStatusMeta(status: ScheduleStatus): StatusMeta {
     }
   }
   return statusMap[status]
+}
+
+function positiveInteger(value: unknown): number | null {
+  return Number.isSafeInteger(value) && Number(value) > 0 ? Number(value) : null
+}
+
+function nonEmptyString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null
+}
+
+export function toSchedulePageError(error: BusinessError): SchedulePageError {
+  const base = {
+    semesterStatus: null,
+    courseId: null,
+    courseName: null
+  } as const
+
+  switch (error.code) {
+    case 'semester_unconfigured':
+      return {
+        ...base,
+        code: 'semester_unconfigured',
+        title: '请先设置学期',
+        message: '设置开学日期和教学周数后，才能按真实教学周生成出发建议。'
+      }
+    case 'semester_not_active': {
+      const semesterStatus = error.details.semester_status === 'before_term'
+        ? 'before_term'
+        : error.details.semester_status === 'after_term'
+          ? 'after_term'
+          : null
+      return {
+        ...base,
+        code: 'semester_not_active',
+        semesterStatus,
+        title: semesterStatus === 'before_term' ? '学期尚未开始' : '本学期已结束',
+        message: semesterStatus === 'before_term'
+          ? '现在不会提前套用第 1 周课程，开学后会自动启用。'
+          : '当前日期已经超过教学周范围，请设置新学期。'
+      }
+    }
+    case 'no_upcoming_course':
+      return {
+        ...base,
+        code: 'no_upcoming_course',
+        title: '本周暂无后续课程',
+        message: '这一教学周接下来没有要出发的课程，可以安心安排自己的时间。'
+      }
+    case 'course_location_incomplete': {
+      const courseId = positiveInteger(error.details.course_id)
+      const courseName = nonEmptyString(error.details.course_name)
+      return {
+        ...base,
+        code: 'course_location_incomplete',
+        courseId,
+        courseName,
+        title: courseName ? `“${courseName}”地点不完整` : `课程 #${courseId ?? '未知'} 地点不完整`,
+        message: '请补全上课建筑和完整教室，再重新生成出发建议。'
+      }
+    }
+    case 'schedule_conflict':
+      return {
+        ...base,
+        code: 'schedule_conflict',
+        title: '下一上课时间存在冲突',
+        message: '同一时间有多门课程，先在课表中确认正确安排。'
+      }
+    case 'course_data_invalid': {
+      const courseId = positiveInteger(error.details.course_id)
+      return {
+        ...base,
+        code: 'course_data_invalid',
+        courseId,
+        title: `课程 #${courseId ?? '未知'} 的时间或周次无法识别`,
+        message: '请修正这门课程的时间和周次后再试。'
+      }
+    }
+    default:
+      return {
+        ...base,
+        code: 'unexpected_error',
+        title: '暂时没能生成出发建议',
+        message: '请稍后重试；如果仍然失败，可以先检查课表和当前位置。'
+      }
+  }
 }
 
 export function getLocationDisplayInfo(

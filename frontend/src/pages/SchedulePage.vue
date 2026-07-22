@@ -1,23 +1,25 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { isAxiosError } from 'axios'
 import { showFailToast, showToast } from 'vant'
 import { useRoute, useRouter } from 'vue-router'
 
 import { getBuildings, type Building } from '@/api/buildings'
-import { getCourses } from '@/api/courses'
+import { extractBusinessError } from '@/api/errors'
 import { getScheduleSuggestion } from '@/api/schedule'
 import RealCampusMap from '@/components/RealCampusMap.vue'
 import TechIcon from '@/components/TechIcon.vue'
+import SemesterGate from '@/components/course/SemesterGate.vue'
+import { useAuthStore } from '@/stores/auth'
 import { useLocationStore } from '@/stores/location'
-import type { Course } from '@/types/course'
+import { useSemesterStore } from '@/stores/semester'
 import type { CampusMapPoint } from '@/types/map'
-import type { ScheduleSuggestion } from '@/types/schedule'
+import type { SchedulePageError, ScheduleSuggestion } from '@/types/schedule'
 import {
   filterScheduleLocations,
   formatDistance,
   getLocationDisplayInfo,
   getStatusMeta,
+  toSchedulePageError,
   type SearchableScheduleLocation
 } from '@/utils/schedule'
 
@@ -29,21 +31,29 @@ type ScheduleLocationOption = SearchableScheduleLocation & {
 
 const router = useRouter()
 const route = useRoute()
+const authStore = useAuthStore()
 const locationStore = useLocationStore()
+const semesterStore = useSemesterStore()
 const buildings = ref<Building[]>([])
-const courses = ref<Course[]>([])
 const selectedOption = ref('')
 const startQuery = ref('')
 const destinationQuery = ref('')
 const selectedDestination = ref<Building | null>(null)
 const suggestion = ref<ScheduleSuggestion | null>(null)
+const scheduleError = ref<SchedulePageError | null>(null)
 const loading = ref(true)
 const generating = ref(false)
-const errorMessage = ref('')
+const loadErrorMessage = ref('')
 /** Route map is secondary to the departure card; start collapsed after a suggestion. */
 const mapExpanded = ref(true)
 
-const hasCourses = computed(() => courses.value.length > 0)
+const semesterLabel = computed(() => {
+  const semester = semesterStore.semester
+  if (!semester || semester.status === 'unconfigured') return '未设置'
+  if (semester.status === 'before_term') return '未开始'
+  if (semester.status === 'after_term') return '已结束'
+  return `第 ${semester.current_week} 周`
+})
 const startLocations = computed<ScheduleLocationOption[]>(() =>
   buildings.value.map((building) => ({
     id: building.id,
@@ -93,25 +103,14 @@ const suggestionRouteToPoint = computed<CampusMapPoint | null>(() => {
 })
 const routeReady = computed(() => Boolean(routeFromPoint.value && suggestionRouteToPoint.value))
 
-function getErrorMessage(error: unknown): string {
-  if (isAxiosError(error)) {
-    const code = error.response?.data?.code
-    const message = error.response?.data?.message
-    if (code === 'no_upcoming_course') return '本教学周暂无后续课程'
-    if (code === 'semester_unconfigured') return '请先在课表页设置学期'
-    if (code === 'semester_not_active') return '当前日期不在已设置的教学周内'
-    if (code === 'schedule_conflict') return '同一时间存在多门课程，请先修复课表冲突'
-    if (code === 'course_location_incomplete') return '下一节课的地点不完整，请先补全教学楼和教室'
-    if (typeof message === 'string') return message
-    const detail = error.response?.data?.detail
-    if (typeof detail === 'string') return detail
-  }
-  return '出发建议生成失败，请稍后重试'
+function clearGeneratedState() {
+  suggestion.value = null
+  scheduleError.value = null
 }
 
 function applySelectedOption(value: string) {
   selectedOption.value = value
-  suggestion.value = null
+  clearGeneratedState()
   if (value.startsWith('building:')) {
     const id = Number(value.replace('building:', ''))
     const building = buildings.value.find((item) => item.id === id)
@@ -127,6 +126,7 @@ function selectStartLocation(location: ScheduleLocationOption) {
 }
 
 function selectDestination(building: Building) {
+  clearGeneratedState()
   selectedDestination.value = building
   destinationQuery.value = building.name
 }
@@ -146,14 +146,20 @@ function clearDestination() {
 
 async function loadScheduleData() {
   loading.value = true
-  errorMessage.value = ''
+  loadErrorMessage.value = ''
+  scheduleError.value = null
+  const userId = authStore.currentUser?.id
+  if (!userId) {
+    loadErrorMessage.value = '登录信息尚未加载完成，请重新进入页面'
+    loading.value = false
+    return
+  }
   try {
-    const [buildingResult, courseResult] = await Promise.all([
+    const [buildingResult] = await Promise.all([
       getBuildings(),
-      getCourses().catch(() => [])
+      semesterStore.load(userId)
     ])
     buildings.value = buildingResult
-    courses.value = courseResult
 
     if (!locationStore.selectedLocation && buildingResult.length > 0) {
       applySelectedOption(`building:${buildingResult[0].id}`)
@@ -164,7 +170,7 @@ async function loadScheduleData() {
       if (destination) selectDestination(destination)
     }
   } catch (error) {
-    errorMessage.value = getErrorMessage(error)
+    loadErrorMessage.value = extractBusinessError(error).message
   } finally {
     loading.value = false
   }
@@ -177,7 +183,7 @@ async function useBrowserLocation() {
     startQuery.value = location.source === 'fallback'
       ? '校园中心'
       : '浏览器定位：当前位置'
-    suggestion.value = null
+    clearGeneratedState()
     showToast(location.source === 'fallback'
       ? '定位超时，已使用校园中心，可搜索调整'
       : '已使用当前位置')
@@ -187,6 +193,7 @@ async function useBrowserLocation() {
 }
 
 async function generateSuggestion() {
+  if (semesterStore.semester?.status !== 'active') return
   const payload = locationStore.suggestionPayload
   if (!payload) {
     showFailToast('请先选择当前位置')
@@ -194,17 +201,46 @@ async function generateSuggestion() {
   }
 
   generating.value = true
-  errorMessage.value = ''
+  scheduleError.value = null
+  clearDestination()
   try {
     suggestion.value = await getScheduleSuggestion(payload)
-    // Keep the departure time first; map is one tap away.
     mapExpanded.value = false
   } catch (error) {
     suggestion.value = null
-    errorMessage.value = getErrorMessage(error)
+    scheduleError.value = toSchedulePageError(extractBusinessError(error))
   } finally {
     generating.value = false
   }
+}
+
+function openScheduleRecovery() {
+  const error = scheduleError.value
+  if (!error) return
+  if (error.courseId && ['course_location_incomplete', 'course_data_invalid'].includes(error.code)) {
+    router.push(`/courses/${error.courseId}/edit`)
+    return
+  }
+  if (['semester_unconfigured', 'semester_not_active'].includes(error.code)) {
+    router.push('/courses#semester-settings')
+    return
+  }
+  if (error.code === 'schedule_conflict') {
+    router.push('/courses')
+    return
+  }
+  void generateSuggestion()
+}
+
+function recoveryActionLabel(error: SchedulePageError): string {
+  if (error.courseId && ['course_location_incomplete', 'course_data_invalid'].includes(error.code)) {
+    return '编辑这门课程'
+  }
+  if (['semester_unconfigured', 'semester_not_active'].includes(error.code)) {
+    return '检查学期设置'
+  }
+  if (error.code === 'schedule_conflict') return '查看课表冲突'
+  return '重新生成'
 }
 
 function toggleRouteMap() {
@@ -238,12 +274,28 @@ onMounted(loadScheduleData)
         </div>
 
         <div class="journey-meta">
-          <div><span>已保存课程</span><strong>{{ courses.length }}</strong></div>
+          <div><span>真实教学周</span><strong>{{ semesterLabel }}</strong></div>
           <div><span>校园地点</span><strong>{{ buildings.length }}</strong></div>
           <div><span>当前位置</span><strong>{{ locationStore.selectedLocation ? '已选择' : '待选择' }}</strong></div>
         </div>
       </header>
 
+      <section v-if="loading" class="route-planner fresh-card">
+        <div class="planner-loading" aria-live="polite">
+          <span><i></i><i></i><i></i></span>
+          <p>正在读取学期和校园地点...</p>
+        </div>
+      </section>
+
+      <van-empty v-else-if="loadErrorMessage || !semesterStore.semester" image="error" :description="loadErrorMessage || '学期状态暂时不可用'">
+        <van-button type="primary" size="small" @click="loadScheduleData">重新加载</van-button>
+      </van-empty>
+
+      <SemesterGate
+        v-else
+        :status="semesterStore.semester.status"
+        :current-week="semesterStore.currentWeek"
+      >
       <section
         v-reveal="{ from: 'right', distance: 38, stagger: 48 }"
         class="route-planner fresh-card"
@@ -252,33 +304,13 @@ onMounted(loadScheduleData)
           <div>
             <span>路线安排</span>
             <h2>你现在在哪里？</h2>
-            <p>终点可以不选，我们会使用下一节课的地点。</p>
+            <p>出发时间始终按下一节课计算；手动终点只用于预览地图。</p>
           </div>
-          <button type="button" aria-label="刷新地点和课程" @click="loadScheduleData">
+          <button type="button" aria-label="刷新学期和地点" @click="loadScheduleData">
             <van-icon name="replay" />
           </button>
         </header>
 
-        <div v-if="loading" class="planner-loading" aria-live="polite">
-          <span><i></i><i></i><i></i></span>
-          <p>正在整理地点和课程...</p>
-        </div>
-
-        <van-empty v-else-if="errorMessage && !suggestion" image="error" :description="errorMessage">
-          <div class="page-actions">
-            <van-button
-              v-if="!hasCourses"
-              type="primary"
-              size="small"
-              @click="router.push('/courses/new')"
-            >
-              添加课程
-            </van-button>
-            <van-button plain size="small" @click="loadScheduleData">重新加载</van-button>
-          </div>
-        </van-empty>
-
-        <template v-else>
           <div class="route-node start-node">
             <span class="node-pin"><i></i></span>
             <div class="node-body">
@@ -343,7 +375,7 @@ onMounted(loadScheduleData)
             <div class="node-body">
               <div class="node-label">
                 <span>终点</span>
-                <small>选填 · 默认下一节课</small>
+                <small>选填 · 只预览地图</small>
               </div>
 
               <van-search
@@ -398,7 +430,23 @@ onMounted(loadScheduleData)
             <TechIcon v-if="!generating" name="arrow" :size="20" />
             <span v-else class="soft-loader"></span>
           </button>
-        </template>
+      </section>
+
+      <section
+        v-if="scheduleError"
+        class="schedule-recovery fresh-card"
+        :data-error-code="scheduleError.code"
+        role="status"
+      >
+        <span class="recovery-mark" aria-hidden="true">!</span>
+        <div>
+          <small>这次没有生成路线</small>
+          <h2>{{ scheduleError.title }}</h2>
+          <p>{{ scheduleError.message }}</p>
+        </div>
+        <button type="button" data-testid="schedule-recovery-action" @click="openScheduleRecovery">
+          {{ recoveryActionLabel(scheduleError) }}
+        </button>
       </section>
 
       <section
@@ -418,7 +466,7 @@ onMounted(loadScheduleData)
           <h2>{{ suggestion.next_course.course_name }}</h2>
           <p>
             {{ suggestion.next_course.start_time }}—{{ suggestion.next_course.end_time }}
-            · {{ suggestion.target_building.name }} {{ suggestion.next_course.room_name }}
+            · {{ suggestion.target_building.name }} · {{ suggestion.next_course.room_name }}
           </p>
           <span v-if="suggestion.next_course.teacher">{{ suggestion.next_course.teacher }}</span>
           <span v-if="suggestion.next_course.weeks">{{ suggestion.next_course.weeks }} 周</span>
@@ -480,6 +528,7 @@ onMounted(loadScheduleData)
           />
         </div>
       </section>
+      </SemesterGate>
     </div>
   </section>
 </template>
@@ -995,6 +1044,57 @@ onMounted(loadScheduleData)
   border-top-color: #fff;
   border-radius: 50%;
   animation: loader-spin 780ms linear infinite;
+}
+
+.schedule-recovery {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+  border-color: #ead4ae;
+  background: #fffaf0;
+  padding: 18px;
+}
+
+.recovery-mark {
+  display: grid;
+  width: 35px;
+  height: 35px;
+  place-items: center;
+  border-radius: 50%;
+  background: #f1d8a9;
+  color: #704f20;
+  font-size: 18px;
+  font-weight: 900;
+}
+
+.schedule-recovery > div { min-width: 0; }
+.schedule-recovery small { color: #76664e; font-size: 12px; font-weight: 750; }
+.schedule-recovery h2 {
+  margin: 4px 0 0;
+  color: #40382c;
+  font-size: 19px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.schedule-recovery p {
+  margin: 6px 0 0;
+  color: #655c4d;
+  font-size: 13px;
+  line-height: 1.7;
+}
+.schedule-recovery > button {
+  grid-column: 2;
+  justify-self: start;
+  min-height: 44px;
+  border: 0;
+  border-radius: 999px;
+  background: #4f7d58;
+  color: #fff;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 800;
+  padding: 0 17px;
 }
 
 .map-card {

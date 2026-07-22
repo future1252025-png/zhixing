@@ -5,6 +5,7 @@ import { useRoute, useRouter } from 'vue-router'
 
 import { getCourses } from '@/api/courses'
 import { extractBusinessError } from '@/api/errors'
+import { fetchSemester } from '@/api/semester'
 import TechIcon from '@/components/TechIcon.vue'
 import { useAuthStore } from '@/stores/auth'
 import { sanitizeInternalRedirect } from '@/router'
@@ -26,7 +27,7 @@ async function handleSubmit() {
   submitting.value = true
   try {
     await authStore.login(form)
-    await prepareLoginIntro(getCourses)
+    await prepareLoginIntro(getCourses, fetchSemester)
     showSuccessToast('欢迎回来')
     const redirect = sanitizeInternalRedirect(route.query.redirect)
     await router.replace(redirect)

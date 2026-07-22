@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
 import {
   APP_LAUNCH_INTRO_STORAGE_KEY,
@@ -11,8 +11,8 @@ import {
   prepareLoginIntro,
   shouldPlayAppLaunchIntro
 } from './loginIntro'
-import { SELECTED_WEEK_STORAGE_KEY } from './course'
 import type { Course } from '@/types/course'
+import type { SemesterState } from '@/types/semester'
 
 function createStorage() {
   const values = new Map<string, string>()
@@ -44,6 +44,15 @@ function createCourse(overrides: Partial<Course>): Course {
       name: building?.name ?? '教1',
       type: building?.type ?? '教学楼'
     }
+  }
+}
+
+function activeSemester(currentWeek = 4): SemesterState {
+  return {
+    status: 'active',
+    start_date: '2026-08-31',
+    total_weeks: 20,
+    current_week: currentWeek
   }
 }
 
@@ -111,8 +120,6 @@ describe('login intro flag', () => {
 
   it('prepares a snapshot from the next course for the login intro', async () => {
     const introStorage = createStorage()
-    const weekStorage = createStorage()
-    weekStorage.setItem(SELECTED_WEEK_STORAGE_KEY, '13')
     const courses = [
       createCourse({
         id: 1,
@@ -150,9 +157,9 @@ describe('login intro flag', () => {
 
     await prepareLoginIntro(
       async () => courses,
+      async () => activeSemester(13),
       {
         introStorage,
-        weekStorage,
         now: new Date('2026-06-01T12:00:00')
       }
     )
@@ -173,9 +180,47 @@ describe('login intro flag', () => {
       async () => {
         throw new Error('network')
       },
+      async () => activeSemester(),
       { introStorage }
     )
 
+    expect(consumeLoginIntroFlag(introStorage)).toBe(true)
+    expect(consumeLoginIntroSnapshot(introStorage)).toBeNull()
+  })
+
+  it('builds the login snapshot from the real current week', async () => {
+    const introStorage = createStorage()
+    await prepareLoginIntro(
+      async () => [
+        createCourse({ course_name: '真实周课程', weeks: '4' }),
+        createCourse({ id: 9, course_name: '浏览周课程', weeks: '9' })
+      ],
+      async () => activeSemester(4),
+      {
+        introStorage,
+        now: new Date('2026-09-21T07:00:00+08:00')
+      }
+    )
+
+    expect(consumeLoginIntroSnapshot(introStorage)?.courseName).toBe('真实周课程')
+  })
+
+  it('uses a generic intro outside an active semester without loading courses', async () => {
+    const introStorage = createStorage()
+    const loadCourses = vi.fn<() => Promise<Course[]>>().mockResolvedValue([])
+
+    await prepareLoginIntro(
+      loadCourses,
+      async () => ({
+        status: 'before_term',
+        start_date: '2026-08-31',
+        total_weeks: 20,
+        current_week: null
+      }),
+      { introStorage }
+    )
+
+    expect(loadCourses).not.toHaveBeenCalled()
     expect(consumeLoginIntroFlag(introStorage)).toBe(true)
     expect(consumeLoginIntroSnapshot(introStorage)).toBeNull()
   })

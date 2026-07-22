@@ -139,13 +139,19 @@ def _location_is_incomplete(course: Course) -> bool:
 
 
 def _location_error(courses: list[Course]) -> BusinessError:
-    course_ids = sorted(course.id for course in courses)
+    ordered_courses = sorted(courses, key=lambda course: course.id)
+    primary_course = ordered_courses[0]
+    course_ids = [course.id for course in ordered_courses]
     return BusinessError(
         409,
         "course_location_incomplete",
         "下一节课的地点信息不完整，请先补全教学楼和教室",
         fields=["building_id", "room_name"],
-        details={"course_id": course_ids[0], "course_ids": course_ids},
+        details={
+            "course_id": primary_course.id,
+            "course_name": primary_course.course_name,
+            "course_ids": course_ids,
+        },
     )
 
 

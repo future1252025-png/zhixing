@@ -1,5 +1,6 @@
 import type { Course } from '@/types/course'
-import { filterCoursesByWeek, findNextCourse, readSelectedWeek } from './course'
+import type { SemesterState } from '@/types/semester'
+import { filterCoursesByWeek, findNextCourse } from './course'
 
 export const APP_LAUNCH_INTRO_STORAGE_KEY = 'campusmind-launch-intro-seen-v1'
 export const LOGIN_INTRO_STORAGE_KEY = 'campusmind-login-intro-pending'
@@ -18,14 +19,8 @@ type StorageLike = {
   removeItem(key: string): void
 }
 
-type WeekStorageLike = {
-  getItem(key: string): string | null
-  setItem(key: string, value: string): void
-}
-
 type PrepareLoginIntroOptions = {
   introStorage?: StorageLike
-  weekStorage?: WeekStorageLike
   now?: Date
 }
 
@@ -101,16 +96,20 @@ export function consumeLoginIntroSnapshot(
 
 export async function prepareLoginIntro(
   loadCourses: () => Promise<Course[]>,
+  loadSemester: () => Promise<SemesterState>,
   options: PrepareLoginIntroOptions = {}
 ): Promise<void> {
   const introStorage = options.introStorage ?? sessionStorage
-  const weekStorage = options.weekStorage ?? localStorage
 
   try {
-    const selectedWeek = readSelectedWeek(weekStorage)
+    const semester = await loadSemester()
+    if (semester.status !== 'active' || semester.current_week === null) {
+      markLoginIntroPending(introStorage)
+      return
+    }
     const courses = await loadCourses()
     const nextCourse = findNextCourse(
-      filterCoursesByWeek(courses, selectedWeek),
+      filterCoursesByWeek(courses, semester.current_week),
       options.now ?? new Date()
     )
     markLoginIntroPending(introStorage, buildLoginIntroSnapshot(nextCourse))

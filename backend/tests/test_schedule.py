@@ -557,6 +557,7 @@ def test_same_time_incomplete_courses_report_location_not_schedule_conflict(
 
     assert_business_error(raised, "course_location_incomplete")
     assert raised.value.details["course_id"] == first.id
+    assert raised.value.details["course_name"] == "待确认 A"
     assert raised.value.details["course_ids"] == [first.id, second.id]
 
 

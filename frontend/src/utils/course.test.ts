@@ -14,8 +14,6 @@ import {
   getTeachingWeekOptions,
   groupCoursesByWeekday,
   isCourseActiveInWeek,
-  readSelectedWeek,
-  writeSelectedWeek,
   validateCourseForm
 } from './course'
 import type { Course } from '@/types/course'
@@ -135,22 +133,6 @@ describe('course helpers', () => {
     )
 
     expect(filtered.map((course) => course.id)).toEqual([1, 2])
-  })
-
-  it('reads and writes selected teaching week safely', () => {
-    const storage = new Map<string, string>()
-    const localStorageLike = {
-      getItem: (key: string) => storage.get(key) ?? null,
-      setItem: (key: string, value: string) => storage.set(key, value)
-    }
-
-    expect(readSelectedWeek(localStorageLike)).toBe(1)
-    writeSelectedWeek(localStorageLike, 13)
-    expect(readSelectedWeek(localStorageLike)).toBe(13)
-    writeSelectedWeek(localStorageLike, 16)
-    expect(readSelectedWeek(localStorageLike)).toBe(16)
-    writeSelectedWeek(localStorageLike, 99)
-    expect(readSelectedWeek(localStorageLike)).toBe(1)
   })
 
   it('provides all teaching week options including week 16', () => {

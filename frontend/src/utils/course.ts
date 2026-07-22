@@ -32,12 +32,6 @@ export type WeeksRangePickerValue = {
   endWeek: number
 }
 
-type StorageLike = {
-  getItem(key: string): string | null
-  setItem(key: string, value: string): void
-}
-
-export const SELECTED_WEEK_STORAGE_KEY = 'campusmind-selected-week'
 export const MAX_TEACHING_WEEK = 20
 
 const COURSE_TIME_SLOTS: CourseTimeSlot[] = [
@@ -161,22 +155,6 @@ export function buildCourseColorMap(
     colorMap[course.id] = subjectColors[subject]
     return colorMap
   }, {})
-}
-
-export function readSelectedWeek(storage: StorageLike): number {
-  const value = Number(storage.getItem(SELECTED_WEEK_STORAGE_KEY))
-  if (Number.isInteger(value) && value >= 1 && value <= MAX_TEACHING_WEEK) {
-    return value
-  }
-  return 1
-}
-
-export function writeSelectedWeek(storage: StorageLike, week: number): void {
-  if (Number.isInteger(week) && week >= 1 && week <= MAX_TEACHING_WEEK) {
-    storage.setItem(SELECTED_WEEK_STORAGE_KEY, String(week))
-  } else {
-    storage.setItem(SELECTED_WEEK_STORAGE_KEY, '1')
-  }
 }
 
 export function buildEmptyCourseForm(): CourseForm {
