@@ -4,6 +4,10 @@ import {
   buildEmptyCourseForm,
   buildCourseCreateQuery,
   buildCourseColorMap,
+  courseUsesStandardSlotTime,
+  formatCourseLocation,
+  formatTimetableCourseLocation,
+  getCourseDisplaySlot,
   parseWeeksRangeToPicker,
   buildWeeksRange,
   filterCoursesByWeek,
@@ -210,6 +214,36 @@ describe('course helpers', () => {
       end_time: '09:40'
     })
     expect(slots).toHaveLength(5)
+  })
+
+  it('assigns every course to one display slot and preserves exceptional times', () => {
+    const standardSlot = getCourseDisplaySlot(baseCourse)
+    const exceptionalCourse = { ...baseCourse, start_time: '09:00', end_time: '10:40' }
+    const exceptionalSlot = getCourseDisplaySlot(exceptionalCourse)
+
+    expect(standardSlot?.section).toBe('1-2')
+    expect(courseUsesStandardSlotTime(baseCourse, standardSlot!)).toBe(true)
+    expect(exceptionalSlot?.section).toBe('1-2')
+    expect(courseUsesStandardSlotTime(exceptionalCourse, exceptionalSlot!)).toBe(false)
+  })
+
+  it('keeps full locations while removing timetable-only campus and building repetition', () => {
+    const course = {
+      ...baseCourse,
+      building: { ...baseCourse.building, name: '湖北大学(武昌主校区)-教4' },
+      room_name: '教4-211'
+    }
+    const detailedCourse = {
+      ...baseCourse,
+      building: { ...baseCourse.building, name: '湖北大学武昌校区国际教育学院' },
+      room_name: '东区三层 A101 交互设计实验室'
+    }
+
+    expect(formatCourseLocation(course)).toBe('湖北大学(武昌主校区)-教4 · 教4-211')
+    expect(formatTimetableCourseLocation(course)).toBe('教4-211')
+    expect(formatTimetableCourseLocation(detailedCourse)).toBe(
+      '国际教育学院 · 东区三层 A101 交互设计实验室'
+    )
   })
 
   it('finds same-day time overlaps without blocking save', () => {

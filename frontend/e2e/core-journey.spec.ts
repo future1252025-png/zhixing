@@ -32,7 +32,30 @@ async function expectReadableControls(page: Page): Promise<void> {
       const element = button as HTMLButtonElement
       const rect = element.getBoundingClientRect()
       const text = (element.innerText || element.getAttribute('aria-label') || '').trim()
-      const center = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2)
+      const centerX = rect.left + rect.width / 2
+      const centerY = rect.top + rect.height / 2
+      let centerIsClipped = false
+      let ancestor = element.parentElement
+      while (ancestor) {
+        const style = getComputedStyle(ancestor)
+        if (/(auto|scroll|hidden|clip)/.test(`${style.overflow} ${style.overflowX} ${style.overflowY}`)) {
+          const ancestorRect = ancestor.getBoundingClientRect()
+          if (
+            centerX < ancestorRect.left || centerX > ancestorRect.right ||
+            centerY < ancestorRect.top || centerY > ancestorRect.bottom
+          ) {
+            centerIsClipped = true
+            break
+          }
+        }
+        ancestor = ancestor.parentElement
+      }
+      const controlIsFullyInViewport =
+        rect.left >= 0 && rect.right <= window.innerWidth &&
+        rect.top >= 0 && rect.bottom <= window.innerHeight
+      const center = controlIsFullyInViewport && !centerIsClipped
+        ? document.elementFromPoint(centerX, centerY)
+        : null
       const issues: string[] = []
       if (!text) issues.push('缺少可读文字或 aria-label')
       if (rect.height < 40) issues.push(`高度只有 ${rect.height.toFixed(1)}px`)
@@ -41,7 +64,7 @@ async function expectReadableControls(page: Page): Promise<void> {
         center
         && center !== element
         && !element.contains(center)
-        && !center.closest('.app-tabbar, .van-toast, .van-overlay')
+        && !center.closest('.app-tabbar, .van-nav-bar, .van-toast, .van-overlay')
       ) {
         issues.push('中心被其他元素遮挡')
       }
@@ -105,7 +128,7 @@ test('mobile core journey keeps weeks, locations, sessions, text, and actions tr
   expect((await createResponse).status()).toBe(201)
   await page.waitForURL('**/courses')
   await expect(page.getByText('交互设计基础').first()).toBeVisible()
-  await expect(page.getByText(`湖北大学武昌校区国际教育学院 · ${fullManualRoom}`)).toBeVisible()
+  await expect(page.getByText(`国际教育学院 · ${fullManualRoom}`)).toBeVisible()
 
   await page.goto('/courses/new')
   await fillCourseForm(page, '不应写入的冲突课程')
@@ -143,11 +166,31 @@ test('mobile core journey keeps weeks, locations, sessions, text, and actions tr
   await page.getByTestId('view-courses').click()
   await page.waitForURL('**/courses')
 
-  await expect(page.getByText(`湖北大学武昌校区国际教育学院 · ${fullManualRoom}`)).toBeVisible()
-  await expect(page.getByText(`湖北大学(武昌主校区)-教4 · ${fullImportRoom}`)).toBeVisible()
-  await page.getByText(`湖北大学(武昌主校区)-教4 · ${fullImportRoom}`).scrollIntoViewIfNeeded()
+  const manualCourseCard = page.locator('.timetable-course').filter({ hasText: '交互设计基础' })
+  const importedCourseCard = page.locator('.timetable-course').filter({ hasText: '自然语言处理' })
+  await expect(manualCourseCard).toHaveCount(1)
+  await expect(importedCourseCard).toHaveCount(1)
+  await expect(manualCourseCard.getByText(`国际教育学院 · ${fullManualRoom}`)).toBeVisible()
+  await expect(importedCourseCard.getByText(`教4 · ${fullImportRoom}`)).toBeVisible()
+  await expect(manualCourseCard.locator('time')).toHaveText('09:00—10:40')
+  await expect(importedCourseCard.locator('time')).toHaveCount(0)
+  await expect(page.locator('.course-place-index')).toHaveCount(0)
+  const courseCardHeights = await page.locator('.timetable-course').evaluateAll((cards) =>
+    cards.map((card) => Math.round(card.getBoundingClientRect().height))
+  )
+  expect(new Set(courseCardHeights).size).toBe(1)
+  await importedCourseCard.getByText(`教4 · ${fullImportRoom}`).scrollIntoViewIfNeeded()
   await screenshot(page, testInfo, 'course-list.png')
   await assertPageQuality(page)
+
+  await importedCourseCard.locator('.course-content').click()
+  await expect(page.locator('.van-action-sheet__description')).toHaveText(
+    `湖北大学(武昌主校区)-教4 · ${fullImportRoom}`
+  )
+  await page.getByRole('button', { name: /查看地点/ }).click()
+  await page.waitForURL('**/buildings/**')
+  await page.goBack()
+  await page.waitForURL('**/courses')
 
   await page.locator('#courseWeekSelect').selectOption('9')
   await expect(page.getByText('浏览第 9 周').first()).toBeVisible()

@@ -6,7 +6,6 @@ import { useRouter } from 'vue-router'
 import { deleteCourse, getCourses } from '@/api/courses'
 import { extractBusinessError } from '@/api/errors'
 import TechIcon from '@/components/TechIcon.vue'
-import CourseCard from '@/components/course/CourseCard.vue'
 import SemesterSettingsCard from '@/components/course/SemesterSettingsCard.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useSemesterStore } from '@/stores/semester'
@@ -15,7 +14,11 @@ import type { SemesterUpdate } from '@/types/semester'
 import {
   buildCourseCreateQuery,
   buildCourseColorMap,
+  courseUsesStandardSlotTime,
   filterCoursesByWeek,
+  formatCourseLocation,
+  formatTimetableCourseLocation,
+  getCourseDisplaySlot,
   getCourseTimeSlots,
   getQuickWeekOptions,
   getTeachingWeekOptions,
@@ -47,16 +50,28 @@ const weekOptions = computed(() =>
 )
 const timeSlots = getCourseTimeSlots()
 const courseActionOptions = [
+  { name: '查看地点', subname: '打开地图与地点频道' },
   { name: '编辑课程' },
   { name: '删除课程', color: '#b65f56' }
 ]
 const visibleCourses = computed(() => filterCoursesByWeek(courses.value, selectedWeek.value))
-const orderedVisibleCourses = computed(() =>
-  [...visibleCourses.value].sort((left, right) =>
-    left.weekday - right.weekday ||
-    left.start_time.localeCompare(right.start_time) ||
-    left.id - right.id
-  )
+const timetableCoursesByCell = computed(() => {
+  const coursesByCell = new Map<string, Course[]>()
+  for (const course of visibleCourses.value) {
+    const slot = getCourseDisplaySlot(course)
+    if (!slot) continue
+    const key = `${slot.section}-${course.weekday}`
+    const cellCourses = coursesByCell.get(key) ?? []
+    cellCourses.push(course)
+    cellCourses.sort((left, right) =>
+      left.start_time.localeCompare(right.start_time) || left.id - right.id
+    )
+    coursesByCell.set(key, cellCourses)
+  }
+  return coursesByCell
+})
+const activeCourseLocation = computed(() =>
+  activeCourse.value ? formatCourseLocation(activeCourse.value) : ''
 )
 const quickWeekOptions = computed(() =>
   getQuickWeekOptions(
@@ -136,20 +151,8 @@ function openCreateForSlot(weekday: number, slot: { start_time: string; end_time
   openCreatePage(buildCourseCreateQuery(weekday, slot, selectedWeek.value))
 }
 
-function getCellCourses(weekday: number, slot: { start_time: string; end_time: string }) {
-  return visibleCourses.value
-    .filter(
-      (course) =>
-        course.weekday === weekday &&
-        course.start_time < slot.end_time &&
-        course.end_time > slot.start_time
-    )
-    .sort((left, right) => {
-      if (left.start_time === right.start_time) {
-        return left.id - right.id
-      }
-      return left.start_time.localeCompare(right.start_time)
-    })
+function getCellCourses(weekday: number, slot: { section: string }) {
+  return timetableCoursesByCell.value.get(`${slot.section}-${weekday}`) ?? []
 }
 
 function getCourseStyle(course: Course): Record<string, string> {
@@ -167,6 +170,9 @@ async function handleCourseAction(action: { name: string }) {
   const course = activeCourse.value
   actionSheetVisible.value = false
   if (!course) return
+  if (action.name === '查看地点') {
+    router.push(`/buildings/${course.building_id}`)
+  }
   if (action.name === '编辑课程') {
     openEditPage(course.id)
   }
@@ -246,7 +252,7 @@ onMounted(() => {
             <strong>{{ String(selectedWeek).padStart(2, '0') }}</strong>
             <span>浏览第 {{ selectedWeek }} 周</span>
           </div>
-          <p>{{ courseCountText }} · 点课程可以编辑，点空白格可以添加</p>
+          <p>{{ courseCountText }} · 点课程查看地点或编辑，点空白格添加</p>
         </div>
         <div class="course-actions">
           <button type="button" @click="openImportPage">
@@ -321,7 +327,7 @@ onMounted(() => {
         class="timetable-shell fresh-card"
       >
         <header class="table-heading">
-          <div><h2>一周课表</h2><p>横向滑动，看看每天的安排</p></div>
+          <div><h2>一周课表</h2><p>横向滑动，课程名和地点完整显示</p></div>
           <span><i></i> 浏览第 {{ selectedWeek }} 周</span>
         </header>
 
@@ -382,45 +388,24 @@ onMounted(() => {
                   <button
                     type="button"
                     class="course-content"
+                    :aria-label="`${course.course_name}，${formatCourseLocation(course)}，点击查看课程操作`"
                     :disabled="deletingId === course.id"
                     @click="openCourseActions(course)"
                   >
                     <strong>{{ course.course_name }}</strong>
                     <span class="compact-location">
                       <van-icon name="location-o" />
-                      <span>
-                        <b>{{ course.building.name }}</b>
-                        <small>{{ course.room_name }}</small>
-                      </span>
+                      <span>{{ formatTimetableCourseLocation(course) }}</span>
                     </span>
-                    <time>{{ course.start_time }}—{{ course.end_time }}</time>
+                    <time v-if="!courseUsesStandardSlotTime(course, slot)" class="exception-time">
+                      {{ course.start_time }}—{{ course.end_time }}
+                    </time>
                   </button>
                 </article>
               </div>
             </template>
           </div>
         </div>
-
-        <section v-if="orderedVisibleCourses.length" class="course-place-index">
-          <header>
-            <div>
-              <span>地点清单</span>
-              <h3>这周要去哪里上课</h3>
-            </div>
-            <small>建筑与教室完整显示</small>
-          </header>
-
-          <div class="place-course-list">
-            <CourseCard
-              v-for="course in orderedVisibleCourses"
-              :key="`place-${course.id}`"
-              :course="course"
-              :disabled="deletingId === course.id"
-              @select="openCourseActions(course)"
-              @edit="openEditPage"
-            />
-          </div>
-        </section>
 
         <div v-if="visibleCourses.length === 0" class="empty-week">
           <span><TechIcon name="calendar" :size="22" /></span>
@@ -434,6 +419,9 @@ onMounted(() => {
 
       <van-action-sheet
         v-model:show="actionSheetVisible"
+        class="course-action-sheet"
+        :title="activeCourse?.course_name"
+        :description="activeCourseLocation"
         :actions="courseActionOptions"
         cancel-text="取消"
         close-on-click-action
@@ -783,7 +771,7 @@ onMounted(() => {
   overscroll-behavior-x: contain;
   border-top: 1px solid var(--fresh-line);
   outline: none;
-  scroll-padding-left: 58px;
+  scroll-padding-left: 64px;
   scrollbar-color: #aebca9 transparent;
   scrollbar-width: thin;
   scroll-snap-type: x proximity;
@@ -798,8 +786,8 @@ onMounted(() => {
 
 .timetable-grid {
   display: grid;
-  grid-template-columns: 58px repeat(7, minmax(96px, 1fr));
-  min-width: 730px;
+  grid-template-columns: 64px repeat(7, minmax(128px, 1fr));
+  min-width: 960px;
   width: 100%;
   background: #fbfcf8;
 }
@@ -864,7 +852,7 @@ onMounted(() => {
   left: 0;
   z-index: 3;
   display: grid;
-  min-height: 136px;
+  min-height: 154px;
   align-content: center;
   justify-items: center;
   background: #edf2e9;
@@ -895,8 +883,9 @@ onMounted(() => {
 .course-cell {
   position: relative;
   display: grid;
-  min-height: 136px;
-  align-content: start;
+  min-height: 154px;
+  align-content: stretch;
+  grid-auto-rows: minmax(0, 1fr);
   gap: 5px;
   background: #fbfcf8;
   padding: 5px;
@@ -940,8 +929,9 @@ onMounted(() => {
 
 .timetable-course {
   --course-accent: var(--fresh-green);
+  box-sizing: border-box;
+  height: 100%;
   min-width: 0;
-  overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--course-accent) 28%, #d8e1d5);
   border-radius: 14px 14px 11px 14px;
   background:
@@ -951,8 +941,10 @@ onMounted(() => {
 
 .course-content {
   display: flex;
+  box-sizing: border-box;
   width: 100%;
-  min-height: 124px;
+  height: 100%;
+  min-height: 142px;
   scroll-margin-block: 76px 108px;
   flex-direction: column;
   align-items: stretch;
@@ -974,12 +966,9 @@ onMounted(() => {
 }
 
 .course-content strong {
-  display: -webkit-box;
-  overflow: hidden;
   font-size: 13px;
   line-height: 1.35;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+  overflow-wrap: anywhere;
 }
 
 .compact-location {
@@ -990,6 +979,7 @@ onMounted(() => {
   margin-top: 5px;
   color: var(--fresh-muted);
   font-size: 12px;
+  line-height: 1.35;
 }
 
 .compact-location > i {
@@ -998,142 +988,17 @@ onMounted(() => {
 }
 
 .compact-location > span {
-  display: grid;
   min-width: 0;
-  gap: 2px;
-}
-
-.compact-location b {
-  display: -webkit-box;
-  overflow: hidden;
   font-size: 12px;
   font-weight: 650;
-  line-height: 1.25;
   overflow-wrap: anywhere;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
 }
 
-.compact-location small {
-  overflow: hidden;
-  color: var(--fresh-ink);
-  font-size: 12px;
-  font-weight: 760;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.course-content time {
+.course-content .exception-time {
   margin-top: auto;
   color: color-mix(in srgb, var(--course-accent) 72%, var(--fresh-ink));
   font-size: 12px;
   font-weight: 720;
-}
-
-.course-place-index {
-  margin: 13px 12px 2px;
-  border: 1px solid rgba(83, 119, 82, 0.13);
-  border-radius: 21px;
-  background: #f2f7ed;
-  padding: 14px;
-}
-
-.course-place-index > header {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 10px;
-}
-
-.course-place-index > header span {
-  color: var(--fresh-green-dark);
-  font-size: 12px;
-  font-weight: 760;
-}
-
-.course-place-index h3 {
-  margin: 3px 0 0;
-  color: var(--fresh-ink);
-  font-size: 15px;
-}
-
-.course-place-index > header > small {
-  color: var(--fresh-muted);
-  font-size: 12px;
-}
-
-.place-course-list {
-  display: grid;
-  gap: 8px;
-}
-
-.place-course-list > button {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 10px;
-  border: 1px solid #dfe8dc;
-  border-radius: 16px;
-  background: #fffdf8;
-  color: var(--fresh-ink);
-  cursor: pointer;
-  padding: 10px;
-  text-align: left;
-}
-
-.place-day {
-  display: grid;
-  min-width: 42px;
-  min-height: 35px;
-  place-items: center;
-  border-radius: 12px;
-  background: var(--fresh-mint);
-  color: var(--fresh-green-dark);
-  font-size: 12px;
-  font-weight: 760;
-  padding: 0 7px;
-}
-
-.place-course-copy {
-  display: grid;
-  min-width: 0;
-  gap: 3px;
-}
-
-.place-course-copy > strong {
-  color: var(--fresh-ink);
-  font-size: 12px;
-}
-
-.place-course-copy > span {
-  display: flex;
-  align-items: flex-start;
-  gap: 4px;
-  color: var(--fresh-green-dark);
-  font-size: 12px;
-  line-height: 1.4;
-}
-
-.place-course-copy b {
-  font-weight: 700;
-  overflow-wrap: anywhere;
-}
-
-.place-course-copy small {
-  color: var(--fresh-text);
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.place-course-list time {
-  align-self: start;
-  border-radius: 9px;
-  background: #eef3e9;
-  color: var(--fresh-text);
-  font-size: 12px;
-  font-weight: 720;
-  padding: 6px 7px;
 }
 
 .timetable-course.is-deleting {
@@ -1145,6 +1010,23 @@ onMounted(() => {
 .timetable-course.is-deleting .course-content {
   color: var(--fresh-muted);
   cursor: wait;
+}
+
+:global(.course-action-sheet) {
+  --van-action-sheet-description-color: var(--text-secondary);
+  --van-action-sheet-subname-color: var(--text-secondary);
+}
+
+:global(.course-action-sheet .van-action-sheet__header) {
+  min-height: var(--van-action-sheet-header-height);
+  padding: 13px 46px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+:global(.course-action-sheet .van-action-sheet__description) {
+  font-weight: 600;
+  overflow-wrap: anywhere;
 }
 
 .empty-week {

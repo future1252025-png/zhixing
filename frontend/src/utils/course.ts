@@ -46,6 +46,69 @@ export function getCourseTimeSlots(): CourseTimeSlot[] {
   return [...COURSE_TIME_SLOTS]
 }
 
+export function formatCourseLocation(
+  course: Pick<Course, 'building' | 'room_name'>
+): string {
+  return `${course.building.name.trim()} · ${course.room_name.trim()}`
+}
+
+function compactBuildingName(name: string): string {
+  const compact = name
+    .trim()
+    .replace(/^湖北大学(?:[（(][^）)]+[）)]|武昌主校区|武昌校区|阳逻校区)?\s*[-—·]?\s*/u, '')
+  return compact || name.trim()
+}
+
+function normalizeLocationPart(value: string): string {
+  return value.replace(/[\s·()（）\-—_]/g, '').toLocaleLowerCase('zh-Hans-CN')
+}
+
+export function formatTimetableCourseLocation(
+  course: Pick<Course, 'building' | 'room_name'>
+): string {
+  const building = compactBuildingName(course.building.name)
+  const room = course.room_name.trim()
+  const normalizedBuilding = normalizeLocationPart(building)
+  const normalizedRoom = normalizeLocationPart(room)
+
+  if (normalizedBuilding && normalizedRoom.includes(normalizedBuilding)) {
+    return room
+  }
+  return `${building} · ${room}`
+}
+
+export function getCourseDisplaySlot(
+  course: Pick<Course, 'start_time' | 'end_time'>
+): CourseTimeSlot | null {
+  const start = parseTimeValue(course.start_time)
+  if (start === null) {
+    return null
+  }
+
+  const containingSlot = COURSE_TIME_SLOTS.find((slot) => {
+    const slotStart = parseTimeValue(slot.start_time)
+    const slotEnd = parseTimeValue(slot.end_time)
+    return slotStart !== null && slotEnd !== null && start >= slotStart && start < slotEnd
+  })
+  if (containingSlot) {
+    return { ...containingSlot }
+  }
+
+  const nearestSlot = [...COURSE_TIME_SLOTS].sort((left, right) => {
+    const leftStart = parseTimeValue(left.start_time) ?? 0
+    const rightStart = parseTimeValue(right.start_time) ?? 0
+    return Math.abs(leftStart - start) - Math.abs(rightStart - start)
+  })[0]
+  return nearestSlot ? { ...nearestSlot } : null
+}
+
+export function courseUsesStandardSlotTime(
+  course: Pick<Course, 'start_time' | 'end_time'>,
+  slot: Pick<CourseTimeSlot, 'start_time' | 'end_time'>
+): boolean {
+  return course.start_time === slot.start_time && course.end_time === slot.end_time
+}
+
 export function getTeachingWeekOptions(maxWeek = MAX_TEACHING_WEEK): number[] {
   const safeMaxWeek = Number.isInteger(maxWeek)
     ? Math.min(Math.max(maxWeek, 1), 30)

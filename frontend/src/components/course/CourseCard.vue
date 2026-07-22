@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 
 import type { Course } from '@/types/course'
+import { formatCourseLocation } from '@/utils/course'
 import { getWeekdayLabel } from '@/utils/course'
 
 const props = withDefaults(
@@ -21,9 +22,7 @@ const emit = defineEmits<{
   edit: [courseId: number]
 }>()
 
-const fullLocation = computed(() =>
-  `${props.course.building.name} · ${props.course.room_name}`
-)
+const fullLocation = computed(() => formatCourseLocation(props.course))
 const sourceLabel = computed(() =>
   props.course.source_kind === 'import' ? '导入课程' : '手动添加'
 )
