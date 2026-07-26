@@ -29,11 +29,13 @@
     "@axe-core/playwright": "^4.12.1",
     "@playwright/test": "^1.61.1",
     "@types/node": "^22.10.2",
+    "@vant/auto-import-resolver": "^1.3.0",
     "@vitejs/plugin-vue": "^5.2.1",
     "@vue/test-utils": "^2.4.11",
     "cross-env": "^10.1.0",
     "jsdom": "^25.0.1",
     "typescript": "^5.7.2",
+    "unplugin-vue-components": "^32.1.0",
     "vite": "^6.4.3",
     "vitest": "^4.1.7",
     "vue-tsc": "^2.2.0"

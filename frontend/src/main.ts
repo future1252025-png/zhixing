@@ -1,22 +1,9 @@
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
-import {
-  ActionSheet,
-  Button,
-  Cell,
-  CellGroup,
-  ConfigProvider,
-  Empty,
-  Field,
-  Form,
-  Icon,
-  NavBar,
-  Search,
-  Tabbar,
-  TabbarItem,
-  showFailToast
-} from 'vant'
-import 'vant/lib/index.css'
+import { showFailToast } from 'vant'
+// 函数式调用组件（showToast/showConfirmDialog 等）不经模板解析，需手动引入样式
+import 'vant/es/toast/style/index'
+import 'vant/es/dialog/style/index'
 
 import App from './App.vue'
 import revealDirective from './directives/reveal'
@@ -35,20 +22,6 @@ const pinia = createPinia()
 app.use(pinia)
 app.use(router)
 app.directive('reveal', revealDirective)
-
-app.use(Button)
-app.use(ActionSheet)
-app.use(Cell)
-app.use(CellGroup)
-app.use(ConfigProvider)
-app.use(Empty)
-app.use(Field)
-app.use(Form)
-app.use(Icon)
-app.use(NavBar)
-app.use(Search)
-app.use(Tabbar)
-app.use(TabbarItem)
 
 setUnauthorizedHandler(async () => {
   const auth = useAuthStore(pinia)
