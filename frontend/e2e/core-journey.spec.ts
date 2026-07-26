@@ -86,10 +86,9 @@ async function fillCourseForm(page: Page, courseName: string): Promise<void> {
   await page.locator('.van-field').filter({ hasText: '上课周次' }).locator('input').fill('1-16')
   await page.locator('.van-field').filter({ hasText: '开始时间' }).locator('input').fill('09:00')
   await page.locator('.van-field').filter({ hasText: '结束时间' }).locator('input').fill('10:40')
-  await page.locator('.building-search input').fill('国际教育学院')
-  await page.getByLabel('选择上课建筑').selectOption({
-    label: '湖北大学武昌校区国际教育学院'
-  })
+  await page.locator('.building-picker .picker-trigger').click()
+  await page.locator('.picker-sheet .sheet-search input').fill('国际教育学院')
+  await page.locator('.picker-sheet .sheet-option', { hasText: '国际教育学院' }).first().click()
   await page.locator('.van-field').filter({ hasText: /^教室/ }).locator('input').fill(fullManualRoom)
 }
 
@@ -156,9 +155,11 @@ test('mobile core journey keeps weeks, locations, sessions, text, and actions tr
   await page.getByTestId('raw-location').scrollIntoViewIfNeeded()
   await screenshot(page, testInfo, 'import-needs-resolution.png')
   await page.locator('input[name="room_name"]').fill(fullImportRoom)
-  const buildingSelect = page.locator('select[name="building_id"]')
-  if (!(await buildingSelect.inputValue())) {
-    await buildingSelect.selectOption({ label: '湖北大学(武昌主校区)-教4' })
+  const buildingTrigger = page.locator('.candidate-card .building-picker .picker-trigger')
+  if ((await buildingTrigger.innerText()).includes('请选择建筑')) {
+    await buildingTrigger.click()
+    await page.locator('.picker-sheet .sheet-search input').fill('教4')
+    await page.locator('.picker-sheet .sheet-option', { hasText: '教4' }).first().click()
   }
   await expect(page.getByTestId('commit-import')).toBeEnabled()
   await page.getByTestId('commit-import').click()

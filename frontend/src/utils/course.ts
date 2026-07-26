@@ -212,20 +212,59 @@ export function buildCourseCreateQuery(
   return query
 }
 
+/**
+ * 课程色策展调色板：从「清新自然」体系派生的 12 个中等明度低饱和色。
+ * 消费端（CourseCard）会用 color-mix 与白/墨混出底色与文字色，
+ * 因此这里保持中等深度、色相拉开即可。
+ */
+export const COURSE_ACCENT_PALETTE = [
+  '#4f7d58', // 松绿
+  '#7ca06b', // 叶绿
+  '#8a9a4e', // 橄榄
+  '#b8863e', // 赭金
+  '#bf7a55', // 陶土
+  '#b56d76', // 玫瑰
+  '#9784b5', // 丁香
+  '#6f9faa', // 雾蓝
+  '#4f8577', // 湖绿
+  '#6d84b0', // 远山蓝
+  '#7d8a97', // 青灰
+  '#8c7a5b' // 麦茶棕
+] as const
+
+function hashSubjectName(subject: string): number {
+  let hash = 5381
+  for (const ch of subject) {
+    hash = ((hash << 5) + hash + (ch.codePointAt(0) ?? 0)) >>> 0
+  }
+  return hash
+}
+
+/**
+ * 按课程名哈希取色：同名课程跨周、跨会话、跨增删稳定拿到同一个色，
+ * 保住「颜色=科目」的记忆。哈希撞车时在调色板内线性探测，
+ * 科目数不超过调色板长度时保证互不相同。
+ */
 export function buildCourseColorMap(
   courses: Pick<Course, 'id' | 'course_name'>[]
 ): Record<number, string> {
   const subjectNames = Array.from(
     new Set(courses.map((course) => course.course_name.trim() || `课程 ${course.id}`))
   ).sort((left, right) => left.localeCompare(right, 'zh-Hans-CN'))
-  const total = Math.max(subjectNames.length, 1)
-  const subjectColors = subjectNames.reduce<Record<string, string>>((colorMap, subject, index) => {
-    const hue = Math.round((index * 360) / total)
-    const saturation = 62 + (index % 3) * 7
-    const lightness = 36 + (index % 4) * 4
-    colorMap[subject] = `hsl(${hue} ${saturation}% ${lightness}%)`
-    return colorMap
-  }, {})
+
+  const taken = new Set<number>()
+  const subjectColors: Record<string, string> = {}
+  for (const subject of subjectNames) {
+    const start = hashSubjectName(subject) % COURSE_ACCENT_PALETTE.length
+    let slot = start
+    if (taken.size < COURSE_ACCENT_PALETTE.length) {
+      while (taken.has(slot)) {
+        slot = (slot + 1) % COURSE_ACCENT_PALETTE.length
+      }
+      taken.add(slot)
+    }
+    subjectColors[subject] = COURSE_ACCENT_PALETTE[slot]
+  }
 
   return courses.reduce<Record<number, string>>((colorMap, course) => {
     const subject = course.course_name.trim() || `课程 ${course.id}`

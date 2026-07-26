@@ -47,11 +47,11 @@ defineProps<{
   position: relative;
   min-width: 0;
   overflow: hidden;
-  border: 1px solid #d9e5d6;
+  border: 1px solid var(--fresh-line);
   border-radius: 28px 28px 21px 28px;
-  background: #fffdf8;
+  background: var(--fresh-paper);
   box-shadow: 0 14px 34px rgba(55, 78, 57, .08);
-  color: #2b3d30;
+  color: var(--fresh-ink);
   padding: 24px 116px 24px 20px;
 }
 
@@ -64,7 +64,7 @@ defineProps<{
 
 .semester-gate h2 {
   margin: 7px 0 0;
-  color: #293b2e;
+  color: var(--fresh-ink);
   font-size: 22px;
   line-height: 1.35;
 }
@@ -72,7 +72,7 @@ defineProps<{
 .semester-gate p {
   max-width: 430px;
   margin: 8px 0 16px;
-  color: #58675b;
+  color: var(--fresh-text);
   font-size: 13px;
   line-height: 1.75;
 }
@@ -83,8 +83,8 @@ defineProps<{
   display: inline-flex;
   min-height: 44px;
   align-items: center;
-  border-radius: 999px;
-  background: #4f7d58;
+  border-radius: var(--radius-pill);
+  background: var(--fresh-green);
   color: #fff;
   font-size: 14px;
   font-weight: 800;

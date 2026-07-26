@@ -1,16 +1,26 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { showFailToast, showSuccessToast } from 'vant'
+import { showConfirmDialog, showFailToast, showSuccessToast } from 'vant'
 import { useRouter } from 'vue-router'
 
 import { extractBusinessError } from '@/api/errors'
 import TechIcon from '@/components/TechIcon.vue'
 import { useAuthStore } from '@/stores/auth'
+import { useCoursesStore } from '@/stores/courses'
+import { useSemesterStore } from '@/stores/semester'
 
 const router = useRouter()
 const authStore = useAuthStore()
+const coursesStore = useCoursesStore()
+const semesterStore = useSemesterStore()
 const editing = ref(false)
 const saving = ref(false)
+// hero 底部换成真实数据：课程数 / 教学周 / 学号（拿不到就显示占位横线）
+const courseCount = ref<number | null>(null)
+const currentWeekText = computed(() =>
+  semesterStore.currentWeek !== null ? `第 ${semesterStore.currentWeek} 周` : '—'
+)
+const studentIdText = computed(() => authStore.currentUser?.student_id || '未填写')
 const avatarColors = ['#6f9474', '#6f9faa', '#c58f6f', '#9b8caf', '#b07b74', '#ad9a62']
 const profileForm = reactive({
   nickname: '',
@@ -18,12 +28,19 @@ const profileForm = reactive({
   avatar_color: avatarColors[0]
 })
 
-const avatarText = computed(() => {
+const savedAvatarText = computed(() => {
   const text = authStore.currentUser?.avatar_text || authStore.displayName.slice(0, 1) || '智'
   return text.slice(0, 2)
 })
+// 编辑态所见即所得：hero 头像读表单草稿，非编辑态读账号已保存值
+const avatarText = computed(() => {
+  if (!editing.value) return savedAvatarText.value
+  return profileForm.avatar_text.trim().slice(0, 2) || savedAvatarText.value
+})
 const avatarStyle = computed(() => ({
-  '--avatar-color': authStore.currentUser?.avatar_color || avatarColors[0]
+  '--avatar-color':
+    (editing.value ? profileForm.avatar_color : authStore.currentUser?.avatar_color) ||
+    avatarColors[0]
 }))
 
 function getErrorMessage(error: unknown): string {
@@ -32,7 +49,7 @@ function getErrorMessage(error: unknown): string {
 
 function syncProfileForm() {
   profileForm.nickname = authStore.currentUser?.nickname || authStore.displayName
-  profileForm.avatar_text = authStore.currentUser?.avatar_text || avatarText.value
+  profileForm.avatar_text = authStore.currentUser?.avatar_text || savedAvatarText.value
   profileForm.avatar_color = authStore.currentUser?.avatar_color || avatarColors[0]
 }
 
@@ -86,9 +103,31 @@ onMounted(async () => {
     }
   }
   syncProfileForm()
+
+  // 真实统计：课程数与教学周，失败静默降级为占位
+  void coursesStore
+    .ensureLoaded()
+    .then((courses) => {
+      courseCount.value = courses.length
+    })
+    .catch(() => {})
+  const userId = authStore.currentUser?.id
+  if (userId && !semesterStore.semester) {
+    void semesterStore.load(userId).catch(() => {})
+  }
 })
 
 async function handleLogout() {
+  try {
+    await showConfirmDialog({
+      title: '退出登录',
+      message: '确定要退出当前账号吗？',
+      confirmButtonText: '退出',
+      cancelButtonText: '再想想'
+    })
+  } catch {
+    return
+  }
   authStore.logout()
   await router.replace('/login')
 }
@@ -117,23 +156,30 @@ async function handleLogout() {
         </div>
 
         <button type="button" class="edit-profile-button" @click="startEdit">
-          <van-icon name="edit" />
+          <TechIcon name="edit" :size="15" />
           <span>编辑资料</span>
         </button>
 
         <footer>
-          <div><span>账号状态</span><strong>正常</strong></div>
-          <div><span>身份</span><strong>{{ authStore.currentUser?.role || '学生' }}</strong></div>
-          <div><span>资料</span><strong>已同步</strong></div>
+          <div><span>本学期课程</span><strong>{{ courseCount !== null ? `${courseCount} 门` : '—' }}</strong></div>
+          <div><span>教学周</span><strong>{{ currentWeekText }}</strong></div>
+          <div><span>学号</span><strong>{{ studentIdText }}</strong></div>
         </footer>
       </section>
 
-      <Transition name="editor-panel">
-        <section v-if="editing" class="profile-editor fresh-card">
+      <van-popup
+        v-model:show="editing"
+        position="bottom"
+        round
+        safe-area-inset-bottom
+        class="profile-editor-popup"
+        overlay-class="profile-editor-overlay"
+      >
+        <section class="profile-editor">
           <div class="fresh-section-heading">
             <div>
-              <h2>换一个新的样子</h2>
-              <p>修改后会保存到你的账号</p>
+              <h2>编辑资料</h2>
+              <p>头像会在上方即时预览，保存后写入账号</p>
             </div>
             <span class="editor-leaf" aria-hidden="true"></span>
           </div>
@@ -181,10 +227,10 @@ async function handleLogout() {
             >
               保存修改
             </van-button>
-            <van-button block plain @click="cancelEdit">暂时不改</van-button>
+            <van-button block plain @click="cancelEdit">取消</van-button>
           </div>
         </section>
-      </Transition>
+      </van-popup>
 
       <section
         v-reveal="{ from: 'right', distance: 38, stagger: 50 }"
@@ -197,15 +243,15 @@ async function handleLogout() {
 
         <div class="account-list">
           <article>
-            <span><van-icon name="contact" /></span>
+            <span><TechIcon name="contact" :size="18" /></span>
             <div><small>用户名</small><strong>{{ authStore.currentUser?.username || '未加载' }}</strong></div>
           </article>
           <article>
-            <span><van-icon name="notes-o" /></span>
+            <span><TechIcon name="notes" :size="18" /></span>
             <div><small>学号</small><strong>{{ authStore.currentUser?.student_id || '尚未填写' }}</strong></div>
           </article>
           <article>
-            <span><van-icon name="certificate" /></span>
+            <span><TechIcon name="certificate" :size="18" /></span>
             <div><small>账号角色</small><strong>{{ authStore.currentUser?.role || '学生' }}</strong></div>
           </article>
         </div>
@@ -224,7 +270,7 @@ async function handleLogout() {
 
       <div v-reveal="{ from: 'right', distance: 34 }" class="logout-wrap">
         <button type="button" class="logout-button" @click="handleLogout">
-          <span><van-icon name="back-top" /></span>
+          <span><TechIcon name="to-top" :size="18" /></span>
           <span><strong>退出当前账号</strong><small>下次回来还可以继续使用</small></span>
           <TechIcon name="arrow" :size="18" />
         </button>
@@ -258,7 +304,7 @@ async function handleLogout() {
   border-radius: 34px 34px 26px 34px;
   background:
     linear-gradient(150deg, rgba(255, 255, 255, 0.48), transparent 43%),
-    #e5eee0;
+    var(--fresh-mint);
   padding: 30px 20px 0;
   text-align: center;
   box-shadow: var(--fresh-shadow-soft);
@@ -320,9 +366,9 @@ async function handleLogout() {
 }
 
 .avatar-wrap span {
-  font-family: "STKaiti", "KaiTi", sans-serif;
+  font-family: var(--font-serif);
   font-size: 38px;
-  font-weight: 720;
+  font-weight: 700;
 }
 
 .avatar-wrap i {
@@ -331,9 +377,9 @@ async function handleLogout() {
   bottom: -5px;
   width: 22px;
   height: 22px;
-  border: 4px solid #e5eee0;
+  border: 4px solid var(--fresh-mint);
   border-radius: 50%;
-  background: #7fa16f;
+  background: var(--fresh-leaf);
 }
 
 .profile-copy {
@@ -345,13 +391,13 @@ async function handleLogout() {
 .profile-copy > span {
   color: var(--fresh-green);
   font-size: 12px;
-  font-weight: 720;
+  font-weight: 700;
 }
 
 .profile-copy h1 {
   margin: 5px 0 0;
   color: var(--fresh-ink);
-  font-family: "STKaiti", "KaiTi", "PingFang SC", sans-serif;
+  font-family: var(--font-serif);
   font-size: 32px;
   line-height: 1;
 }
@@ -379,8 +425,15 @@ async function handleLogout() {
   color: var(--fresh-green-dark);
   cursor: pointer;
   font-size: 12px;
-  font-weight: 720;
+  font-weight: 700;
   padding: 0 11px;
+}
+
+/* 视觉保持 36px，伪元素外扩补足 44px 命中区 */
+.edit-profile-button::after {
+  position: absolute;
+  inset: -4px;
+  content: "";
 }
 
 .profile-hero footer {
@@ -408,16 +461,49 @@ async function handleLogout() {
 .profile-hero footer span { color: var(--fresh-muted); font-size: 12px; }
 .profile-hero footer strong { color: var(--fresh-ink); font-size: 14px; }
 
-.profile-editor,
 .account-card {
   padding: 18px;
+}
+
+/* 编辑时减弱遮罩，让 hero 头像的实时预览保持可见 */
+.profile-page :deep(.profile-editor-overlay) {
+  background: color-mix(in srgb, var(--fresh-ink) 20%, transparent);
+  backdrop-filter: none;
+}
+
+/* 底部弹层与页面同宽上限，圆角走令牌 */
+.profile-editor-popup {
+  right: 0;
+  left: 0;
+  width: min(100%, var(--page-max));
+  margin: 0 auto;
+  overflow: hidden;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  background: var(--fresh-paper);
+}
+
+.profile-editor {
+  max-height: min(78vh, 560px);
+  overflow-y: auto;
+  padding: 14px 18px 18px;
+}
+
+/* 顶部示意条仅装饰，关闭走取消按钮或点遮罩 */
+.profile-editor::before {
+  display: block;
+  width: 44px;
+  height: 5px;
+  margin: 0 auto 14px;
+  border-radius: var(--radius-pill);
+  background: var(--fresh-line-strong);
+  content: "";
 }
 
 .editor-leaf {
   width: 29px;
   height: 39px;
   border-radius: 100% 0 100% 0;
-  background: #dcebd6;
+  background: var(--fresh-mint);
   transform: rotate(34deg);
 }
 
@@ -432,14 +518,15 @@ async function handleLogout() {
 .color-picker {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  padding: 4px 0;
+  gap: 2px;
+  padding: 2px 0;
 }
 
+/* 色块命中区 ≥44px，视觉色点居中缩小 */
 .color-picker button {
   display: grid;
-  width: 31px;
-  height: 31px;
+  width: 44px;
+  height: 44px;
   place-items: center;
   border: 2px solid transparent;
   border-radius: 50%;
@@ -448,8 +535,8 @@ async function handleLogout() {
 }
 
 .color-picker button i {
-  width: 22px;
-  height: 22px;
+  width: 24px;
+  height: 24px;
   border-radius: 50%;
   background: var(--picker-color);
 }
@@ -466,11 +553,11 @@ async function handleLogout() {
 }
 
 .account-stamp {
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--fresh-mint);
   color: var(--fresh-green-dark);
   font-size: 12px;
-  font-weight: 720;
+  font-weight: 700;
   padding: 6px 9px;
 }
 
@@ -486,8 +573,8 @@ async function handleLogout() {
   gap: 10px;
   align-items: center;
   min-height: 61px;
-  border-radius: 18px;
-  background: #f7f9f3;
+  border-radius: var(--radius-md);
+  background: var(--fresh-paper-2);
   padding: 9px 11px;
 }
 
@@ -496,18 +583,18 @@ async function handleLogout() {
   width: 38px;
   height: 38px;
   place-items: center;
-  border-radius: 14px;
+  border-radius: var(--radius-sm);
   background: var(--fresh-mint);
   color: var(--fresh-green-dark);
 }
 
 .account-list article:nth-child(2) > span {
   background: var(--fresh-sky);
-  color: #5e838b;
+  color: var(--cm-chat-dark);
 }
 
 .account-list article:nth-child(3) > span {
-  background: #f6ecd4;
+  background: var(--cm-amber-soft);
   color: #9a793d;
 }
 
@@ -526,7 +613,7 @@ async function handleLogout() {
   gap: 11px;
   align-items: center;
   border-radius: 23px;
-  background: #e4eff0;
+  background: var(--fresh-sky);
   padding: 15px;
 }
 
@@ -537,7 +624,7 @@ async function handleLogout() {
   place-items: center;
   border-radius: 15px;
   background: rgba(255, 255, 255, 0.66);
-  color: #5c8790;
+  color: var(--cm-chat-dark);
 }
 
 .data-note strong { color: var(--fresh-ink); font-size: 15px; }
@@ -568,8 +655,8 @@ async function handleLogout() {
   width: 38px;
   height: 38px;
   place-items: center;
-  border-radius: 14px;
-  background: #f7e7e2;
+  border-radius: var(--radius-sm);
+  background: var(--cm-red-soft);
 }
 
 .logout-button > span:nth-child(2) {
@@ -579,19 +666,6 @@ async function handleLogout() {
 
 .logout-button strong { font-size: 15px; }
 .logout-button small { color: #a87b75; font-size: 13px; }
-
-.editor-panel-enter-active,
-.editor-panel-leave-active {
-  transition:
-    opacity 300ms ease,
-    transform 440ms var(--fresh-spring);
-}
-
-.editor-panel-enter-from,
-.editor-panel-leave-to {
-  opacity: 0;
-  transform: translateY(-12px) scale(0.98) rotate(-0.5deg);
-}
 
 @keyframes profile-sun {
   50% { transform: translateY(-5px) scale(1.04); }

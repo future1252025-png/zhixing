@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 
 import type { Building } from '@/api/buildings'
+import BuildingPicker from '@/components/BuildingPicker.vue'
 import type {
   ImportCandidate,
   ImportIssue,
@@ -47,11 +48,10 @@ function issuesFor(field: string): ImportIssue[] {
   return allIssues.value.filter((issue) => issue.field === field || issue.field === 'course')
 }
 
-function updateBuilding(event: Event) {
-  const value = Number((event.target as HTMLSelectElement).value)
+function updateBuilding(value: number | null) {
   emit('update:resolution', {
     ...props.resolution,
-    building_id: Number.isInteger(value) && value > 0 ? value : null
+    building_id: Number.isInteger(value) && Number(value) > 0 ? value : null
   })
 }
 
@@ -138,16 +138,12 @@ function updateRoom(event: Event) {
 
       <label>
         <span>上课建筑 <em>必填</em></span>
-        <select
-          name="building_id"
-          :value="resolution.building_id ?? ''"
-          @change="updateBuilding"
-        >
-          <option value="">请选择建筑</option>
-          <option v-for="building in buildings" :key="building.id" :value="building.id">
-            {{ building.name }}
-          </option>
-        </select>
+        <BuildingPicker
+          :model-value="resolution.building_id"
+          :buildings="buildings"
+          placeholder="请选择建筑"
+          @update:model-value="updateBuilding"
+        />
         <small v-if="candidate.suggested_building_name">
           文件地点建议：{{ candidate.suggested_building_name }}
         </small>
@@ -184,9 +180,9 @@ function updateRoom(event: Event) {
   display: grid;
   min-width: 0;
   gap: 14px;
-  border: 1px solid #dce6d7;
-  border-radius: 26px 26px 20px 26px;
-  background: #fffdf8;
+  border: 1px solid var(--fresh-line);
+  border-radius: var(--radius-lg) var(--radius-lg) 20px var(--radius-lg);
+  background: var(--fresh-paper);
   box-shadow: 0 16px 38px rgba(59, 79, 57, .08);
   padding: 17px;
   scroll-margin-top: 18px;
@@ -195,7 +191,7 @@ function updateRoom(event: Event) {
 
 .candidate-card.has-issues { border-color: #e2c59a; }
 .candidate-card.is-highlighted {
-  border-color: #b45d4e;
+  border-color: var(--cm-red);
   box-shadow: 0 0 0 4px rgba(180, 93, 78, .13), 0 18px 42px rgba(82, 58, 51, .12);
   transform: translateY(-2px);
 }
@@ -213,7 +209,7 @@ function updateRoom(event: Event) {
   height: 42px;
   place-items: center;
   border-radius: 50% 50% 42% 50%;
-  background: #e4efdd;
+  background: var(--fresh-mint);
   color: #4e7053;
   font-family: ui-monospace, monospace;
   font-size: 13px;
@@ -221,25 +217,25 @@ function updateRoom(event: Event) {
 }
 
 .candidate-heading > span:nth-child(2) { display: grid; min-width: 0; gap: 2px; }
-.candidate-heading small { color: #667168; font-size: 12px; }
-.candidate-heading strong { color: #2d4032; font-size: 17px; overflow-wrap: anywhere; }
+.candidate-heading small { color: var(--fresh-muted); font-size: 12px; }
+.candidate-heading strong { color: var(--fresh-ink); font-size: 17px; overflow-wrap: anywhere; }
 .candidate-heading > b {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  border-radius: 999px;
-  background: #fff0d8;
+  border-radius: var(--radius-pill);
+  background: var(--cm-amber-soft);
   color: #80551e;
   font-size: 12px;
   padding: 7px 9px;
 }
-.candidate-heading > b.ready { background: #e5f0df; color: #3d6747; }
+.candidate-heading > b.ready { background: var(--fresh-mint); color: var(--fresh-green-dark); }
 .candidate-heading > b i { font-style: normal; }
 
 .source-panel {
   overflow: hidden;
   border: 1px solid #e5e3d8;
-  border-radius: 18px;
+  border-radius: var(--radius-md);
   background: #faf8f1;
 }
 
@@ -252,17 +248,17 @@ function updateRoom(event: Event) {
   padding: 10px 12px;
 }
 .panel-title span { color: #48554b; font-size: 13px; font-weight: 800; }
-.panel-title small { color: #68716a; font-size: 12px; }
+.panel-title small { color: var(--fresh-muted); font-size: 12px; }
 .source-panel dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 0; }
 .source-panel dl > div { min-width: 0; border-bottom: 1px solid #ebe8de; padding: 10px 12px; }
 .source-panel dl > div:nth-child(odd) { border-right: 1px solid #ebe8de; }
 .source-panel dl > div:nth-last-child(-n + 2) { border-bottom: 0; }
-.source-panel dt { color: #747d76; font-size: 11px; }
+.source-panel dt { color: var(--fresh-muted); font-size: 11px; }
 .source-value {
   margin: 3px 0 0;
-  color: #303b33;
+  color: var(--fresh-ink);
   font-size: 13px;
-  font-weight: 680;
+  font-weight: 600;
   line-height: 1.55;
   overflow-wrap: anywhere;
   word-break: break-word;
@@ -271,12 +267,12 @@ function updateRoom(event: Event) {
 
 .parsed-panel {
   border-radius: 16px;
-  background: #edf3e8;
+  background: var(--fresh-mint);
   padding: 11px 12px;
 }
-.parsed-panel > span { color: #607064; font-size: 12px; font-weight: 800; }
+.parsed-panel > span { color: var(--fresh-muted); font-size: 12px; font-weight: 800; }
 .parsed-panel p { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 0; }
-.parsed-panel p b { border-radius: 999px; background: #fffdf8; color: #47594b; font-size: 12px; padding: 5px 8px; }
+.parsed-panel p b { border-radius: var(--radius-pill); background: var(--fresh-paper); color: #47594b; font-size: 12px; padding: 5px 8px; }
 
 .mapping-panel {
   display: grid;
@@ -284,35 +280,33 @@ function updateRoom(event: Event) {
   gap: 12px;
   min-width: 0;
   margin: 0;
-  border: 1px solid #cfdcca;
-  border-radius: 18px;
-  background: #f5f9f1;
+  border: 1px solid var(--fresh-line-strong);
+  border-radius: var(--radius-md);
+  background: var(--fresh-paper-2);
   padding: 12px;
 }
-.mapping-panel legend { color: #3c5c43; font-size: 14px; font-weight: 850; padding: 0 7px; }
-.mapping-panel > p { grid-column: 1 / -1; margin: -3px 0 0; color: #626d65; font-size: 12px; line-height: 1.55; }
+.mapping-panel legend { color: var(--fresh-green-dark); font-size: 14px; font-weight: 850; padding: 0 7px; }
+.mapping-panel > p { grid-column: 1 / -1; margin: -3px 0 0; color: var(--fresh-muted); font-size: 12px; line-height: 1.55; }
 .mapping-panel > label { display: grid; min-width: 0; align-content: start; gap: 7px; }
 .mapping-panel label > span { color: #46564a; font-size: 13px; font-weight: 800; }
 .mapping-panel em { color: #934b40; font-size: 11px; font-style: normal; }
-.mapping-panel select,
 .mapping-panel input {
   width: 100%;
   min-height: 46px;
-  border: 1px solid #cbd9c7;
+  border: 1px solid var(--fresh-line-strong);
   border-radius: 12px;
-  background: #fffef9;
-  color: #293a2e;
+  background: var(--fresh-paper);
+  color: var(--fresh-ink);
   font: inherit;
   font-size: 16px;
   outline: none;
   padding: 0 11px;
 }
-.mapping-panel select:focus,
 .mapping-panel input:focus { border-color: #668e6b; box-shadow: 0 0 0 3px rgba(102,142,107,.13); }
-.mapping-panel label > small { color: #68736a; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.mapping-panel label > small { color: var(--fresh-muted); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
 .issue-list { display: grid; gap: 5px; margin: 7px 0 0; padding: 0; list-style: none; }
 .issue-list li { display: flex; align-items: flex-start; gap: 6px; color: #833e34; font-size: 12px; line-height: 1.5; }
-.issue-list i { display: grid; width: 17px; height: 17px; flex: 0 0 auto; place-items: center; border-radius: 50%; background: #9b4d40; color: #fff; font-size: 11px; font-style: normal; font-weight: 900; }
+.issue-list i { display: grid; width: 17px; height: 17px; flex: 0 0 auto; place-items: center; border-radius: 50%; background: var(--cm-red); color: #fff; font-size: 11px; font-style: normal; font-weight: 900; }
 
 @media (max-width: 560px) {
   .candidate-heading { grid-template-columns: auto minmax(0, 1fr); }

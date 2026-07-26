@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { showConfirmDialog, showFailToast, showSuccessToast } from 'vant'
 import { useRouter } from 'vue-router'
 
@@ -91,6 +91,48 @@ const todayWeekday = computed(() => {
   const day = new Date().getDay()
   return day === 0 ? 7 : day
 })
+// 当前时刻（分钟精度），驱动"此刻正在上的节次"呼吸高亮
+const nowMinutes = ref(getMinutesOfDay())
+let nowTimer: ReturnType<typeof setInterval> | undefined
+
+function getMinutesOfDay(): number {
+  const now = new Date()
+  return now.getHours() * 60 + now.getMinutes()
+}
+
+function toMinutes(time: string): number {
+  const [hour, minute] = time.split(':').map(Number)
+  return (hour || 0) * 60 + (minute || 0)
+}
+
+function isNowSlot(weekday: number, slot: { start_time: string; end_time: string }): boolean {
+  return (
+    isTodayColumn(weekday) &&
+    nowMinutes.value >= toMinutes(slot.start_time) &&
+    nowMinutes.value < toMinutes(slot.end_time)
+  )
+}
+
+// 左右滑动切周：横向位移明显大于纵向才触发，避免与纵向滚动打架
+let touchStartX = 0
+let touchStartY = 0
+
+function handleWeekTouchStart(event: TouchEvent) {
+  touchStartX = event.touches[0]?.clientX ?? 0
+  touchStartY = event.touches[0]?.clientY ?? 0
+}
+
+function handleWeekTouchEnd(event: TouchEvent) {
+  const touch = event.changedTouches[0]
+  if (!touch) return
+  const deltaX = touch.clientX - touchStartX
+  const deltaY = touch.clientY - touchStartY
+  if (Math.abs(deltaX) < 64 || Math.abs(deltaX) < Math.abs(deltaY) * 1.4) return
+  const nextWeek = selectedWeek.value + (deltaX < 0 ? 1 : -1)
+  if (weekOptions.value.includes(nextWeek)) {
+    selectedWeek.value = nextWeek
+  }
+}
 const selectedWeekDates = computed(() => {
   const startDate = semesterStore.semester?.start_date
   if (!startDate) {
@@ -194,7 +236,7 @@ function getCellCourses(weekday: number, slot: { section: string }) {
 
 function getCourseStyle(course: Course): Record<string, string> {
   return {
-    '--course-accent': courseColorMap.value[course.id] ?? '#678f70'
+    '--course-accent': courseColorMap.value[course.id] ?? 'var(--fresh-green)'
   }
 }
 
@@ -252,6 +294,13 @@ watch(
 
 onMounted(() => {
   void Promise.all([loadCourses(), loadSemester()])
+  nowTimer = setInterval(() => {
+    nowMinutes.value = getMinutesOfDay()
+  }, 60_000)
+})
+
+onBeforeUnmount(() => {
+  if (nowTimer) clearInterval(nowTimer)
 })
 </script>
 
@@ -324,7 +373,7 @@ onMounted(() => {
                 第 {{ week }} 周
               </option>
             </select>
-            <van-icon name="arrow-down" />
+            <TechIcon name="chevron-down" :size="15" />
           </label>
         </div>
 
@@ -353,11 +402,28 @@ onMounted(() => {
         <van-button type="primary" size="small" @click="loadCourses">重新加载</van-button>
       </van-empty>
 
-      <van-empty v-else-if="courses.length === 0" description="还没有课程安排">
-        <van-button type="primary" size="small" @click="openCreateForCurrentWeek">
-          添加第一门课程
-        </van-button>
-      </van-empty>
+      <section
+        v-else-if="courses.length === 0"
+        v-reveal="{ from: 'left', distance: 42 }"
+        class="courses-empty fresh-card"
+        aria-label="课表为空"
+      >
+        <div class="courses-empty-art" aria-hidden="true">
+          <i class="art-page"></i>
+          <i class="art-leaf art-leaf-1"></i>
+          <i class="art-leaf art-leaf-2"></i>
+          <i class="art-dot"></i>
+        </div>
+        <h2>课表还空着呢</h2>
+        <p>从教务系统文本一键导入整学期课表，<br />也可以先手动添加一门试试。</p>
+        <div class="courses-empty-actions">
+          <van-button type="primary" @click="openImportPage">
+            <TechIcon name="upload" :size="17" />
+            <span>导入课表</span>
+          </van-button>
+          <van-button plain @click="openCreateForCurrentWeek">手动添加</van-button>
+        </div>
+      </section>
 
       <section
         v-else
@@ -374,6 +440,8 @@ onMounted(() => {
             :key="selectedWeek"
             class="timetable-week-stage"
             :data-week="selectedWeek"
+            @touchstart.passive="handleWeekTouchStart"
+            @touchend.passive="handleWeekTouchEnd"
           >
             <div class="timetable-viewport" aria-label="完整展示周一到周日的周课表">
               <div class="week-head" aria-hidden="true">
@@ -414,7 +482,8 @@ onMounted(() => {
                       class="course-cell"
                       :class="{
                         'has-course': getCellCourses(weekday.value, slot).length > 0,
-                        'is-today': isTodayColumn(weekday.value)
+                        'is-today': isTodayColumn(weekday.value),
+                        'is-now': isNowSlot(weekday.value, slot)
                       }"
                     >
                       <button
@@ -441,6 +510,12 @@ onMounted(() => {
                           :disabled="deletingId === course.id"
                           @click="openCourseActions(course)"
                         >
+                          <i
+                            v-if="course.needs_location_review"
+                            class="review-flag"
+                            aria-hidden="true"
+                            title="地点待确认"
+                          ></i>
                           <strong>{{ course.course_name }}</strong>
                           <span class="compact-location">
                             <span class="location-mark" aria-hidden="true">@</span>
@@ -494,7 +569,7 @@ onMounted(() => {
   gap: 11px;
   color: var(--fresh-green-dark);
   font-size: 14px;
-  font-weight: 720;
+  font-weight: 700;
 }
 
 .semester-loading i {
@@ -516,7 +591,7 @@ onMounted(() => {
   border-radius: 28px 28px 22px 28px;
   background:
     linear-gradient(155deg, rgba(255, 255, 255, 0.38), transparent 45%),
-    #e6eee0;
+    var(--fresh-mint);
   padding: 18px;
   box-shadow: var(--fresh-shadow-soft);
 }
@@ -546,9 +621,9 @@ onMounted(() => {
 
 .week-number strong {
   color: var(--fresh-ink);
-  font-family: "STKaiti", "KaiTi", "PingFang SC", sans-serif;
+  font-family: var(--font-serif);
   font-size: clamp(40px, 12vw, 52px);
-  font-weight: 690;
+  font-weight: 600;
   line-height: 0.85;
   letter-spacing: -0.06em;
 }
@@ -556,7 +631,7 @@ onMounted(() => {
 .week-number span {
   color: var(--fresh-green-dark);
   font-size: 13px;
-  font-weight: 760;
+  font-weight: 700;
 }
 
 .course-hero-copy p {
@@ -579,12 +654,12 @@ onMounted(() => {
   align-items: center;
   gap: 6px;
   border: 1px solid rgba(79, 125, 88, 0.17);
-  border-radius: 14px;
+  border-radius: var(--radius-sm);
   background: rgba(255, 255, 255, 0.56);
   color: var(--fresh-green-dark);
   cursor: pointer;
   font-size: 13px;
-  font-weight: 720;
+  font-weight: 700;
   padding: 0 12px;
 }
 
@@ -637,7 +712,7 @@ onMounted(() => {
 .week-book-heading span {
   color: var(--fresh-ink);
   font-size: 15px;
-  font-weight: 750;
+  font-weight: 700;
 }
 
 .week-book-heading small {
@@ -663,7 +738,7 @@ onMounted(() => {
   background: transparent;
   color: inherit;
   font-size: 12px;
-  font-weight: 720;
+  font-weight: 700;
 }
 
 .week-switcher {
@@ -681,8 +756,8 @@ onMounted(() => {
   justify-items: center;
   overflow: hidden;
   border: 1px solid var(--fresh-line);
-  border-radius: 18px;
-  background: #fafbf6;
+  border-radius: var(--radius-md);
+  background: var(--fresh-paper-2);
   color: var(--fresh-muted);
   cursor: pointer;
   transition:
@@ -696,7 +771,7 @@ onMounted(() => {
 .week-switcher button > span {
   font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
   font-size: 16px;
-  font-weight: 680;
+  font-weight: 600;
 }
 
 .week-switcher button small {
@@ -711,7 +786,7 @@ onMounted(() => {
   width: 4px;
   height: 4px;
   border-radius: 50%;
-  background: #c2ccc0;
+  background: var(--fresh-line-strong);
 }
 
 .week-switcher button.active {
@@ -749,7 +824,7 @@ onMounted(() => {
 .course-loading i {
   width: 6px;
   height: 10px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--fresh-leaf);
   animation: course-load 850ms ease-in-out infinite alternate;
 }
@@ -757,6 +832,103 @@ onMounted(() => {
 .course-loading i:nth-child(2) { height: 22px; animation-delay: 150ms; }
 .course-loading i:nth-child(3) { height: 15px; animation-delay: 300ms; }
 .course-loading p { margin: 0; }
+
+/* 零课程空状态：品牌插画 + 导入（主）/手动（次）双入口 */
+.courses-empty {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  padding: 34px 22px 30px;
+  text-align: center;
+}
+
+.courses-empty-art {
+  position: relative;
+  width: 96px;
+  height: 88px;
+  margin-bottom: 8px;
+}
+
+.courses-empty-art .art-page {
+  position: absolute;
+  inset: 6px 14px 0;
+  border: 1.5px solid var(--fresh-line-strong);
+  border-radius: 14px 14px 16px 16px;
+  background:
+    repeating-linear-gradient(
+      180deg,
+      transparent 0 15px,
+      var(--fresh-line) 15px 16.5px
+    ),
+    var(--fresh-paper);
+  transform: rotate(-3deg);
+}
+
+.courses-empty-art .art-leaf {
+  position: absolute;
+  width: 22px;
+  height: 22px;
+  border-radius: 70% 30% 62% 38%;
+  background: var(--fresh-leaf);
+  opacity: 0.85;
+}
+
+.courses-empty-art .art-leaf-1 {
+  top: -4px;
+  right: 2px;
+  transform: rotate(28deg);
+}
+
+.courses-empty-art .art-leaf-2 {
+  bottom: 2px;
+  left: -2px;
+  width: 16px;
+  height: 16px;
+  background: var(--fresh-sun);
+  transform: rotate(-18deg);
+}
+
+.courses-empty-art .art-dot {
+  position: absolute;
+  top: 30%;
+  left: 4px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--fresh-blue);
+  opacity: 0.7;
+}
+
+.courses-empty h2 {
+  margin: 0;
+  color: var(--fresh-ink);
+  font-family: var(--font-serif);
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.courses-empty p {
+  margin: 0;
+  color: var(--fresh-muted);
+  font-size: var(--text-sm);
+  line-height: 1.7;
+}
+
+.courses-empty-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.courses-empty-actions .van-button {
+  min-width: 128px;
+}
+
+.courses-empty-actions .van-button span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
 
 .timetable-shell {
   --time-rail: clamp(44px, 7vw, 58px);
@@ -797,7 +969,7 @@ onMounted(() => {
   gap: 6px;
   color: var(--fresh-green-dark);
   font-size: 12px;
-  font-weight: 720;
+  font-weight: 700;
 }
 
 .table-heading > span i {
@@ -819,7 +991,8 @@ onMounted(() => {
 
 .week-head {
   position: sticky;
-  top: var(--van-nav-bar-height, 46px);
+  /* 导航栏 58px + 刘海安全区，吸顶表头正好贴住导航底边 */
+  top: calc(var(--nav-height, 58px) + env(safe-area-inset-top, 0px));
   z-index: 6;
   display: grid;
   grid-template-columns: var(--time-rail) repeat(7, minmax(0, 1fr));
@@ -831,7 +1004,8 @@ onMounted(() => {
 
 .timetable-grid {
   display: grid;
-  grid-auto-rows: minmax(170px, 1fr);
+  /* 行高按内容自适应：稀疏课表整页更短，同格双课不再爆行 */
+  grid-auto-rows: minmax(96px, auto);
   width: 100%;
   background: #eef1f7;
 }
@@ -869,7 +1043,7 @@ onMounted(() => {
   background: #e5eaf2;
   color: var(--fresh-green-dark);
   font-size: 12px;
-  font-weight: 720;
+  font-weight: 700;
 }
 
 .weekday-head {
@@ -885,14 +1059,14 @@ onMounted(() => {
 }
 
 .weekday-head.is-today {
-  background: #e2ece5;
+  background: var(--fresh-mint);
   color: var(--fresh-green-dark);
   box-shadow: inset 0 -3px 0 var(--fresh-green);
 }
 
 .weekday-head small {
   font-size: clamp(12px, 2vw, 15px);
-  font-weight: 760;
+  font-weight: 700;
 }
 
 .weekday-head span,
@@ -920,7 +1094,7 @@ onMounted(() => {
   color: #fff;
   font-size: 9px;
   font-style: normal;
-  font-weight: 760;
+  font-weight: 700;
 }
 
 .time-cell {
@@ -942,7 +1116,7 @@ onMounted(() => {
 
 .time-cell time {
   font-size: 12px;
-  font-weight: 650;
+  font-weight: 600;
   color: var(--fresh-text);
 }
 
@@ -978,6 +1152,36 @@ onMounted(() => {
   background: rgba(229, 239, 230, 0.86);
 }
 
+/* 此刻正在上的节次：柔和呼吸描边，只描今日列当前格 */
+.course-cell.is-now::after {
+  position: absolute;
+  inset: 3px;
+  z-index: 2;
+  border: 2px solid color-mix(in srgb, var(--fresh-green) 62%, transparent);
+  border-radius: 12px;
+  content: "";
+  pointer-events: none;
+  animation: now-breathe 2.6s var(--fresh-spring) infinite;
+}
+
+@keyframes now-breathe {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+
+  50% {
+    opacity: 0.85;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .course-cell.is-now::after {
+    opacity: 0.6;
+    animation: none;
+  }
+}
+
 .empty-cell-button {
   position: absolute;
   inset: 0;
@@ -1003,11 +1207,24 @@ onMounted(() => {
   transition:
     background 220ms var(--fresh-spring),
     color 220ms var(--fresh-spring),
+    opacity 220ms var(--fresh-spring),
     transform 220ms var(--fresh-spring);
+}
+
+/* 触屏没有 hover，"＋"完全不可见等于没有入口：常驻低透明度，今日列稍亮 */
+@media (hover: none) {
+  .empty-cell-button span {
+    opacity: 0.32;
+  }
+
+  .course-cell.is-today .empty-cell-button span {
+    opacity: 0.55;
+  }
 }
 
 .timetable-course {
   --course-accent: var(--fresh-green);
+  position: relative;
   box-sizing: border-box;
   height: 100%;
   min-width: 0;
@@ -1032,7 +1249,6 @@ onMounted(() => {
   box-sizing: border-box;
   width: 100%;
   height: 100%;
-  min-height: 164px;
   scroll-margin-block: 76px 108px;
   flex-direction: column;
   align-items: center;
@@ -1048,10 +1264,22 @@ onMounted(() => {
   content: none;
 }
 
+/* 地点待确认微徽标：只提示，不抢注意力 */
+.review-flag {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50% 50% 50% 20%;
+  background: var(--fresh-sun);
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.65);
+}
+
 .course-content strong {
   font-size: clamp(10px, 1.8vw, 14px);
   line-height: 1.4;
-  font-weight: 780;
+  font-weight: 700;
   overflow-wrap: anywhere;
 }
 
@@ -1063,7 +1291,7 @@ onMounted(() => {
   justify-content: center;
   gap: 1px;
   margin-top: auto;
-  color: color-mix(in srgb, var(--course-accent) 52%, #263a32);
+  color: color-mix(in srgb, var(--course-accent) 52%, var(--fresh-ink));
   font-size: clamp(9px, 1.4vw, 12px);
   line-height: 1.3;
   text-align: center;
@@ -1077,7 +1305,7 @@ onMounted(() => {
 .compact-location > span:last-child {
   min-width: 0;
   font-size: inherit;
-  font-weight: 680;
+  font-weight: 600;
   overflow-wrap: anywhere;
 }
 
@@ -1085,12 +1313,12 @@ onMounted(() => {
   margin-top: 5px;
   color: color-mix(in srgb, var(--course-accent) 72%, var(--fresh-ink));
   font-size: clamp(9px, 1.4vw, 11px);
-  font-weight: 720;
+  font-weight: 700;
 }
 
 .timetable-course.is-deleting {
-  border-color: #d7ddd3;
-  background: #eef0eb;
+  border-color: var(--fresh-line);
+  background: var(--disabled-surface);
   filter: grayscale(0.5);
 }
 
@@ -1122,8 +1350,7 @@ onMounted(() => {
 .week-backward-leave-active {
   transition:
     opacity 640ms ease,
-    transform 760ms var(--fresh-spring),
-    filter 640ms ease;
+    transform 760ms var(--fresh-spring);
 }
 
 .week-forward-leave-active,
@@ -1134,17 +1361,16 @@ onMounted(() => {
   left: 0;
 }
 
+/* 不用 blur：低端 Android 上是掉帧源，位移+透明度已足够表达方向 */
 .week-forward-enter-from,
 .week-backward-leave-to {
   opacity: 0;
-  filter: blur(2px);
   transform: translateX(32px) scale(0.985);
 }
 
 .week-forward-leave-to,
 .week-backward-enter-from {
   opacity: 0;
-  filter: blur(2px);
   transform: translateX(-32px) scale(0.985);
 }
 

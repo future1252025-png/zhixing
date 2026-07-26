@@ -2,7 +2,6 @@ import type { Course } from '@/types/course'
 import type { SemesterState } from '@/types/semester'
 import { filterCoursesByWeek, findNextCourse } from './course'
 
-export const APP_LAUNCH_INTRO_STORAGE_KEY = 'campusmind-launch-intro-seen-v1'
 export const LOGIN_INTRO_STORAGE_KEY = 'campusmind-login-intro-pending'
 export const LOGIN_INTRO_SNAPSHOT_STORAGE_KEY = 'campusmind-login-intro-snapshot'
 
@@ -35,14 +34,6 @@ function isLoginIntroSnapshot(value: unknown): value is LoginIntroSnapshot {
     typeof snapshot.buildingName === 'string' &&
     typeof snapshot.roomName === 'string'
   )
-}
-
-export function shouldPlayAppLaunchIntro(storage: StorageLike = localStorage): boolean {
-  if (storage.getItem(APP_LAUNCH_INTRO_STORAGE_KEY) === '1') {
-    return false
-  }
-  storage.setItem(APP_LAUNCH_INTRO_STORAGE_KEY, '1')
-  return true
 }
 
 export function buildLoginIntroSnapshot(course: Course | null): LoginIntroSnapshot | null {

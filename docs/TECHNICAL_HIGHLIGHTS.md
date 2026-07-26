@@ -31,11 +31,11 @@ flowchart LR
 
 | 模块 | 入口 | 说明 |
 | --- | --- | --- |
-| 地图首页 | `frontend/src/pages/HomePage.vue` | 校园地图、地点搜索、地图点位分层 |
-| 地图组件 | `frontend/src/components/RealCampusMap.vue` | 高德地图加载、点位、路线预览 |
+| 地图首页 | `frontend/src/pages/HomePage.vue` | 校园地图、地点搜索、登录欢迎卡、地图点位分层 |
+| 地图组件 | `frontend/src/components/RealCampusMap.vue` | 高德地图加载、叶形点位、点选确认卡、路线预览 |
 | 聊天室 | `frontend/src/pages/BuildingChatroomsPage.vue` | 建筑总频道和教室频道选择 |
-| 留言页 | `frontend/src/pages/BuildingMessagesPage.vue` | 气泡聊天、定位状态、禁用输入 |
-| 课程表 | `frontend/src/pages/CoursesPage.vue` | 周次筛选、整周课表网格、课程操作 |
+| 留言页 | `frontend/src/pages/BuildingMessagesPage.vue` | 气泡聊天、按日分隔、作者头像、定位状态、禁用输入 |
+| 课程表 | `frontend/src/pages/CoursesPage.vue` | 周次筛选与滑动切周、整周课表网格、当前节次高亮、课程操作 |
 | 课表导入 | `frontend/src/pages/CourseImportPage.vue` | HTML/Excel 上传预览和导入 |
 | 出发建议 | `frontend/src/pages/SchedulePage.vue` | 起终点搜索、建议生成、地图路线 |
 
@@ -72,7 +72,14 @@ flowchart LR
 - 手动新增/编辑课程。
 - 导入 HTML 或 Excel 课表后预览，再批量写入。
 
-导入逻辑会解析课程名、教师、周次、节次、教室等信息，并尝试把教室文本自动匹配到已有校园建筑，减少用户手动选择建筑的步骤。
+导入逻辑会解析课程名、教师、周次、节次、教室等信息，并尝试把教室文本自动匹配到已有校园建筑，减少用户手动选择建筑的步骤；教室仍是占位文本（如“待确认教室”）的课程会带上 `needs_location_review` 标记，课表上以“地点待确认”微徽标提示用户复核。
+
+课表网格本身也有几个可讲的细节：
+
+- 课程色块按课程名哈希从自然色板取色，同名课程跨周、跨设备颜色稳定。
+- 此刻正在上的节次带柔和呼吸描边高亮，只描今日列当前格。
+- 支持左右滑动切周（横向位移明显大于纵向才触发，避免与纵向滚动冲突）。
+- 零课程时展示空状态引导，提供“导入课表/手动添加”双 CTA。
 
 ## 周次筛选
 
@@ -92,21 +99,35 @@ flowchart LR
 
 - 通过 `.env.local` 配置高德 Web 端 JS API Key 和安全密钥。
 - 地图点位支持搜索和缩放分层，避免一屏点位过密。
+- 非选中建筑也渲染可见叶形 pin，用户不用靠底图 POI 猜哪里能点。
+- 点选建筑先弹出确认卡，跳转交给卡上按钮，地图拖动时不再误触进页。
+- 错误文案分层：用户只看到“暂时打不开”这类可读提示，Key/白名单等开发者信息仅开发环境输出。
 - 对校园点位保留手动采点能力，便于后续补充高德搜索不到的校内细地点。
 - 路线规划失败不会阻断出发建议主流程。
+
+## 移动端体验细节
+
+本轮“清新自然”美化后，几处适合展开讲的前端细节：
+
+- 登录采用乐观导航：登录成功立刻进首页，欢迎数据在后台预取；原 animejs 登录/启动动画时间线已删除，欢迎过场改为纯 CSS 首页欢迎卡，有下一节课快照时可点按直达当天课表，3.6s 后自动收起（收起用 grid-template-rows 平滑塌高度，首页内容不跳动）。
+- 会话过期被踢回登录页时，用内联纸条说明“登录状态过期了，重新登录就好”，比一闪而过的 toast 更不容易错过。
+- 留言页重构为单滚动区，按日期插入分隔条（今天/昨天/具体日期）；作者首字头像按昵称哈希取色，加载更早的留言后颜色依旧稳定，并做了滚动位置补偿，插入历史消息不打断阅读位置。
+- 设计令牌收敛为单一来源：CSS 侧 `frontend/src/styles/fresh.css` 的 `:root` 变量，JS 侧从 `frontend/src/styles/tokens.ts` 取色，禁止新增裸 hex。
+- 品牌楷体 LXGW WenKai Screen 以 webfont 上线，Android 端标题不再回退为系统黑体。
+- 动效统一带 `prefers-reduced-motion` 降级，触控目标不小于 44px。
 
 ## 测试覆盖
 
 当前测试覆盖：
 
 - 后端健康检查、认证、建筑、留言、课程、课表导入、出发建议。
-- 前端认证状态、路由守卫、API 封装、地图/搜索工具、课程工具、定位 store、出发建议工具和登录动效工具。
+- 前端认证状态、路由守卫、API 封装、地图/搜索工具、课程工具、定位 store、出发建议工具、登录欢迎卡快照工具，以及一组用字符串断言钉住关键样式/文案的前端策略测试（对比度、输入字号、触控目标）。
 
 最近一次整理验证：
 
 ```text
 backend: 61 passed
-frontend: 81 passed
+frontend: 276 passed（43 个测试文件，美化改造后基线）
 npm run build: passed
 ```
 

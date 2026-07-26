@@ -29,12 +29,19 @@ function contrastRatio(foreground: string, background: string): number {
 describe('mobile input policy', () => {
   it('keeps the audited CourseForm controls at least 16px high and 44px tall', () => {
     const source = frontendFile('src/pages/CourseFormPage.vue')
-    expect(source).toMatch(/\.form-select,[\s\S]*?min-height:\s*44px;[\s\S]*?font-size:\s*16px;/)
+    expect(source).toMatch(/\.form-select \{[\s\S]*?min-height:\s*44px;[\s\S]*?font-size:\s*16px;/)
   })
 
   it('keeps import mapping controls at least 16px high and 44px tall', () => {
     const source = frontendFile('src/components/import/ImportCandidateCard.vue')
-    expect(source).toMatch(/\.mapping-panel select,[\s\S]*?\.mapping-panel input \{[\s\S]*?min-height:\s*4[4-9]px;[\s\S]*?font-size:\s*16px;/)
+    expect(source).toMatch(/\.mapping-panel input \{[\s\S]*?min-height:\s*4[4-9]px;[\s\S]*?font-size:\s*16px;/)
+  })
+
+  it('keeps the shared BuildingPicker trigger and search at mobile-safe sizes', () => {
+    const source = frontendFile('src/components/BuildingPicker.vue')
+    expect(source).toMatch(/\.picker-trigger \{[\s\S]*?min-height:\s*4[4-9]px;[\s\S]*?font-size:\s*16px;/)
+    expect(source).toMatch(/\.sheet-search input \{[\s\S]*?min-height:\s*44px;[\s\S]*?font-size:\s*16px;/)
+    expect(source).toMatch(/\.sheet-option \{[\s\S]*?min-height:\s*(4[4-9]|5[0-9])px;/)
   })
 
   it('provides a coarse-pointer fallback for text fields, selects and textareas', () => {
@@ -70,7 +77,7 @@ describe('mobile input policy', () => {
 describe('readability policy', () => {
   it.each([
     ['#635b6b', '#fffdf8'],
-    ['#68716a', '#faf8f1'],
+    ['#5f6f62', '#faf8f1'],
     ['#5f6e62', '#fffdf7']
   ])('keeps %s readable on %s', (foreground, background) => {
     expect(contrastRatio(foreground, background)).toBeGreaterThanOrEqual(4.5)
@@ -78,14 +85,17 @@ describe('readability policy', () => {
 
   it('applies the audited readable colors to their small-text surfaces', () => {
     expect(frontendFile('src/pages/BuildingMessagesPage.vue')).toContain('.heading-copy small { color: #635b6b;')
-    expect(frontendFile('src/components/import/ImportCandidateCard.vue')).toContain('.panel-title small { color: #68716a; font-size: 12px; }')
+    // --fresh-muted 的终值由下一行钉住，与上方 #5f6f62 对比度断言构成完整审计链
+    expect(frontendFile('src/styles/fresh.css')).toContain('--fresh-muted: #5f6f62')
+    expect(frontendFile('src/components/import/ImportCandidateCard.vue')).toContain('.panel-title small { color: var(--fresh-muted); font-size: 12px; }')
     expect(frontendFile('src/components/RealCampusMap.vue')).toContain('.map-selected-card div > span { color: #5f6e62;')
   })
 
   it('uses the backend channel name and no stale public-channel label', () => {
     const source = frontendFile('src/pages/BuildingMessagesPage.vue')
-    expect(source).toContain("selectedRoomName.value || '建筑总聊'")
+    expect(source).toContain("selectedRoomName.value || '地点频道'")
     expect(source).not.toContain('建筑公共频道')
+    expect(source).not.toContain('建筑总聊')
   })
 
   it('keeps course time text at 12px or larger', () => {

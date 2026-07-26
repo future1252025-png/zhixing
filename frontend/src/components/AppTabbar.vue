@@ -42,9 +42,9 @@ function handleTabClick(path: string) {
 <style scoped>
 .app-tabbar {
   position: fixed;
-  right: max(14px, calc((100vw - 560px) / 2));
+  right: max(14px, calc((100vw - var(--page-max)) / 2 + 14px));
   bottom: max(12px, env(safe-area-inset-bottom));
-  left: max(14px, calc((100vw - 560px) / 2));
+  left: max(14px, calc((100vw - var(--page-max)) / 2 + 14px));
   z-index: 1000;
   display: grid;
   grid-template-columns: repeat(4, 1fr);
@@ -65,7 +65,7 @@ function handleTabClick(path: string) {
   place-content: center;
   justify-items: center;
   gap: 5px;
-  color: #5f6f62;
+  color: var(--fresh-muted);
   font-size: 13px;
   font-weight: 700;
   -webkit-tap-highlight-color: transparent;
@@ -88,11 +88,11 @@ function handleTabClick(path: string) {
 }
 
 .app-tabbar-item.active {
-  color: #3f704a;
+  color: var(--fresh-green-dark);
 }
 
 .app-tabbar-item.active::before {
-  background: #e7f0e3;
+  background: var(--fresh-mint);
   transform: scale(1);
 }
 

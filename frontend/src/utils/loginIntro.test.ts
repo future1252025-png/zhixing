@@ -1,15 +1,13 @@
 import { describe, expect, it, vi } from 'vitest'
 
 import {
-  APP_LAUNCH_INTRO_STORAGE_KEY,
   LOGIN_INTRO_STORAGE_KEY,
   LOGIN_INTRO_SNAPSHOT_STORAGE_KEY,
   buildLoginIntroSnapshot,
   consumeLoginIntroFlag,
   consumeLoginIntroSnapshot,
   markLoginIntroPending,
-  prepareLoginIntro,
-  shouldPlayAppLaunchIntro
+  prepareLoginIntro
 } from './loginIntro'
 import type { Course } from '@/types/course'
 import type { SemesterState } from '@/types/semester'
@@ -65,14 +63,6 @@ describe('login intro flag', () => {
     expect(storage.getItem(LOGIN_INTRO_STORAGE_KEY)).toBe('1')
     expect(consumeLoginIntroFlag(storage)).toBe(true)
     expect(consumeLoginIntroFlag(storage)).toBe(false)
-  })
-
-  it('plays the app launch intro only once per browser version', () => {
-    const storage = createStorage()
-
-    expect(shouldPlayAppLaunchIntro(storage)).toBe(true)
-    expect(storage.getItem(APP_LAUNCH_INTRO_STORAGE_KEY)).toBe('1')
-    expect(shouldPlayAppLaunchIntro(storage)).toBe(false)
   })
 
   it('stores and consumes the login course snapshot once', () => {

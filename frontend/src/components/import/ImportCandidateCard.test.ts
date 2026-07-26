@@ -64,7 +64,7 @@ describe('ImportCandidateCard', () => {
     expect(wrapper.get('[data-testid="raw-time-or-section"]').text()).toBe('第1-2节')
     expect(wrapper.get('[data-testid="raw-teacher"]').text()).toBe('陈老师')
     expect(wrapper.get('[data-testid="raw-weeks"]').text()).toBe('1-16周')
-    expect(wrapper.find('[name="building_id"]').exists()).toBe(true)
+    expect(wrapper.find('.building-picker .picker-trigger').exists()).toBe(true)
     expect(wrapper.find('[name="room_name"]').exists()).toBe(true)
   })
 

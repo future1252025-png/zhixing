@@ -9,6 +9,7 @@ import {
 import TechIcon from '@/components/TechIcon.vue'
 import { useAuthStore } from '@/stores/auth'
 import { rememberRecentChatEntry } from '@/utils/chat'
+import { goBack } from '@/utils/navigation'
 import { createScopedStorage } from '@/utils/scopedStorage'
 
 const route = useRoute()
@@ -98,7 +99,7 @@ onMounted(loadPage)
 
 <template>
   <section class="page chatrooms-page">
-    <van-nav-bar title="地点频道" left-arrow @click-left="router.push(`/buildings/${buildingId}`)" />
+    <van-nav-bar title="地点频道" left-arrow @click-left="goBack(router, '/home')" />
     <div class="page-content chatrooms-content">
       <div v-if="loading" class="channel-loading" role="status" aria-live="polite">
         <span><i></i><i></i><i></i></span>
@@ -140,7 +141,7 @@ onMounted(loadPage)
             class="custom-room"
             @click="openCustomRoom"
           >
-            <span><van-icon name="plus" /></span>
+            <span><TechIcon name="plus" :size="17" /></span>
             <span><strong>进入“{{ roomQuery.trim() }}”</strong><small>这个教室还没有留言，也可以先进去</small></span>
             <TechIcon name="arrow" :size="18" />
           </button>
@@ -151,7 +152,7 @@ onMounted(loadPage)
           class="room-list-section"
         >
           <div class="fresh-section-heading">
-            <div><h2>{{ roomQuery.trim() ? '搜索结果' : '这里的频道' }}</h2><p>公共频道和教室频道都在这里</p></div>
+            <div><h2>{{ roomQuery.trim() ? '搜索结果' : '这里的频道' }}</h2><p>地点频道和教室频道都在这里</p></div>
           </div>
 
           <div class="room-list">
@@ -163,7 +164,7 @@ onMounted(loadPage)
               @click="openRoom(room)"
             >
               <span class="room-icon">
-                <van-icon :name="room.is_general ? 'friends-o' : 'chat-o'" />
+                <TechIcon :name="room.is_general ? 'users' : 'chat'" :size="22" />
               </span>
               <span class="room-copy">
                 <small>{{ room.is_general ? '大家都在这里' : `教室频道 ${String(index + 1).padStart(2, '0')}` }}</small>
@@ -213,7 +214,7 @@ onMounted(loadPage)
 .channel-loading i {
   width: 7px;
   height: 12px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--fresh-lilac);
   animation: room-load 850ms ease-in-out infinite alternate;
 }
@@ -253,7 +254,7 @@ onMounted(loadPage)
   max-width: 320px;
   margin: 15px 0 0;
   color: var(--fresh-ink);
-  font-family: "STKaiti", "KaiTi", "PingFang SC", sans-serif;
+  font-family: var(--font-serif);
   font-size: clamp(34px, 9vw, 46px);
   line-height: 1.08;
   letter-spacing: -0.05em;
@@ -311,8 +312,8 @@ onMounted(loadPage)
   gap: 8px;
 }
 
-.channel-count span { color: var(--fresh-muted); font-size: 13px; font-weight: 650; }
-.channel-count strong { color: var(--fresh-ink); font-family: "STKaiti", "KaiTi", serif; font-size: 32px; line-height: 0.8; }
+.channel-count span { color: var(--fresh-muted); font-size: 13px; font-weight: 600; }
+.channel-count strong { color: var(--fresh-ink); font-family: var(--font-serif); font-size: 32px; line-height: 0.8; }
 
 .room-search {
   padding: 18px;
@@ -331,7 +332,7 @@ onMounted(loadPage)
   min-height: 60px;
   margin-top: 9px;
   border: 1px dashed #a9bfa9;
-  border-radius: 18px;
+  border-radius: var(--radius-md);
   background: var(--fresh-mint);
   color: var(--fresh-green-dark);
   cursor: pointer;
@@ -393,7 +394,7 @@ onMounted(loadPage)
 
 .room-list > button.general {
   border-color: rgba(79, 125, 88, 0.14);
-  background: #e8f0e4;
+  background: var(--fresh-mint);
 }
 
 .room-icon {
@@ -401,9 +402,9 @@ onMounted(loadPage)
   width: 48px;
   height: 48px;
   place-items: center;
-  border-radius: 18px;
+  border-radius: var(--radius-md);
   background: var(--fresh-sky);
-  color: #5c858e;
+  color: var(--cm-chat-dark);
   font-size: 20px;
 }
 

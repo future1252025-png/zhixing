@@ -1,7 +1,6 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { animate, stagger } from 'animejs'
 
 import type { Building } from '@/api/buildings'
 import RealCampusMap from '@/components/RealCampusMap.vue'
@@ -44,7 +43,6 @@ const loading = ref(true)
 const errorMessage = ref('')
 const chatQuery = ref('')
 const recentChats = ref<RecentChatEntry[]>([])
-const homeRoot = ref<HTMLElement | null>(null)
 const loginWelcomeVisible = ref(false)
 const loginWelcomeSnapshot = ref<LoginIntroSnapshot | null>(null)
 let loginWelcomeTimer: number | null = null
@@ -122,21 +120,6 @@ async function loadHomeData() {
   }
 }
 
-function playHomeIntro() {
-  if (typeof window === 'undefined' || !homeRoot.value) return
-  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
-  const items = homeRoot.value.querySelectorAll('.home-motion-item')
-  if (!items.length) return
-  animate(items, {
-    opacity: [0, 1],
-    translateY: [18, 0],
-    rotate: [-0.7, 0],
-    duration: 680,
-    delay: stagger(76),
-    ease: 'outCubic'
-  })
-}
-
 async function initializeHome() {
   const hasLoginIntro = consumeLoginIntroFlag()
   loginWelcomeSnapshot.value = consumeLoginIntroSnapshot()
@@ -145,11 +128,26 @@ async function initializeHome() {
     loginWelcomeTimer = window.setTimeout(() => {
       loginWelcomeVisible.value = false
       loginWelcomeTimer = null
-    }, 2800)
+    }, 3600)
   }
   await loadHomeData()
-  await nextTick()
-  playHomeIntro()
+}
+
+function dismissLoginWelcome() {
+  if (loginWelcomeTimer !== null) {
+    window.clearTimeout(loginWelcomeTimer)
+    loginWelcomeTimer = null
+  }
+  loginWelcomeVisible.value = false
+}
+
+// 欢迎卡不只是提示：有课程快照时点按直达当天课表
+function handleWelcomeTap() {
+  const hasSnapshot = loginWelcomeSnapshot.value !== null
+  dismissLoginWelcome()
+  if (hasSnapshot) {
+    router.push('/courses')
+  }
 }
 
 function rememberChat(building: Pick<Building, 'id' | 'name'>, roomName: string | null = null) {
@@ -212,7 +210,7 @@ onUnmounted(() => {
 
 <template>
   <section class="page home-page">
-    <div ref="homeRoot" class="page-content home-content">
+    <div class="page-content home-content">
       <header class="home-top home-motion-item">
         <div class="home-brand">
           <span><i></i><i></i></span>
@@ -225,17 +223,26 @@ onUnmounted(() => {
       </header>
 
       <Transition name="login-welcome">
-        <aside v-if="loginWelcomeVisible" class="login-welcome" aria-live="polite">
-          <span class="login-welcome__path" aria-hidden="true"><i></i></span>
-          <div>
-            <small>登录成功 · 校园路线已接上</small>
-            <strong>{{ loginWelcomeSnapshot?.courseName || '欢迎回来，慢慢开始今天' }}</strong>
-            <p v-if="loginWelcomeSnapshot">
-              {{ loginWelcomeSnapshot.startTime }} · {{ loginWelcomeSnapshot.buildingName }} · {{ loginWelcomeSnapshot.roomName }}
-            </p>
-            <p v-else>课表、地点和出发建议已经准备好了。</p>
-          </div>
-        </aside>
+        <div v-if="loginWelcomeVisible" class="login-welcome-shell">
+          <aside
+            class="login-welcome"
+            aria-live="polite"
+            role="button"
+            tabindex="0"
+            @click="handleWelcomeTap"
+            @keydown.enter="handleWelcomeTap"
+          >
+            <span class="login-welcome__path" aria-hidden="true"><i></i></span>
+            <div>
+              <small>登录成功 · 校园路线已接上</small>
+              <strong>{{ loginWelcomeSnapshot?.courseName || '欢迎回来，慢慢开始今天' }}</strong>
+              <p v-if="loginWelcomeSnapshot">
+                {{ loginWelcomeSnapshot.startTime }} · {{ loginWelcomeSnapshot.buildingName }} · {{ loginWelcomeSnapshot.roomName }} · 点我看课表
+              </p>
+              <p v-else>课表、地点和出发建议已经准备好了。</p>
+            </div>
+          </aside>
+        </div>
       </Transition>
 
       <div v-if="loading" class="home-semester-loading fresh-card" aria-live="polite">
@@ -365,7 +372,7 @@ onUnmounted(() => {
             type="button"
             @click="openRecentChat(entry)"
           >
-            <span><van-icon name="location-o" /></span>
+            <span><TechIcon name="location" :size="16" /></span>
             <strong>{{ formatChatEntryLabel(entry) }}</strong>
           </button>
         </div>
@@ -437,6 +444,27 @@ onUnmounted(() => {
   padding-top: 16px;
 }
 
+/* 进场动效统一为纯 CSS（原 animejs 时间线）：插入即播，数据到达后不再二次闪现 */
+.home-motion-item {
+  animation: home-arrive 680ms var(--fresh-spring) both;
+}
+
+.today-card.home-motion-item {
+  animation-delay: 76ms;
+}
+
+@keyframes home-arrive {
+  from {
+    opacity: 0;
+    transform: translateY(18px) rotate(-0.7deg);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
 .home-top {
   display: flex;
   align-items: center;
@@ -465,7 +493,7 @@ onUnmounted(() => {
   width: 10px;
   height: 17px;
   border-radius: 100% 0 100% 0;
-  background: #eaf2e6;
+  background: var(--fresh-mint);
 }
 
 .home-brand > span i:first-child { top: 4px; left: 6px; }
@@ -487,7 +515,7 @@ onUnmounted(() => {
 }
 
 .home-top time {
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: rgba(255, 253, 248, 0.74);
   padding: 7px 10px;
 }
@@ -499,7 +527,7 @@ onUnmounted(() => {
   border-radius: 34px 34px 26px 34px;
   background:
     linear-gradient(145deg, rgba(255, 255, 255, 0.42), transparent 42%),
-    #dfead8;
+    var(--fresh-mint);
   padding: 26px 23px 22px;
   box-shadow: 0 22px 55px rgba(66, 96, 65, 0.13);
 }
@@ -528,11 +556,11 @@ onUnmounted(() => {
   grid-template-columns: auto minmax(0, 1fr);
   gap: 12px;
   overflow: hidden;
-  border: 1px solid #cfdfca;
+  border: 1px solid var(--fresh-line);
   border-radius: 21px 21px 17px 21px;
-  background: #edf4e8;
+  background: var(--fresh-mint);
   box-shadow: 0 12px 30px rgba(55, 81, 57, .09);
-  color: #293b2e;
+  color: var(--fresh-ink);
   padding: 14px 15px;
 }
 
@@ -541,7 +569,7 @@ onUnmounted(() => {
   display: block;
   width: 42px;
   height: 42px;
-  border: 2px dashed #86a682;
+  border: 2px dashed var(--fresh-leaf);
   border-radius: 50%;
 }
 
@@ -551,11 +579,11 @@ onUnmounted(() => {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #4f7d58;
+  background: var(--fresh-green);
   content: '';
 }
 .login-welcome__path::before { top: -4px; left: 15px; }
-.login-welcome__path::after { right: -4px; bottom: 12px; background: #547d86; }
+.login-welcome__path::after { right: -4px; bottom: 12px; background: var(--cm-chat-dark); }
 .login-welcome__path i {
   position: absolute;
   top: 13px;
@@ -568,16 +596,34 @@ onUnmounted(() => {
   animation: welcome-pulse 1.15s ease-in-out infinite alternate;
 }
 .login-welcome > div { position: relative; z-index: 1; display: grid; min-width: 0; gap: 3px; }
-.login-welcome small { color: #486650; font-size: 12px; font-weight: 760; }
-.login-welcome strong { color: #293b2e; font-size: 15px; line-height: 1.45; overflow-wrap: anywhere; }
-.login-welcome p { margin: 0; color: #536657; font-size: 12px; line-height: 1.55; overflow-wrap: anywhere; }
+.login-welcome small { color: var(--fresh-green-dark); font-size: 12px; font-weight: 700; }
+.login-welcome strong { color: var(--fresh-ink); font-size: 15px; line-height: 1.45; overflow-wrap: anywhere; }
+.login-welcome p { margin: 0; color: var(--fresh-text); font-size: 12px; line-height: 1.55; overflow-wrap: anywhere; }
+
+/* 收起时用 grid-template-rows 1fr→0fr 平滑塌高度，首页内容不再猛跳 */
+.login-welcome-shell {
+  display: grid;
+  grid-template-rows: 1fr;
+}
+
+.login-welcome-shell .login-welcome {
+  min-height: 0;
+  cursor: pointer;
+}
 
 .login-welcome-enter-active,
 .login-welcome-leave-active {
-  transition: opacity 620ms ease, transform 720ms var(--fresh-spring);
+  transition:
+    opacity 420ms ease,
+    transform 480ms var(--fresh-spring),
+    grid-template-rows 460ms var(--fresh-spring);
 }
 .login-welcome-enter-from { opacity: 0; transform: translateX(32px) rotate(.5deg); }
-.login-welcome-leave-to { opacity: 0; transform: translateX(-20px); }
+.login-welcome-leave-to {
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transform: translateX(-14px);
+}
 
 @keyframes welcome-pulse {
   to { transform: scale(1.18); }
@@ -599,9 +645,9 @@ onUnmounted(() => {
   max-width: 330px;
   margin: 7px 0 0;
   color: var(--fresh-ink);
-  font-family: "STKaiti", "KaiTi", "PingFang SC", sans-serif;
+  font-family: var(--font-serif);
   font-size: clamp(30px, 8vw, 43px);
-  font-weight: 760;
+  font-weight: 700;
   line-height: 1.12;
   letter-spacing: -0.045em;
 }
@@ -614,7 +660,7 @@ onUnmounted(() => {
   gap: 10px;
   margin-top: 16px;
   border: 1px solid rgba(79, 125, 88, 0.13);
-  border-radius: 17px;
+  border-radius: var(--fresh-radius-sm);
   background: rgba(255, 253, 248, 0.66);
   padding: 10px 12px;
 }
@@ -625,7 +671,7 @@ onUnmounted(() => {
   height: 36px;
   place-items: center;
   border-radius: 13px;
-  background: #fffdf8;
+  background: var(--fresh-paper);
   color: var(--fresh-green-dark);
   font-size: 18px;
   box-shadow: 0 5px 13px rgba(57, 84, 58, 0.08);
@@ -640,7 +686,7 @@ onUnmounted(() => {
 .today-location small {
   color: var(--fresh-muted);
   font-size: 12px;
-  font-weight: 680;
+  font-weight: 600;
 }
 
 .today-location strong {
@@ -716,7 +762,7 @@ onUnmounted(() => {
   position: absolute;
   width: 9px;
   height: 9px;
-  border: 3px solid #dfead8;
+  border: 3px solid var(--fresh-mint);
   border-radius: 50%;
   background: var(--fresh-green);
 }
@@ -735,12 +781,12 @@ onUnmounted(() => {
   align-items: center;
   justify-content: space-between;
   border: 0;
-  border-radius: 17px;
+  border-radius: var(--fresh-radius-sm);
   background: var(--fresh-green-dark);
   color: #fff;
   cursor: pointer;
   font-size: 13px;
-  font-weight: 720;
+  font-weight: 700;
   padding: 0 17px;
   box-shadow: 0 12px 24px rgba(49, 91, 59, 0.2);
 }
@@ -784,14 +830,14 @@ onUnmounted(() => {
 }
 
 .note small {
-  color: #536657;
+  color: var(--fresh-text);
   font-size: 12px;
   line-height: 1.45;
 }
 
-.note-green { background: #e5eee0; }
-.note-blue { background: #e1edef; }
-.note-yellow { background: #f8edd1; }
+.note-green { background: var(--fresh-mint); }
+.note-blue { background: var(--fresh-sky); }
+.note-yellow { background: var(--cm-amber-soft); }
 
 .search-sheet,
 .map-sheet {
@@ -832,8 +878,8 @@ onUnmounted(() => {
   align-items: center;
   min-height: 60px;
   border: 1px solid var(--fresh-line);
-  border-radius: 17px;
-  background: #fafbf6;
+  border-radius: var(--fresh-radius-sm);
+  background: var(--fresh-paper-2);
   color: var(--fresh-ink);
   cursor: pointer;
   padding: 9px 11px;
@@ -897,7 +943,7 @@ onUnmounted(() => {
   gap: 8px;
   min-height: 47px;
   border: 1px solid var(--fresh-line);
-  border-radius: 18px;
+  border-radius: var(--radius-md);
   background: var(--fresh-paper);
   color: var(--fresh-text);
   cursor: pointer;
@@ -911,10 +957,10 @@ onUnmounted(() => {
   place-items: center;
   border-radius: 50%;
   background: var(--fresh-sky);
-  color: #56808a;
+  color: var(--cm-chat-dark);
 }
 
-.recent-row strong { font-size: 13px; font-weight: 720; }
+.recent-row strong { font-size: 13px; font-weight: 700; }
 
 .places-section .fresh-section-heading > span {
   color: var(--fresh-muted);
@@ -954,22 +1000,22 @@ onUnmounted(() => {
   pointer-events: none;
 }
 
-.place-tone-0 { background: #e3eddd; }
-.place-tone-1 { background: #e1edef; }
-.place-tone-2 { background: #f7ead0; }
+.place-tone-0 { background: var(--fresh-mint); }
+.place-tone-1 { background: var(--fresh-sky); }
+.place-tone-2 { background: var(--cm-amber-soft); }
 .place-tone-3 { background: #eee5ec; }
 
 .place-index {
   position: absolute;
   top: 13px;
   left: 14px;
-  color: #536657;
+  color: var(--fresh-text);
   font-family: ui-monospace, monospace;
   font-size: 12px;
 }
 
 .place-grid small {
-  color: #536657;
+  color: var(--fresh-text);
   font-size: 12px;
 }
 
@@ -1020,7 +1066,7 @@ onUnmounted(() => {
 .home-semester-loading i {
   width: 5px;
   height: 12px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--fresh-leaf);
   animation: loading-grow 1s ease-in-out infinite alternate;
 }

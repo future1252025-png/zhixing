@@ -85,9 +85,9 @@ const sourceLabel = computed(() =>
 .course-card {
   min-width: 0;
   overflow: hidden;
-  border: 1px solid #dce7da;
+  border: 1px solid var(--fresh-line);
   border-radius: 20px 20px 16px 20px;
-  background: #fffdf8;
+  background: var(--fresh-paper);
   box-shadow: 0 10px 24px rgba(56, 79, 58, 0.08);
   transition:
     transform 360ms cubic-bezier(.2, .8, .2, 1),
@@ -102,7 +102,7 @@ const sourceLabel = computed(() =>
   gap: 11px;
   border: 0;
   background: transparent;
-  color: #314236;
+  color: var(--fresh-ink);
   cursor: pointer;
   padding: 15px;
   text-align: left;
@@ -123,13 +123,13 @@ const sourceLabel = computed(() =>
 }
 
 .course-card__heading small {
-  color: #66736a;
+  color: var(--fresh-muted);
   font-size: 12px;
   line-height: 1.4;
 }
 
 .course-card__heading strong {
-  color: #26392d;
+  color: var(--fresh-ink);
   font-size: 16px;
   line-height: 1.38;
   overflow-wrap: anywhere;
@@ -138,10 +138,10 @@ const sourceLabel = computed(() =>
 .course-card__heading time {
   flex: 0 0 auto;
   border-radius: 10px;
-  background: #edf3e8;
+  background: var(--fresh-mint);
   color: #485a4c;
   font-size: 12px;
-  font-weight: 720;
+  font-weight: 700;
   padding: 6px 8px;
 }
 
@@ -150,9 +150,9 @@ const sourceLabel = computed(() =>
   min-width: 0;
   align-items: flex-start;
   gap: 7px;
-  color: #375d42;
+  color: var(--fresh-green-dark);
   font-size: 14px;
-  font-weight: 750;
+  font-weight: 700;
   line-height: 1.65;
   overflow-wrap: anywhere;
   word-break: break-word;
@@ -165,7 +165,7 @@ const sourceLabel = computed(() =>
   height: 24px;
   place-items: center;
   border-radius: 50%;
-  background: #e4efdd;
+  background: var(--fresh-mint);
   color: #50745a;
   font-size: 14px;
 }
@@ -177,7 +177,7 @@ const sourceLabel = computed(() =>
 }
 
 .course-card__meta > span {
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: #f4f1e7;
   color: #59645c;
   font-size: 12px;
@@ -192,7 +192,7 @@ const sourceLabel = computed(() =>
   justify-content: space-between;
   gap: 10px;
   border-top: 1px solid #edc9bd;
-  background: #fff0ea;
+  background: var(--cm-red-soft);
   color: #873d31;
   padding: 10px 14px;
 }
@@ -211,16 +211,16 @@ const sourceLabel = computed(() =>
   height: 20px;
   place-items: center;
   border-radius: 50%;
-  background: #a64f40;
+  background: var(--cm-red);
   color: #fff;
   font-style: normal;
 }
 
 .course-card__review button {
   min-height: 36px;
-  border: 1px solid #a64f40;
-  border-radius: 999px;
-  background: #fffaf7;
+  border: 1px solid var(--cm-red);
+  border-radius: var(--radius-pill);
+  background: var(--fresh-paper);
   color: #77372e;
   cursor: pointer;
   font-size: 13px;
@@ -243,7 +243,7 @@ const sourceLabel = computed(() =>
 
 @media (hover: hover) and (pointer: fine) {
   .course-card:hover {
-    border-color: #bfd1bb;
+    border-color: var(--fresh-line-strong);
     box-shadow: 0 15px 32px rgba(56, 79, 58, 0.13);
     transform: translateY(-3px);
   }

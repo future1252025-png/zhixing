@@ -6,6 +6,7 @@ import { useRoute, useRouter } from 'vue-router'
 import type { Building } from '@/api/buildings'
 import { extractBusinessError } from '@/api/errors'
 import { getScheduleSuggestion } from '@/api/schedule'
+import BuildingPicker from '@/components/BuildingPicker.vue'
 import RealCampusMap from '@/components/RealCampusMap.vue'
 import TechIcon from '@/components/TechIcon.vue'
 import SemesterGate from '@/components/course/SemesterGate.vue'
@@ -24,12 +25,6 @@ import {
   type SearchableScheduleLocation
 } from '@/utils/schedule'
 
-type ScheduleLocationOption = SearchableScheduleLocation & {
-  source: 'building'
-  building_id: number | null
-  description?: string | null
-}
-
 const router = useRouter()
 const route = useRoute()
 const authStore = useAuthStore()
@@ -37,9 +32,6 @@ const buildingsStore = useBuildingsStore()
 const locationStore = useLocationStore()
 const semesterStore = useSemesterStore()
 const buildings = ref<Building[]>([])
-const selectedOption = ref('')
-const startQuery = ref('')
-const destinationQuery = ref('')
 const selectedDestination = ref<Building | null>(null)
 const suggestion = ref<ScheduleSuggestion | null>(null)
 const scheduleError = ref<SchedulePageError | null>(null)
@@ -56,24 +48,9 @@ const semesterLabel = computed(() => {
   if (semester.status === 'after_term') return '已结束'
   return `第 ${semester.current_week} 周`
 })
-const startLocations = computed<ScheduleLocationOption[]>(() =>
-  buildings.value.map((building) => ({
-    id: building.id,
-    source: 'building' as const,
-    name: building.name,
-    type: building.type,
-    building_id: building.id,
-    latitude: building.latitude,
-    longitude: building.longitude,
-    description: building.walk_hint
-  }))
-)
-const startSearchResults = computed(() =>
-  filterScheduleLocations(startLocations.value, startQuery.value, 10)
-)
-const destinationSearchResults = computed(() =>
-  filterScheduleLocations(buildings.value, destinationQuery.value, 10)
-)
+// 起点选中态只在选中校园建筑时有值；浏览器定位/校园中心的 building_id 为 null
+const startBuildingId = computed(() => locationStore.selectedLocation?.building_id ?? null)
+const destinationBuildingId = computed(() => selectedDestination.value?.id ?? null)
 const statusMeta = computed(() =>
   suggestion.value ? getStatusMeta(suggestion.value.status) : null
 )
@@ -110,27 +87,23 @@ function clearGeneratedState() {
   scheduleError.value = null
 }
 
-function applySelectedOption(value: string) {
-  selectedOption.value = value
+function selectStartBuilding(buildingId: number | null) {
+  if (buildingId === null) return
+  const building = buildings.value.find((item) => item.id === buildingId)
+  if (!building) return
   clearGeneratedState()
-  if (value.startsWith('building:')) {
-    const id = Number(value.replace('building:', ''))
-    const building = buildings.value.find((item) => item.id === id)
-    if (building) {
-      locationStore.selectBuilding(building)
-      startQuery.value = building.name
-    }
-  }
-}
-
-function selectStartLocation(location: ScheduleLocationOption) {
-  applySelectedOption(`${location.source}:${location.id}`)
+  locationStore.selectBuilding(building)
 }
 
 function selectDestination(building: Building) {
   clearGeneratedState()
   selectedDestination.value = building
-  destinationQuery.value = building.name
+}
+
+function selectDestinationById(buildingId: number | null) {
+  if (buildingId === null) return
+  const building = buildings.value.find((item) => item.id === buildingId)
+  if (building) selectDestination(building)
 }
 
 function locationTitle(location: Pick<SearchableScheduleLocation, 'name' | 'type'>): string {
@@ -143,7 +116,6 @@ function locationSubtitle(location: Pick<SearchableScheduleLocation, 'name' | 't
 
 function clearDestination() {
   selectedDestination.value = null
-  destinationQuery.value = ''
 }
 
 async function loadScheduleData() {
@@ -164,7 +136,7 @@ async function loadScheduleData() {
     buildings.value = buildingResult
 
     if (!locationStore.selectedLocation && buildingResult.length > 0) {
-      applySelectedOption(`building:${buildingResult[0].id}`)
+      selectStartBuilding(buildingResult[0].id)
     }
     const destinationId = Number(route.query.destination)
     if (Number.isFinite(destinationId)) {
@@ -181,10 +153,6 @@ async function loadScheduleData() {
 async function useBrowserLocation() {
   try {
     const location = await locationStore.requestBrowserLocation()
-    selectedOption.value = location.source
-    startQuery.value = location.source === 'fallback'
-      ? '校园中心'
-      : '浏览器定位：当前位置'
     clearGeneratedState()
     showToast(location.source === 'fallback'
       ? '定位超时，已使用校园中心，可搜索调整'
@@ -309,7 +277,7 @@ onMounted(loadScheduleData)
             <p>出发时间始终按下一节课计算；手动终点只用于预览地图。</p>
           </div>
           <button type="button" aria-label="刷新学期和地点" @click="loadScheduleData">
-            <van-icon name="replay" />
+            <TechIcon name="refresh" :size="18" />
           </button>
         </header>
 
@@ -319,37 +287,21 @@ onMounted(loadScheduleData)
               <div class="node-label">
                 <span>起点</span>
                 <button type="button" :disabled="locationStore.browserLoading" @click="useBrowserLocation">
-                  <van-icon name="aim" />
+                  <TechIcon name="aim" :size="15" />
                   {{ locationStore.browserLoading ? '定位中' : '用当前位置' }}
                 </button>
               </div>
 
-              <van-search
-                id="locationSearch"
-                v-model="startQuery"
-                shape="round"
+              <BuildingPicker
+                :model-value="startBuildingId"
+                :buildings="buildings"
                 placeholder="搜索图书馆、教学楼、食堂..."
+                :filter="filterScheduleLocations"
+                @update:model-value="selectStartBuilding"
               />
 
-              <div class="location-result-list">
-                <button
-                  v-for="location in startSearchResults"
-                  :key="`${location.source}-${location.id}`"
-                  type="button"
-                  :class="{ active: selectedOption === `${location.source}:${location.id}` }"
-                  :aria-pressed="selectedOption === `${location.source}:${location.id}`"
-                  @click="selectStartLocation(location)"
-                >
-                  <i></i>
-                  <span>
-                    <strong>{{ locationTitle(location) }}</strong>
-                    <small>{{ locationSubtitle(location) }}</small>
-                  </span>
-                </button>
-              </div>
-
               <div v-if="locationStore.selectedLocation" class="selected-place">
-                <span><van-icon name="success" /></span>
+                <span><TechIcon name="check" :size="17" /></span>
                 <div>
                   <small>起点已选择</small>
                   <strong>
@@ -380,39 +332,23 @@ onMounted(loadScheduleData)
                 <small>选填 · 只预览地图</small>
               </div>
 
-              <van-search
-                id="destinationSearch"
-                v-model="destinationQuery"
-                shape="round"
+              <BuildingPicker
+                :model-value="destinationBuildingId"
+                :buildings="buildings"
                 placeholder="想先预览其他终点？"
+                :filter="filterScheduleLocations"
+                @update:model-value="selectDestinationById"
               />
 
-              <div class="location-result-list">
-                <button
-                  v-for="building in destinationSearchResults"
-                  :key="building.id"
-                  type="button"
-                  :class="{ active: selectedDestination?.id === building.id }"
-                  :aria-pressed="selectedDestination?.id === building.id"
-                  @click="selectDestination(building)"
-                >
-                  <i></i>
-                  <span>
-                    <strong>{{ locationTitle(building) }}</strong>
-                    <small>{{ locationSubtitle(building) }}</small>
-                  </span>
-                </button>
-              </div>
-
               <div v-if="selectedDestination" class="selected-place selected-destination">
-                <span><van-icon name="flag-o" /></span>
+                <span><TechIcon name="flag" :size="17" /></span>
                 <div>
                   <small>预览终点</small>
                   <strong>{{ locationTitle(selectedDestination) }}</strong>
                   <p>{{ locationSubtitle(selectedDestination) }}</p>
                 </div>
                 <button type="button" aria-label="改回下一节课终点" @click="clearDestination">
-                  <van-icon name="cross" />
+                  <TechIcon name="close" :size="15" />
                 </button>
               </div>
             </div>
@@ -554,7 +490,7 @@ onMounted(loadScheduleData)
   border-radius: 34px 34px 26px 34px;
   background:
     linear-gradient(145deg, rgba(255, 255, 255, 0.5), transparent 44%),
-    #dfecee;
+    var(--fresh-sky);
   padding: 25px 22px 18px;
   box-shadow: var(--fresh-shadow-soft);
 }
@@ -647,7 +583,7 @@ onMounted(loadScheduleData)
   width: 13px;
   height: 13px;
   place-items: center;
-  border: 4px solid #dfecee;
+  border: 4px solid var(--fresh-sky);
   border-radius: 50%;
   background: var(--fresh-green);
   box-sizing: content-box;
@@ -667,7 +603,7 @@ onMounted(loadScheduleData)
   height: 34px;
   border-width: 5px;
   background: var(--fresh-paper);
-  color: #5b8992;
+  color: var(--cm-chat-dark);
   animation-delay: 1.1s;
 }
 
@@ -679,7 +615,7 @@ onMounted(loadScheduleData)
   z-index: 4;
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  border-radius: 18px;
+  border-radius: var(--radius-md);
   background: rgba(255, 255, 255, 0.57);
   padding: 10px 4px;
 }
@@ -722,7 +658,7 @@ onMounted(loadScheduleData)
 .planner-heading > div > span {
   color: var(--fresh-green);
   font-size: 12px;
-  font-weight: 720;
+  font-weight: 700;
 }
 
 .planner-heading h2 {
@@ -744,8 +680,8 @@ onMounted(loadScheduleData)
   height: 44px;
   place-items: center;
   border: 1px solid var(--fresh-line);
-  border-radius: 14px;
-  background: #f8faf4;
+  border-radius: var(--radius-sm);
+  background: var(--fresh-paper-2);
   color: var(--fresh-green-dark);
   cursor: pointer;
 }
@@ -770,7 +706,7 @@ onMounted(loadScheduleData)
 .planner-loading i {
   width: 6px;
   height: 10px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--fresh-blue);
   animation: planner-load 850ms ease-in-out infinite alternate;
 }
@@ -828,7 +764,7 @@ onMounted(loadScheduleData)
 .node-label > span {
   color: var(--fresh-ink);
   font-size: 12px;
-  font-weight: 750;
+  font-weight: 700;
 }
 
 .node-label > button {
@@ -856,82 +792,14 @@ onMounted(loadScheduleData)
   font-size: 12px;
 }
 
-.location-result-list {
-  display: flex;
-  gap: 7px;
-  overflow-x: auto;
-  margin-top: 9px;
-  padding: 1px 1px 5px;
-  scrollbar-width: none;
-}
-
-.location-result-list::-webkit-scrollbar { display: none; }
-
-.location-result-list > button {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  flex: 0 0 155px;
-  gap: 8px;
-  align-items: center;
-  min-height: 57px;
-  border: 1px solid var(--fresh-line);
-  border-radius: 17px;
-  background: #fafbf6;
-  color: var(--fresh-ink);
-  cursor: pointer;
-  padding: 9px 10px;
-  text-align: left;
-}
-
-.location-result-list > button > i {
-  width: 8px;
-  height: 8px;
-  border: 2px solid #b8c4b7;
-  border-radius: 50%;
-}
-
-.location-result-list > button > span {
-  display: grid;
-  min-width: 0;
-  gap: 3px;
-}
-
-.location-result-list strong,
-.location-result-list small {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.location-result-list strong { font-size: 14px; }
-.location-result-list small { color: var(--fresh-muted); font-size: 12px; }
-
-.location-result-list > button.active {
-  border-color: #96b39a;
-  background: var(--fresh-mint);
-  color: var(--fresh-green-dark);
-}
-
-.end-node .location-result-list > button.active {
-  border-color: #a6c1c6;
-  background: var(--fresh-sky);
-  color: #4e7c85;
-}
-
-.location-result-list > button.active > i {
-  border-color: var(--fresh-green);
-  background: var(--fresh-green);
-  box-shadow: 0 0 0 4px rgba(79, 125, 88, 0.1);
-}
-
 .selected-place {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
   gap: 9px;
   align-items: center;
   margin-top: 9px;
-  border-radius: 17px;
-  background: #eef4ea;
+  border-radius: var(--fresh-radius-sm);
+  background: var(--fresh-mint);
   padding: 10px;
 }
 
@@ -951,13 +819,13 @@ onMounted(loadScheduleData)
   gap: 2px;
 }
 
-.selected-place small { color: var(--fresh-green-dark); font-size: 12px; font-weight: 720; }
+.selected-place small { color: var(--fresh-green-dark); font-size: 12px; font-weight: 700; }
 .selected-place strong { overflow: hidden; color: var(--fresh-ink); font-size: 15px; text-overflow: ellipsis; white-space: nowrap; }
 .selected-place p { overflow: hidden; margin: 0; color: var(--fresh-muted); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
 
 .selected-destination {
   grid-template-columns: auto minmax(0, 1fr) auto;
-  background: #eaf2f3;
+  background: var(--fresh-sky);
 }
 
 .selected-destination > span { color: var(--fresh-blue); }
@@ -971,7 +839,7 @@ onMounted(loadScheduleData)
   border: 1px solid #c5d7d9;
   border-radius: 11px;
   background: #fff;
-  color: #628791;
+  color: var(--cm-chat-dark);
   cursor: pointer;
 }
 
@@ -1029,7 +897,7 @@ onMounted(loadScheduleData)
   gap: 3px;
 }
 
-.generate-button strong { font-size: 16px; font-weight: 760; }
+.generate-button strong { font-size: 16px; font-weight: 700; }
 .generate-button small { color: rgba(255, 255, 255, 0.82); font-size: 13px; }
 
 .generate-button:disabled {
@@ -1072,7 +940,7 @@ onMounted(loadScheduleData)
 }
 
 .schedule-recovery > div { min-width: 0; }
-.schedule-recovery small { color: #76664e; font-size: 12px; font-weight: 750; }
+.schedule-recovery small { color: #76664e; font-size: 12px; font-weight: 700; }
 .schedule-recovery h2 {
   margin: 4px 0 0;
   color: #40382c;
@@ -1091,8 +959,8 @@ onMounted(loadScheduleData)
   justify-self: start;
   min-height: 44px;
   border: 0;
-  border-radius: 999px;
-  background: #4f7d58;
+  border-radius: var(--radius-pill);
+  background: var(--fresh-green);
   color: #fff;
   cursor: pointer;
   font-size: 14px;
@@ -1133,11 +1001,11 @@ onMounted(loadScheduleData)
   min-height: 36px;
   align-items: center;
   gap: 4px;
-  border-radius: 999px;
-  background: #eaf2e6;
+  border-radius: var(--radius-pill);
+  background: var(--fresh-mint);
   color: var(--fresh-green-dark);
   font-size: 13px;
-  font-weight: 720;
+  font-weight: 700;
   padding: 0 12px;
   white-space: nowrap;
 }
@@ -1153,7 +1021,7 @@ onMounted(loadScheduleData)
 .map-body {
   margin-top: 2px;
   overflow: hidden;
-  border-radius: 18px;
+  border-radius: var(--radius-md);
 }
 
 .departure-card {
@@ -1162,7 +1030,7 @@ onMounted(loadScheduleData)
   border-radius: 32px 32px 25px 32px;
   background:
     linear-gradient(145deg, rgba(255, 255, 255, 0.45), transparent 40%),
-    #e5eedf;
+    var(--fresh-mint);
   padding: 23px 19px 19px;
   box-shadow: var(--fresh-shadow);
 }
@@ -1185,11 +1053,11 @@ onMounted(loadScheduleData)
 
 .departure-time > span {
   display: inline-flex;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: rgba(255, 255, 255, 0.65);
   color: var(--fresh-green-dark);
   font-size: 12px;
-  font-weight: 720;
+  font-weight: 700;
   padding: 5px 9px;
 }
 
@@ -1200,14 +1068,14 @@ onMounted(loadScheduleData)
   margin: 12px 0 0;
   color: var(--fresh-text);
   font-size: 14px;
-  font-weight: 680;
+  font-weight: 600;
 }
 
 .departure-time > strong {
   display: block;
   margin-top: 4px;
   color: var(--fresh-ink);
-  font-family: "STKaiti", "KaiTi", sans-serif;
+  font-family: var(--font-serif);
   font-size: clamp(44px, 12vw, 58px);
   line-height: 1;
   letter-spacing: -0.04em;
@@ -1220,10 +1088,10 @@ onMounted(loadScheduleData)
   padding: 14px;
 }
 
-.course-destination small { color: var(--fresh-green); font-size: 12px; font-weight: 720; }
+.course-destination small { color: var(--fresh-green); font-size: 12px; font-weight: 700; }
 .course-destination h2 { margin: 4px 0 0; color: var(--fresh-ink); font-size: 18px; }
 .course-destination p { margin: 6px 0 0; color: var(--fresh-text); font-size: 14px; line-height: 1.55; }
-.course-destination > span { display: inline-block; margin-top: 7px; margin-right: 6px; border-radius: 999px; background: #fff; color: var(--fresh-muted); font-size: 12px; padding: 5px 9px; }
+.course-destination > span { display: inline-block; margin-top: 7px; margin-right: 6px; border-radius: var(--radius-pill); background: #fff; color: var(--fresh-muted); font-size: 12px; padding: 5px 9px; }
 
 .route-summary {
   display: grid;
@@ -1262,7 +1130,7 @@ onMounted(loadScheduleData)
 
 .walking-metrics div + div { border-left: 1px solid rgba(79, 125, 88, 0.13); }
 .walking-metrics span { color: var(--fresh-muted); font-size: 12px; }
-.walking-metrics strong { color: var(--fresh-ink); font-size: 15px; font-weight: 760; }
+.walking-metrics strong { color: var(--fresh-ink); font-size: 15px; font-weight: 700; }
 
 .suggestion-text {
   margin: 14px 0 0;
@@ -1273,8 +1141,8 @@ onMounted(loadScheduleData)
 
 .warning-text {
   margin: 10px 0 0;
-  border-radius: 14px;
-  background: #fae8df;
+  border-radius: var(--radius-sm);
+  background: var(--cm-red-soft);
   color: #9e5f55;
   font-size: 13px;
   line-height: 1.55;

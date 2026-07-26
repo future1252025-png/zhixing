@@ -10,8 +10,8 @@ import {
 
 describe('map interaction helpers', () => {
   it('uses smaller building hit zones when zoomed out and larger zones when zoomed in', () => {
-    expect(getBuildingHitZoneSize(14)).toBe(10)
-    expect(getBuildingHitZoneSize(16)).toBe(22)
+    expect(getBuildingHitZoneSize(14)).toBe(32)
+    expect(getBuildingHitZoneSize(16)).toBe(32)
     expect(getBuildingHitZoneSize(18)).toBe(38)
   })
 

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  COURSE_ACCENT_PALETTE,
   buildEmptyCourseForm,
   buildCourseCreateQuery,
   buildCourseColorMap,
@@ -166,8 +167,8 @@ describe('course helpers', () => {
     expect(colorMap[1]).not.toBe(colorMap[3])
   })
 
-  it('assigns a unique color to each subject name', () => {
-    const courses = Array.from({ length: 12 }, (_, index) => ({
+  it('assigns a unique curated color to each subject name up to the palette size', () => {
+    const courses = Array.from({ length: COURSE_ACCENT_PALETTE.length }, (_, index) => ({
       ...baseCourse,
       course_name: `课程 ${index + 1}`,
       id: index + 1
@@ -176,10 +177,18 @@ describe('course helpers', () => {
     const colors = [...new Set(Object.values(colorMap))]
 
     expect(colors).toHaveLength(courses.length)
-    expect(colors.every((color) => {
-      const saturation = color.match(/hsl\(\d+ (\d+)%/)?.[1]
-      return saturation !== undefined && Number(saturation) >= 62
-    })).toBe(true)
+    expect(colors.every((color) => COURSE_ACCENT_PALETTE.includes(color as never))).toBe(true)
+  })
+
+  it('keeps a subject color stable across sessions and unrelated set changes', () => {
+    const alone = buildCourseColorMap([{ ...baseCourse, id: 1, course_name: '数据结构' }])
+    const withOthers = buildCourseColorMap([
+      { ...baseCourse, id: 1, course_name: '数据结构' },
+      { ...baseCourse, id: 2, course_name: '大学英语' },
+      { ...baseCourse, id: 3, course_name: '高等数学' }
+    ])
+
+    expect(withOthers[1]).toBe(alone[1])
   })
 
   it('builds teaching week ranges from picker values', () => {

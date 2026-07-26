@@ -88,7 +88,6 @@ async function mountPage() {
     global: {
       stubs: {
         'van-nav-bar': { template: '<header />' },
-        'van-icon': { template: '<i />' },
         'van-empty': {
           props: ['description'],
           template: '<div class="van-empty">{{ description }}<slot /></div>'

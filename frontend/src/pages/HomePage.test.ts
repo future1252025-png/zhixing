@@ -11,10 +11,6 @@ import { useAuthStore } from '@/stores/auth'
 import type { Course } from '@/types/course'
 import HomePage from './HomePage.vue'
 
-vi.mock('animejs', () => ({
-  animate: vi.fn(),
-  stagger: vi.fn(() => 0)
-}))
 vi.mock('@/api/buildings', () => ({ getBuildings: vi.fn() }))
 vi.mock('@/api/courses', () => ({ getCourses: vi.fn() }))
 vi.mock('@/api/semester', () => ({
@@ -162,9 +158,31 @@ describe('HomePage', () => {
 
     expect(wrapper.get('.login-welcome').text()).toContain('真实周课程')
     expect(wrapper.get('.login-welcome').text()).toContain('综合教学楼 · 东区三层 A101')
-    vi.advanceTimersByTime(2800)
+    vi.advanceTimersByTime(3600)
     await wrapper.vm.$nextTick()
     expect(wrapper.find('.login-welcome').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('jumps to the timetable when the welcome card with a course snapshot is tapped', async () => {
+    vi.mocked(getCourses).mockResolvedValue([
+      course({ id: 4, course_name: '真实周课程', weeks: '4' })
+    ])
+    sessionStorage.setItem('campusmind-login-intro-pending', '1')
+    sessionStorage.setItem('campusmind-login-intro-snapshot', JSON.stringify({
+      courseName: '真实周课程',
+      startTime: '09:00',
+      buildingName: '综合教学楼',
+      roomName: '东区三层 A101'
+    }))
+
+    const wrapper = await mountHome()
+    const router = wrapper.vm.$router
+
+    await wrapper.get('.login-welcome').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('.login-welcome').exists()).toBe(false)
+    expect(router.currentRoute.value.path).toBe('/courses')
     wrapper.unmount()
   })
 })

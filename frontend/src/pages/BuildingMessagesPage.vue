@@ -10,6 +10,7 @@ import { parseApiDateTime } from '@/utils/dateTime'
 import { haversineDistanceMeters } from '@/utils/geo'
 import { useKeyboardInset } from '@/utils/keyboardInset'
 import { MESSAGE_PAGE_SIZE, hasMoreMessagePages, mergeOlderMessages } from '@/utils/messagePagination'
+import { goBack } from '@/utils/navigation'
 
 const MAX_MESSAGE_DISTANCE_METERS = 500
 
@@ -30,7 +31,7 @@ const selectedRoomName = computed(() => {
   const value = route.query.room_name
   return typeof value === 'string' && value.trim() ? value.trim() : null
 })
-const roomTitle = computed(() => selectedRoomName.value || '建筑总聊')
+const roomTitle = computed(() => selectedRoomName.value || '地点频道')
 const remainingCount = computed(() => Math.max(0, 200 - draft.value.length))
 const currentLocation = ref<{ latitude: number; longitude: number; location_source: MessageLocationSource; label: string } | null>(null)
 const distanceToBuildingMeters = computed(() => {
@@ -81,9 +82,51 @@ function getErrorMessage(error: unknown): string {
   }
   return message
 }
-function formatTime(value: string): string { const date = parseApiDateTime(value); return Number.isNaN(date.getTime()) ? '' : date.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) }
+function formatTime(value: string): string { const date = parseApiDateTime(value); return Number.isNaN(date.getTime()) ? '' : date.toLocaleString('zh-CN', { hour: '2-digit', minute: '2-digit' }) }
 function formatDistance(value: number | null): string { if (value === null) return ''; return value >= 1000 ? `${(value / 1000).toFixed(1)} km` : `${Math.round(value)} m` }
-async function scrollToBottom() { await nextTick(); if (messageListRef.value) messageListRef.value.scrollTop = messageListRef.value.scrollHeight }
+// 作者色点按昵称哈希取色：加载更早的留言后颜色依旧稳定（index 派生会整体变色）
+function authorHue(name: string | null): number {
+  const value = name || '匿名同学'
+  let hash = 5381
+  for (const ch of value) {
+    hash = ((hash << 5) + hash + (ch.codePointAt(0) ?? 0)) >>> 0
+  }
+  return hash % 360
+}
+function formatDayLabel(date: Date): string {
+  const today = new Date()
+  const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
+  const diffDays = Math.round((startOfDay(today) - startOfDay(date)) / 86_400_000)
+  if (diffDays === 0) return '今天'
+  if (diffDays === 1) return '昨天'
+  return `${date.getMonth() + 1}月${date.getDate()}日`
+}
+// 留言按日分组：日期放分隔条，行内只留 HH:mm
+const groupedMessages = computed(() => {
+  const groups: { key: string; label: string; items: BuildingMessage[] }[] = []
+  for (const message of messages.value) {
+    const date = parseApiDateTime(message.created_at)
+    const valid = !Number.isNaN(date.getTime())
+    const key = valid
+      ? `${date.getFullYear()}-${date.getMonth() + 1}-${date.getDate()}`
+      : 'unknown'
+    const lastGroup = groups[groups.length - 1]
+    if (lastGroup && lastGroup.key === key) {
+      lastGroup.items.push(message)
+    } else {
+      groups.push({ key, label: valid ? formatDayLabel(date) : '', items: [message] })
+    }
+  }
+  return groups
+})
+// 页面单滚动区：滚到留言列表底部（留言与输入框都收在视口里）
+async function scrollToBottom() {
+  await nextTick()
+  const list = messageListRef.value
+  if (!list) return
+  const bottom = list.getBoundingClientRect().bottom + window.scrollY
+  window.scrollTo({ top: Math.max(0, bottom - window.innerHeight + 220) })
+}
 // 每次发起留言请求就递增；响应返回时序号不匹配说明已被更新的请求取代，丢弃过期结果。
 let messagesRequestSeq = 0
 async function loadMessages() {
@@ -108,6 +151,9 @@ async function loadOlderMessages() {
   if (oldestMessageId === undefined) return
   const requestSeq = ++messagesRequestSeq
   loadingOlder.value = true
+  // 记住当前第一条留言的位置，prepend 后补偿滚动量，阅读位置不跳
+  const anchorEl = messageListRef.value?.querySelector<HTMLElement>('.message-row')
+  const anchorTop = anchorEl?.getBoundingClientRect().top ?? null
   try {
     const olderMessages = await getBuildingMessages(buildingId.value, {
       roomName: selectedRoomName.value,
@@ -117,6 +163,10 @@ async function loadOlderMessages() {
     if (requestSeq !== messagesRequestSeq) return
     messages.value = mergeOlderMessages(messages.value, olderMessages)
     hasMoreMessages.value = hasMoreMessagePages(olderMessages)
+    if (anchorEl && anchorTop !== null) {
+      await nextTick()
+      window.scrollBy(0, anchorEl.getBoundingClientRect().top - anchorTop)
+    }
   } catch (error) {
     if (requestSeq !== messagesRequestSeq) return
     showFailToast(getErrorMessage(error))
@@ -194,7 +244,7 @@ watch(composerLift, () => {
 
 <template>
   <section class="page message-page" :style="pageStyle">
-    <van-nav-bar :title="roomTitle" left-arrow @click-left="router.push(`/buildings/${buildingId}/chats`)" />
+    <van-nav-bar :title="roomTitle" left-arrow @click-left="goBack(router, '/home')" />
     <div class="message-content">
       <header
         v-reveal="{ from: 'left', distance: 38, stagger: 50 }"
@@ -202,7 +252,7 @@ watch(composerLift, () => {
       >
         <span class="message-sun" aria-hidden="true"></span>
         <span class="message-leaves" aria-hidden="true"><i></i><i></i></span>
-        <span class="channel-icon"><van-icon name="chat-o" /></span>
+        <span class="channel-icon"><TechIcon name="chat" :size="21" /></span>
         <div class="heading-copy">
           <small>{{ building?.name || '校园地点' }}</small>
           <strong>{{ roomTitle }}</strong>
@@ -226,7 +276,7 @@ watch(composerLift, () => {
       >
         <span class="location-mark">
           <i></i>
-          <van-icon name="location-o" />
+          <TechIcon name="location" :size="19" />
         </span>
         <div class="location-copy">
           <small>
@@ -242,11 +292,11 @@ watch(composerLift, () => {
         </div>
         <div class="location-actions">
           <button type="button" :disabled="locating" @click="requestBrowserLocation">
-            <van-icon name="aim" />
+            <TechIcon name="aim" :size="16" />
             {{ locating ? '定位中' : '定位我' }}
           </button>
           <button type="button" @click="useBuildingLocation">
-            <van-icon name="wap-home-o" />
+            <TechIcon name="home" :size="16" />
             使用建筑位置
           </button>
         </div>
@@ -281,16 +331,28 @@ watch(composerLift, () => {
           {{ loadingOlder ? '正在加载...' : '看看更早的留言' }}
         </button>
 
-        <article v-for="(message, index) in messages" :key="message.id" class="message-row">
-          <div class="message-meta">
-            <span class="message-author"><i :style="{ '--author-hue': (index * 47) % 360 }"></i>{{ message.display_name || '匿名同学' }}</span>
-            <span v-if="message.distance_to_building_meters !== null">
-              距建筑 {{ formatDistance(message.distance_to_building_meters) }}
-            </span>
-            <time>{{ formatTime(message.created_at) }}</time>
+        <template v-for="group in groupedMessages" :key="group.key">
+          <div v-if="group.label" class="day-divider" role="separator">
+            <span>{{ group.label }}</span>
           </div>
-          <p>{{ message.content }}</p>
-        </article>
+          <article v-for="message in group.items" :key="message.id" class="message-row">
+            <div class="message-meta">
+              <span class="message-author">
+                <i
+                  class="author-avatar"
+                  aria-hidden="true"
+                  :style="{ '--author-hue': authorHue(message.display_name) }"
+                >{{ (message.display_name || '匿')[0] }}</i>
+                {{ message.display_name || '匿名同学' }}
+              </span>
+              <span v-if="message.distance_to_building_meters !== null">
+                距建筑 {{ formatDistance(message.distance_to_building_meters) }}
+              </span>
+              <time>{{ formatTime(message.created_at) }}</time>
+            </div>
+            <p>{{ message.content }}</p>
+          </article>
+        </template>
       </div>
     </div>
 
@@ -385,7 +447,7 @@ watch(composerLift, () => {
   width: 47px;
   height: 47px;
   place-items: center;
-  border-radius: 18px;
+  border-radius: var(--radius-md);
   background: rgba(255, 255, 255, 0.64);
   color: #786c86;
   font-size: 21px;
@@ -412,7 +474,7 @@ watch(composerLift, () => {
 
 .message-count strong {
   color: var(--fresh-ink);
-  font-family: "STKaiti", "KaiTi", serif;
+  font-family: var(--font-serif);
   font-size: 33px;
   line-height: 1;
 }
@@ -457,13 +519,13 @@ watch(composerLift, () => {
 }
 
 .location-card.verified {
-  border-color: #b9cdb6;
-  background: #edf4e9;
+  border-color: var(--fresh-line-strong);
+  background: var(--fresh-mint);
 }
 
 .location-card.denied {
   border-color: #e2c6bf;
-  background: #fbefea;
+  background: var(--cm-red-soft);
 }
 
 .location-mark {
@@ -474,7 +536,7 @@ watch(composerLift, () => {
   place-items: center;
   border-radius: 50% 50% 50% 14px;
   background: var(--fresh-sky);
-  color: #5a858e;
+  color: var(--cm-chat-dark);
   transform: rotate(-45deg);
 }
 
@@ -501,7 +563,7 @@ watch(composerLift, () => {
   gap: 4px;
 }
 
-.location-copy small { color: var(--fresh-green); font-size: 12px; font-weight: 720; }
+.location-copy small { color: var(--fresh-green); font-size: 12px; font-weight: 700; }
 .location-copy strong { color: var(--fresh-ink); font-size: 15px; line-height: 1.35; }
 .location-copy p {
   overflow: hidden;
@@ -529,12 +591,12 @@ watch(composerLift, () => {
   justify-content: center;
   gap: 6px;
   border: 1px solid var(--fresh-line);
-  border-radius: 14px;
-  background: #fafbf6;
+  border-radius: var(--radius-sm);
+  background: var(--fresh-paper-2);
   color: var(--fresh-text);
   cursor: pointer;
   font-size: 13px;
-  font-weight: 720;
+  font-weight: 700;
 }
 
 /* Primary: browser locate */
@@ -552,9 +614,9 @@ watch(composerLift, () => {
 }
 
 .location-actions button:disabled {
-  border-color: #d8ded4;
-  background: #edf0e9;
-  color: #839085;
+  border-color: var(--fresh-line);
+  background: var(--disabled-surface);
+  color: var(--disabled-text);
   cursor: wait;
   opacity: 1;
 }
@@ -585,7 +647,7 @@ watch(composerLift, () => {
 .messages-loading > div i {
   width: 5px;
   height: 11px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--fresh-lilac);
   animation: message-load 800ms ease-in-out infinite alternate;
 }
@@ -598,8 +660,8 @@ watch(composerLift, () => {
   display: block;
   width: 78%;
   height: 51px;
-  border-radius: 18px;
-  background: linear-gradient(90deg, #eef1ea, #f9faf5, #eef1ea);
+  border-radius: var(--radius-md);
+  background: linear-gradient(90deg, var(--disabled-surface), var(--fresh-paper-2), var(--disabled-surface));
   background-size: 200% 100%;
   animation: skeleton-move 1.3s linear infinite;
 }
@@ -617,27 +679,43 @@ watch(composerLift, () => {
   color: var(--fresh-green);
 }
 
+/* 页面唯一滚动区就是文档本身：聊天流不再截进内滚小窗 */
 .message-list {
   display: grid;
-  max-height: min(56dvh, 580px);
-  overflow-y: auto;
   gap: 13px;
   border-radius: 25px;
   background: rgba(255, 253, 248, 0.6);
   padding: 13px;
-  scroll-behavior: smooth;
+}
+
+.day-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 4px;
+  color: var(--fresh-muted);
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+
+.day-divider::before,
+.day-divider::after {
+  height: 1px;
+  flex: 1;
+  background: var(--fresh-line);
+  content: "";
 }
 
 .load-more-button {
   justify-self: center;
   min-height: 40px;
   border: 1px solid var(--fresh-line);
-  border-radius: 999px;
-  background: #fafbf6;
+  border-radius: var(--radius-pill);
+  background: var(--fresh-paper-2);
   color: var(--fresh-text);
   cursor: pointer;
   font-size: 13px;
-  font-weight: 650;
+  font-weight: 600;
   padding: 0 14px;
 }
 
@@ -664,11 +742,18 @@ watch(composerLift, () => {
   font-weight: 700;
 }
 
-.message-author i {
-  width: 9px;
-  height: 9px;
-  border-radius: 50% 50% 50% 20%;
-  background: hsl(var(--author-hue) 32% 63%);
+.message-author .author-avatar {
+  display: grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border-radius: 50% 50% 50% 22%;
+  background: hsl(var(--author-hue) 30% 58%);
+  color: #fff;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 600;
+  line-height: 1;
 }
 
 .message-row p {
@@ -686,9 +771,9 @@ watch(composerLift, () => {
 
 .message-composer {
   position: fixed;
-  right: max(10px, calc((100vw - 580px) / 2));
+  right: max(10px, calc((100vw - var(--page-max)) / 2 + 10px));
   bottom: max(10px, env(safe-area-inset-bottom));
-  left: max(10px, calc((100vw - 580px) / 2));
+  left: max(10px, calc((100vw - var(--page-max)) / 2 + 10px));
   z-index: 500;
   overflow: hidden;
   border: 1px solid rgba(79, 125, 88, 0.13);
@@ -717,7 +802,7 @@ watch(composerLift, () => {
   padding: 0 3px 6px;
   color: var(--fresh-text);
   font-size: 13px;
-  font-weight: 650;
+  font-weight: 600;
 }
 
 .message-composer.disabled .composer-status {
@@ -745,7 +830,7 @@ watch(composerLift, () => {
 .message-composer :deep(.van-cell) {
   min-height: 48px;
   border-radius: 15px;
-  background: #f7f9f3;
+  background: var(--fresh-paper-2);
   padding: 10px 12px;
 }
 
@@ -765,8 +850,8 @@ watch(composerLift, () => {
 .composer-actions > span {
   height: 3px;
   overflow: hidden;
-  border-radius: 999px;
-  background: #e5eae2;
+  border-radius: var(--radius-pill);
+  background: var(--fresh-mint);
 }
 
 .composer-actions > span i {

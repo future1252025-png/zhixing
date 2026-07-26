@@ -23,18 +23,34 @@ export function getMapInteractionLevel(zoom: number): MapInteractionLevel {
   return 'building'
 }
 
+/**
+ * 命中区始终 ≥32px（触控可点下限）：低 zoom 时 pin 视觉上变小，
+ * 但可点范围不缩水——"看得见的才点得到，点得到的要点得准"。
+ */
 export function getBuildingHitZoneSize(zoom: number, active = false): number {
   if (active) {
     return zoom >= 17.5 ? 46 : 32
   }
   const level = getMapInteractionLevel(zoom)
   if (level === 'area') {
-    return 10
+    return 32
   }
   if (level === 'mixed') {
-    return 22
+    return 32
   }
   return 38
+}
+
+/** 可见 pin 的直径：随 zoom 缩放，与命中区同心 */
+export function getBuildingPinSize(zoom: number, active = false): number {
+  if (active) {
+    return 14
+  }
+  const level = getMapInteractionLevel(zoom)
+  if (level === 'area') {
+    return 8
+  }
+  return 10
 }
 
 export function shouldShowBuildingHighlight(active: boolean): boolean {

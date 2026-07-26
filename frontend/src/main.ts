@@ -4,6 +4,9 @@ import { showFailToast } from 'vant'
 // 函数式调用组件（showToast/showConfirmDialog 等）不经模板解析，需手动引入样式
 import 'vant/es/toast/style/index'
 import 'vant/es/dialog/style/index'
+// 品牌楷体：GB 字符集 + unicode-range 分片，浏览器只下载用到的分片；
+// 保证 Android（无内置楷体）上标题不回退为黑体
+import 'lxgw-wenkai-screen-webfont/lxgwwenkaigbscreen.css'
 
 import App from './App.vue'
 import revealDirective from './directives/reveal'

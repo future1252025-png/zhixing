@@ -177,7 +177,7 @@ watch(
 .semester-card header span {
   color: var(--fresh-muted);
   font-size: 12px;
-  font-weight: 680;
+  font-weight: 600;
 }
 
 .semester-card h2 {
@@ -191,9 +191,9 @@ watch(
   min-height: 42px;
   border: 1px solid var(--fresh-line);
   border-radius: 13px;
-  background: #fffdf8;
+  background: var(--fresh-paper);
   color: var(--fresh-green-dark);
-  font-weight: 720;
+  font-weight: 700;
   padding: 0 15px;
 }
 
@@ -204,7 +204,7 @@ watch(
   gap: 10px;
   margin: 0;
   border-radius: 15px;
-  background: #edf4e9;
+  background: var(--fresh-mint);
   color: #355b3d;
   font-size: 14px;
   line-height: 1.55;
@@ -222,7 +222,7 @@ watch(
 
 .semester-status.is-unconfigured,
 .semester-status.is-after_term {
-  background: #fff4df;
+  background: var(--cm-amber-soft);
   color: #74501d;
 }
 
@@ -241,8 +241,8 @@ watch(
 
 .semester-facts div {
   border: 1px solid var(--fresh-line);
-  border-radius: 14px;
-  background: #fbfcf7;
+  border-radius: var(--radius-sm);
+  background: var(--fresh-paper-2);
   padding: 11px 12px;
 }
 
@@ -255,7 +255,7 @@ watch(
   margin: 4px 0 0;
   color: var(--fresh-ink);
   font-size: 14px;
-  font-weight: 750;
+  font-weight: 700;
 }
 
 .semester-form {
@@ -276,10 +276,10 @@ watch(
   width: 100%;
   min-height: 46px;
   box-sizing: border-box;
-  border: 1px solid #cfdacb;
+  border: 1px solid var(--fresh-line-strong);
   border-radius: 13px;
   outline: none;
-  background: #fffefb;
+  background: var(--fresh-paper);
   color: var(--fresh-ink);
   font: inherit;
   font-size: 16px;
@@ -295,10 +295,10 @@ watch(
   grid-column: 1 / -1;
   margin: 0;
   border-radius: 12px;
-  background: #fff0ec;
+  background: var(--cm-red-soft);
   color: #8f3f35;
   font-size: 13px;
-  font-weight: 680;
+  font-weight: 600;
   padding: 9px 11px;
 }
 
@@ -317,11 +317,11 @@ watch(
   align-items: center;
   gap: 8px;
   border: 0;
-  border-radius: 14px;
+  border-radius: var(--radius-sm);
   background: var(--fresh-green);
   color: #fff;
   font-size: 14px;
-  font-weight: 760;
+  font-weight: 700;
   padding: 0 14px;
 }
 
