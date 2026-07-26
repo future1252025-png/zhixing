@@ -95,7 +95,8 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/map-collector',
     name: 'map-collector',
-    component: MapCollectorPage
+    component: MapCollectorPage,
+    meta: { requiresAuth: true }
   },
   {
     path: '/buildings/:id',

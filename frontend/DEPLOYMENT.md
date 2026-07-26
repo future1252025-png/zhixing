@@ -12,3 +12,33 @@ Referrer-Policy: strict-origin-when-cross-origin
 ```
 
 当前 CSP 只限制 `frame-ancestors`，不会拦截高德地图脚本、地图资源或浏览器定位。不要用 `<meta>` 声明 `frame-ancestors`；浏览器只在 HTTP 响应头中执行该指令。
+
+## 高德安全密钥代理模式（生产推荐）
+
+高德 JSAPI 2.0 需要配合安全密钥使用。开发环境可直接配置 `VITE_AMAP_SECURITY_CODE`（明文注入 `window._AMapSecurityConfig.securityJsCode`），但该密钥会随构建产物暴露给所有访问者。生产环境推荐改用高德官方的代理方案：配置 `VITE_AMAP_SERVICE_HOST` 指向自有域名下的 `_AMapService` 路径，由 Nginx 在转发时附加 `jscode`，安全密钥只保存在服务器上。
+
+```text
+VITE_AMAP_SERVICE_HOST=https://your-domain.com/_AMapService
+```
+
+Nginx 配置示例（将 `你的安全密钥` 替换为高德控制台生成的安全密钥）：
+
+```nginx
+# 自定义地图、海外地图服务
+location /_AMapService/v4/map/styles {
+    set $args "$args&jscode=你的安全密钥";
+    proxy_pass https://webapi.amap.com/v4/map/styles;
+}
+location /_AMapService/v3/vectormap {
+    set $args "$args&jscode=你的安全密钥";
+    proxy_pass https://fmap01.amap.com/v3/vectormap;
+}
+
+# Web 服务 API（搜索、路径规划等）
+location /_AMapService/ {
+    set $args "$args&jscode=你的安全密钥";
+    proxy_pass https://restapi.amap.com/;
+}
+```
+
+部署后可在浏览器网络面板确认地图接口请求走 `/_AMapService/` 前缀且响应正常；若未配置 `VITE_AMAP_SERVICE_HOST`，前端会回退到明文安全密钥模式，并在生产构建的控制台输出警告。

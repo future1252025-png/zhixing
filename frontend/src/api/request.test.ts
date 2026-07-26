@@ -4,7 +4,30 @@ import {
   resetUnauthorizedState,
   setUnauthorizedHandler
 } from './errors'
-import request, { TOKEN_STORAGE_KEY } from './request'
+import request, { TOKEN_STORAGE_KEY, resolveApiBaseURL } from './request'
+
+describe('resolveApiBaseURL', () => {
+  it('uses the explicitly configured base URL', () => {
+    expect(
+      resolveApiBaseURL({ VITE_API_BASE_URL: 'https://api.example.com', DEV: false })
+    ).toBe('https://api.example.com')
+  })
+
+  it('falls back to localhost in development', () => {
+    expect(resolveApiBaseURL({ DEV: true })).toBe('http://127.0.0.1:8000')
+  })
+
+  it('falls back to same-origin relative paths in production and warns', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    expect(resolveApiBaseURL({ DEV: false })).toBe('')
+    expect(warn).toHaveBeenCalledWith(
+      '未显式配置 VITE_API_BASE_URL，生产构建将使用同源相对路径访问后端接口'
+    )
+
+    warn.mockRestore()
+  })
+})
 
 describe('request session handling', () => {
   beforeEach(() => {

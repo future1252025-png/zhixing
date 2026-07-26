@@ -4,7 +4,23 @@ import { notifyUnauthorizedOnce } from './errors'
 
 export const TOKEN_STORAGE_KEY = 'campusmind_token'
 
-const apiBaseURL = import.meta.env.VITE_API_BASE_URL ?? 'http://127.0.0.1:8000'
+export function resolveApiBaseURL(
+  env: { VITE_API_BASE_URL?: string; DEV?: boolean } = import.meta.env
+): string {
+  const configured = env.VITE_API_BASE_URL?.trim()
+  if (configured) {
+    return configured
+  }
+  if (env.DEV) {
+    return 'http://127.0.0.1:8000'
+  }
+  console.warn(
+    '未显式配置 VITE_API_BASE_URL，生产构建将使用同源相对路径访问后端接口'
+  )
+  return ''
+}
+
+const apiBaseURL = resolveApiBaseURL()
 
 const request = axios.create({
   baseURL: apiBaseURL,
