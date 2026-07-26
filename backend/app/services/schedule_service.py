@@ -267,6 +267,33 @@ def get_departure_status(now: datetime, departure_at: datetime) -> SuggestionSta
     return "tight"
 
 
+_WEEKDAY_NAMES = ("周一", "周二", "周三", "周四", "周五", "周六", "周日")
+
+
+def _weekday_name(target_date: date) -> str:
+    return _WEEKDAY_NAMES[target_date.isoweekday() - 1]
+
+
+def _format_departure_time(now: datetime, departure_at: datetime) -> str:
+    """出发时间文本；出发日不是今天时带上"明天/周几"前缀。"""
+    time_text = departure_at.strftime("%H:%M")
+    delta_days = (departure_at.date() - now.date()).days
+    if delta_days <= 0:
+        return time_text
+    if delta_days == 1:
+        return f"明天 {time_text}"
+    return f"{_weekday_name(departure_at.date())} {time_text}"
+
+
+def _next_course_day_phrase(now: datetime, starts_at: datetime) -> str:
+    """跨天场景下"下节课在……"的可读描述。"""
+    time_text = starts_at.strftime("%H:%M")
+    delta_days = (starts_at.date() - now.date()).days
+    if delta_days == 1:
+        return f"下节课在明天 {time_text}"
+    return f"下节课在 {delta_days} 天后（{_weekday_name(starts_at.date())}）{time_text}"
+
+
 def _build_text(
     *,
     now: datetime,
@@ -276,10 +303,20 @@ def _build_text(
     walk_minutes: int,
     buffer_minutes: int,
 ) -> str:
-    minutes_until_course = max(0, int((starts_at - now).total_seconds() // 60))
+    if starts_at.date() == now.date():
+        minutes_until_course = max(0, int((starts_at - now).total_seconds() // 60))
+        return (
+            f"距离上课还有 {minutes_until_course} 分钟，建议 "
+            f"{departure_at.strftime('%H:%M')} 从{from_name}出发，预计步行 "
+            f"{walk_minutes} 分钟，预留 {buffer_minutes} 分钟缓冲。"
+        )
+    if departure_at.date() == starts_at.date():
+        departure_text = departure_at.strftime("%H:%M")
+    else:
+        departure_text = _format_departure_time(now, departure_at)
     return (
-        f"距离上课还有 {minutes_until_course} 分钟，建议 "
-        f"{departure_at.strftime('%H:%M')} 从{from_name}出发，预计步行 "
+        f"{_next_course_day_phrase(now, starts_at)}，建议 "
+        f"{departure_text} 从{from_name}出发，预计步行 "
         f"{walk_minutes} 分钟，预留 {buffer_minutes} 分钟缓冲。"
     )
 
@@ -343,7 +380,7 @@ def build_schedule_suggestion(
         distance_meters=distance_meters,
         walk_minutes=walk_minutes,
         buffer_minutes=DEFAULT_BUFFER_MINUTES,
-        suggest_departure_time=departure_at.strftime("%H:%M"),
+        suggest_departure_time=_format_departure_time(current, departure_at),
         status=get_departure_status(current, departure_at),
         text=_build_text(
             now=current,

@@ -655,6 +655,82 @@ def test_complete_suggestion_exposes_real_week_location_and_aware_start(
     assert suggestion.warning is None
 
 
+def test_same_day_suggestion_keeps_minutes_text_and_plain_departure_time(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    _, SessionLocal = client_and_session
+    with SessionLocal() as session:
+        user = create_service_user(session, "same_day_text")
+        building, _ = first_two_buildings(session)
+        add_course(session, user, building, weekday=1, start_time="09:00", weeks="2")
+        building_name = building.name
+
+        suggestion = build_schedule_suggestion(
+            session,
+            user.id,
+            ScheduleSuggestionRequest(current_building_id=building.id),
+            now=datetime(2026, 9, 7, 8, 0, tzinfo=SHANGHAI_TZ),
+        )
+
+    assert suggestion.suggest_departure_time == "08:50"
+    assert suggestion.text == (
+        f"距离上课还有 60 分钟，建议 08:50 从{building_name}出发，"
+        "预计步行 0 分钟，预留 10 分钟缓冲。"
+    )
+
+
+def test_next_day_suggestion_uses_tomorrow_text_without_minutes(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    _, SessionLocal = client_and_session
+    with SessionLocal() as session:
+        user = create_service_user(session, "next_day_text")
+        building, _ = first_two_buildings(session)
+        add_course(session, user, building, weekday=2, start_time="09:00", weeks="2")
+        building_name = building.name
+
+        suggestion = build_schedule_suggestion(
+            session,
+            user.id,
+            ScheduleSuggestionRequest(current_building_id=building.id),
+            now=datetime(2026, 9, 7, 20, 0, tzinfo=SHANGHAI_TZ),
+        )
+
+    assert suggestion.next_course.start_at.isoformat() == "2026-09-08T09:00:00+08:00"
+    assert suggestion.suggest_departure_time == "明天 08:50"
+    assert "还有" not in suggestion.text
+    assert suggestion.text == (
+        f"下节课在明天 09:00，建议 08:50 从{building_name}出发，"
+        "预计步行 0 分钟，预留 10 分钟缓冲。"
+    )
+
+
+def test_multi_day_suggestion_uses_days_ahead_weekday_text_without_minutes(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    _, SessionLocal = client_and_session
+    with SessionLocal() as session:
+        user = create_service_user(session, "multi_day_text")
+        building, _ = first_two_buildings(session)
+        add_course(session, user, building, weekday=3, start_time="09:00", weeks="2")
+        building_name = building.name
+
+        suggestion = build_schedule_suggestion(
+            session,
+            user.id,
+            ScheduleSuggestionRequest(current_building_id=building.id),
+            now=datetime(2026, 9, 7, 8, 0, tzinfo=SHANGHAI_TZ),
+        )
+
+    assert suggestion.next_course.start_at.isoformat() == "2026-09-09T09:00:00+08:00"
+    assert suggestion.suggest_departure_time == "周三 08:50"
+    assert "还有" not in suggestion.text
+    assert suggestion.text == (
+        f"下节课在 2 天后（周三）09:00，建议 08:50 从{building_name}出发，"
+        "预计步行 0 分钟，预留 10 分钟缓冲。"
+    )
+
+
 def test_schedule_api_uses_injected_current_time_and_business_error_contract(
     client_and_session: tuple[TestClient, sessionmaker],
 ) -> None:
