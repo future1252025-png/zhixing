@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createApp, nextTick } from 'vue'
+import { createApp, defineComponent, h, nextTick, ref } from 'vue'
 
 import { isAMapConfigured, loadAMapPlugin, loadAMapSdk } from '@/utils/amap'
 import { MAP_DRAG_HOLD_DELAY_MS } from '@/utils/mapInteraction'
@@ -181,6 +181,76 @@ describe('RealCampusMap async lifecycle', () => {
     expect(host.querySelector('iframe')?.title).toBe('路线地图交互辅助框架')
     expect(host.querySelector('.amap-logo img')?.getAttribute('alt')).toBe('高德地图')
     expect(host.querySelectorAll('img')[1]?.getAttribute('alt')).toBe('')
+
+    application.unmount()
+  })
+
+  it('rebuilds markers without moving the view when only the active building changes', async () => {
+    const marker = { on: vi.fn() }
+    const mapInstance = {
+      add: vi.fn(),
+      remove: vi.fn(),
+      addControl: vi.fn(),
+      on: vi.fn(),
+      off: vi.fn(),
+      getZoom: vi.fn(() => 16),
+      setFitView: vi.fn(),
+      setCenter: vi.fn(),
+      destroy: vi.fn()
+    }
+    const amap = {
+      Map: vi.fn(function FakeMap() {
+        return mapInstance
+      }),
+      Marker: vi.fn(function FakeMarker() {
+        return marker
+      }),
+      Scale: vi.fn(),
+      ToolBar: vi.fn()
+    }
+    vi.mocked(loadAMapSdk).mockResolvedValue(amap)
+    vi.mocked(loadAMapPlugin).mockResolvedValue(amap)
+
+    const building = {
+      id: 1,
+      name: '教学楼',
+      type: '教学楼',
+      description: '',
+      latitude: 30.59,
+      longitude: 114.33,
+      map_x: 0,
+      map_y: 0,
+      walk_hint: null
+    }
+    const buildings = ref([building])
+    const activeBuildingId = ref<number | null>(null)
+    const Host = defineComponent({
+      render() {
+        return h(RealCampusMap, {
+          buildings: buildings.value,
+          activeBuildingId: activeBuildingId.value
+        })
+      }
+    })
+    const application = createApp(Host)
+    application.mount(host)
+    await settle()
+
+    expect(mapInstance.add).toHaveBeenCalledTimes(1)
+    expect(mapInstance.setFitView).toHaveBeenCalledTimes(1)
+
+    activeBuildingId.value = 1
+    await settle()
+
+    expect(mapInstance.add).toHaveBeenCalledTimes(2)
+    expect(mapInstance.setFitView).toHaveBeenCalledTimes(1)
+    expect(mapInstance.setCenter).not.toHaveBeenCalled()
+
+    buildings.value = [...buildings.value, { ...building, id: 2, name: '图书馆', latitude: 30.6 }]
+    await settle()
+
+    expect(mapInstance.add).toHaveBeenCalledTimes(3)
+    expect(mapInstance.setFitView).toHaveBeenCalledTimes(2)
 
     application.unmount()
   })

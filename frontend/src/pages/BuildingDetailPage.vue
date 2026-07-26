@@ -75,7 +75,7 @@ onMounted(loadBuilding)
           </div>
           <RealCampusMap
             :buildings="[building]"
-            :selected-building-id="building.id"
+            :active-building-id="building.id"
             title=""
             subtitle=""
             height="330px"
