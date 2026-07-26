@@ -1,9 +1,10 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, String
+from sqlalchemy import String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.database import Base
+from app.db.types import TZDateTime
 
 
 class User(Base):
@@ -23,7 +24,7 @@ class User(Base):
     avatar_color: Mapped[str | None] = mapped_column(String(16), nullable=True)
     role: Mapped[str] = mapped_column(String(32), default="student")
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
+        TZDateTime(),
         default=lambda: datetime.now(timezone.utc),
     )
 

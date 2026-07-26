@@ -1,5 +1,3 @@
-from datetime import datetime, timezone
-
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -10,24 +8,18 @@ from app.schemas.message import (
     MessageCreate,
     MessageRead,
 )
-from app.core import errors
-from app.core.errors import MESSAGE_LOCATION_TOO_FAR
+from app.core.errors import BusinessError, MESSAGE_LOCATION_TOO_FAR
 from app.services.location_service import haversine_distance_meters
 
 
 MAX_MESSAGE_DISTANCE_METERS = 500
+MESSAGE_ROOM_NOT_FOUND = "该建筑下不存在此教室频道，无法留言"
 
 
 class MessageLocationTooFarError(ValueError):
     def __init__(self, distance_meters: int | None = None) -> None:
         self.distance_meters = distance_meters
         super().__init__(MESSAGE_LOCATION_TOO_FAR)
-
-
-def normalize_utc_datetime(value: datetime) -> datetime:
-    if value.tzinfo is None:
-        return value.replace(tzinfo=timezone.utc)
-    return value.astimezone(timezone.utc)
 
 
 def get_building(session: Session, building_id: int) -> Building | None:
@@ -41,7 +33,7 @@ def to_message_read(message: Message) -> MessageRead:
         content=message.content,
         display_name=ANONYMOUS_DISPLAY_NAME,
         room_name=message.room_name,
-        created_at=normalize_utc_datetime(message.created_at),
+        created_at=message.created_at,
         latitude=message.latitude,
         longitude=message.longitude,
         location_source=message.location_source,
@@ -55,11 +47,16 @@ def list_building_messages(
     room_name: str | None = None,
     limit: int = 50,
     offset: int = 0,
+    before_id: int | None = None,
 ) -> list[MessageRead]:
     """List messages for one channel.
 
     - room_name is None → 建筑总聊 (only messages with room_name IS NULL)
     - room_name is set  → that classroom channel only
+    - before_id is set  → cursor pagination: only messages with id < before_id.
+      Message ids are monotonically increasing and inserted in created_at order,
+      so the id cursor matches the created_at DESC, id DESC ordering. When
+      before_id is provided it takes precedence and offset is ignored.
     """
     statement = (
         select(Message)
@@ -71,19 +68,16 @@ def list_building_messages(
     else:
         statement = statement.where(Message.room_name == room_name)
 
-    statement = statement.limit(limit).offset(offset)
+    if before_id is not None:
+        statement = statement.where(Message.id < before_id).limit(limit)
+    else:
+        statement = statement.limit(limit).offset(offset)
     messages = session.scalars(statement).all()
     return [to_message_read(message) for message in reversed(messages)]
 
 
 def list_building_chatrooms(session: Session, building_id: int) -> list[ChatRoomRead]:
-    course_rooms = {
-        room_name.strip()
-        for room_name in session.scalars(
-            select(Course.room_name).where(Course.building_id == building_id)
-        ).all()
-        if room_name and room_name.strip()
-    }
+    course_rooms = _course_room_names(session, building_id)
     message_count_rows = session.execute(
         select(Message.room_name, func.count(Message.id))
         .where(Message.building_id == building_id, Message.status == "normal")
@@ -119,15 +113,48 @@ def list_building_chatrooms(session: Session, building_id: int) -> list[ChatRoom
     ]
 
 
+def _course_room_names(session: Session, building_id: int) -> set[str]:
+    return {
+        room_name.strip()
+        for room_name in session.scalars(
+            select(Course.room_name).where(Course.building_id == building_id)
+        ).all()
+        if room_name and room_name.strip()
+    }
+
+
+def _room_exists(session: Session, building_id: int, room_name: str) -> bool:
+    if room_name in _course_room_names(session, building_id):
+        return True
+    return (
+        session.scalars(
+            select(Message.id)
+            .where(
+                Message.building_id == building_id,
+                Message.room_name == room_name,
+                Message.status == "normal",
+            )
+            .limit(1)
+        ).first()
+        is not None
+    )
+
+
 def create_building_message(
     session: Session,
-    building_id: int,
+    building: Building,
     user: User,
     payload: MessageCreate,
 ) -> MessageRead:
-    building = get_building(session, building_id)
-    if building is None:
-        raise ValueError(errors.BUILDING_NOT_FOUND)
+    if payload.room_name is not None and not _room_exists(
+        session, building.id, payload.room_name
+    ):
+        raise BusinessError(
+            422,
+            "room_not_found",
+            MESSAGE_ROOM_NOT_FOUND,
+            fields=["room_name"],
+        )
 
     distance = haversine_distance_meters(
         payload.latitude,
@@ -139,7 +166,7 @@ def create_building_message(
         raise MessageLocationTooFarError(distance)
 
     message = Message(
-        building_id=building_id,
+        building_id=building.id,
         user_id=user.id,
         content=payload.content,
         display_name=ANONYMOUS_DISPLAY_NAME,

@@ -1,9 +1,10 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import CheckConstraint, DateTime, ForeignKey, Integer, String
+from sqlalchemy import CheckConstraint, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.database import Base
+from app.db.types import TZDateTime
 
 
 class Course(Base):
@@ -34,7 +35,7 @@ class Course(Base):
         server_default="manual",
     )
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
+        TZDateTime(),
         default=lambda: datetime.now(timezone.utc),
     )
 

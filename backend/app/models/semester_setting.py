@@ -1,9 +1,10 @@
 from datetime import date, datetime, timezone
 
-from sqlalchemy import Date, DateTime, ForeignKey, Integer
+from sqlalchemy import Date, ForeignKey, Integer
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.database import Base
+from app.db.types import TZDateTime
 
 
 class SemesterSetting(Base):
@@ -18,11 +19,11 @@ class SemesterSetting(Base):
     start_date: Mapped[date] = mapped_column(Date)
     total_weeks: Mapped[int] = mapped_column(Integer, default=20, server_default="20")
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
+        TZDateTime(),
         default=lambda: datetime.now(timezone.utc),
     )
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
+        TZDateTime(),
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
     )

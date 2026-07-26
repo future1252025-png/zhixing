@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.db.database import Base, create_sqlite_engine, get_session, init_db
 from app.db.seed import seed_demo_data
 from app.main import app
-from app.models import Building, Message, User
+from app.models import Building, Course, Message, User
 
 
 def make_test_database_url(path: Path) -> str:
@@ -64,6 +64,29 @@ def message_location_payload(building: dict) -> dict:
         "longitude": building["longitude"],
         "location_source": "manual",
     }
+
+
+def create_course_room(
+    SessionLocal: sessionmaker,
+    building_id: int,
+    room_name: str,
+) -> None:
+    """Register a classroom channel by giving the building a course in it."""
+    with SessionLocal() as session:
+        user = session.query(User).first()
+        assert user is not None
+        session.add(
+            Course(
+                user_id=user.id,
+                course_name="教室频道课程",
+                weekday=1,
+                start_time="08:00",
+                end_time="09:40",
+                building_id=building_id,
+                room_name=room_name,
+            )
+        )
+        session.commit()
 
 
 def auth_headers(client: TestClient, username: str = "alice") -> dict[str, str]:
@@ -416,10 +439,12 @@ def test_get_building_chatrooms_includes_general_and_course_rooms(
 def test_room_messages_are_filtered_by_room_name(
     client_and_session: tuple[TestClient, sessionmaker],
 ) -> None:
-    client, _ = client_and_session
+    client, SessionLocal = client_and_session
     building = get_first_building(client)
     headers = auth_headers(client)
     location = message_location_payload(building)
+    create_course_room(SessionLocal, building["id"], "教4-203")
+    create_course_room(SessionLocal, building["id"], "教4-204")
 
     first = client.post(
         f"/api/buildings/{building['id']}/messages",
@@ -448,11 +473,12 @@ def test_room_messages_are_filtered_by_room_name(
 def test_room_message_channel_accepts_full_room_name_up_to_course_limit(
     client_and_session: tuple[TestClient, sessionmaker],
 ) -> None:
-    client, _ = client_and_session
+    client, SessionLocal = client_and_session
     building = get_first_building(client)
     headers = auth_headers(client, "long_room_channel")
     room_name = "东区三层联合创新实验教室-" + "A" * 88
     assert 64 < len(room_name) <= 120
+    create_course_room(SessionLocal, building["id"], room_name)
 
     created = client.post(
         f"/api/buildings/{building['id']}/messages",
@@ -482,6 +508,7 @@ def test_general_channel_excludes_classroom_messages_and_counts_only_general(
     building = get_first_building(client)
     headers = auth_headers(client, "channel_user")
     location = message_location_payload(building)
+    create_course_room(SessionLocal, building["id"], "教4-101")
 
     general = client.post(
         f"/api/buildings/{building['id']}/messages",
@@ -521,3 +548,175 @@ def test_general_channel_excludes_classroom_messages_and_counts_only_general(
     assert data[0]["message_count"] == 1
     classroom = next(room for room in data if room["room_name"] == "教4-101")
     assert classroom["message_count"] == 1
+
+
+def test_listed_messages_created_at_is_timezone_aware_utc(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    client, SessionLocal = client_and_session
+    headers = auth_headers(client)
+
+    with SessionLocal() as session:
+        building = session.query(Building).first()
+        user = session.query(User).filter(User.username == "alice").one()
+        assert building is not None
+        session.query(Message).filter(Message.building_id == building.id).delete()
+        session.add(
+            Message(
+                building_id=building.id,
+                user_id=user.id,
+                content="时区检查",
+                display_name="Other",
+                status="normal",
+                created_at=datetime(2026, 5, 29, 8, 0, tzinfo=timezone.utc),
+            )
+        )
+        session.commit()
+        building_id = building.id
+
+    response = client.get(f"/api/buildings/{building_id}/messages", headers=headers)
+
+    assert response.status_code == 200
+    (message,) = response.json()
+    assert message["created_at"].endswith(("+00:00", "Z"))
+    assert datetime.fromisoformat(message["created_at"]) == datetime(
+        2026, 5, 29, 8, 0, tzinfo=timezone.utc
+    )
+
+
+def seed_paged_messages(SessionLocal: sessionmaker, count: int) -> int:
+    with SessionLocal() as session:
+        building = session.query(Building).first()
+        user = session.query(User).filter(User.username == "alice").one()
+        assert building is not None
+        session.query(Message).filter(Message.building_id == building.id).delete()
+        base_time = datetime(2026, 5, 29, 8, 0, tzinfo=timezone.utc)
+        session.add_all(
+            [
+                Message(
+                    building_id=building.id,
+                    user_id=user.id,
+                    content=f"message-{index:02d}",
+                    display_name="Other",
+                    status="normal",
+                    created_at=base_time + timedelta(minutes=index),
+                )
+                for index in range(count)
+            ]
+        )
+        session.commit()
+        return building.id
+
+
+def test_get_messages_before_id_pages_earlier_messages(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    client, SessionLocal = client_and_session
+    headers = auth_headers(client)
+    building_id = seed_paged_messages(SessionLocal, 20)
+
+    latest = client.get(
+        f"/api/buildings/{building_id}/messages",
+        params={"limit": 5},
+        headers=headers,
+    )
+    assert latest.status_code == 200
+    assert [message["content"] for message in latest.json()] == [
+        f"message-{index:02d}" for index in range(15, 20)
+    ]
+
+    earlier = client.get(
+        f"/api/buildings/{building_id}/messages",
+        params={"limit": 5, "before_id": latest.json()[0]["id"]},
+        headers=headers,
+    )
+
+    assert earlier.status_code == 200
+    assert [message["content"] for message in earlier.json()] == [
+        f"message-{index:02d}" for index in range(10, 15)
+    ]
+
+
+def test_get_messages_before_id_takes_precedence_over_offset(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    client, SessionLocal = client_and_session
+    headers = auth_headers(client)
+    building_id = seed_paged_messages(SessionLocal, 20)
+
+    latest = client.get(
+        f"/api/buildings/{building_id}/messages",
+        params={"limit": 5},
+        headers=headers,
+    )
+    assert latest.status_code == 200
+    before_id = latest.json()[0]["id"]
+
+    response = client.get(
+        f"/api/buildings/{building_id}/messages",
+        params={"limit": 5, "offset": 100, "before_id": before_id},
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    assert [message["content"] for message in response.json()] == [
+        f"message-{index:02d}" for index in range(10, 15)
+    ]
+
+
+def test_create_message_with_unknown_room_name_returns_422(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    client, _ = client_and_session
+    building = get_first_building(client)
+
+    response = client.post(
+        f"/api/buildings/{building['id']}/messages",
+        json={
+            "content": "hello",
+            "room_name": "不存在的教室-999",
+            **message_location_payload(building),
+        },
+        headers=auth_headers(client),
+    )
+
+    assert response.status_code == 422
+    data = response.json()
+    assert data["code"] == "room_not_found"
+    assert "教室" in data["message"]
+    assert data["fields"] == ["room_name"]
+
+
+def test_create_message_accepts_room_name_from_existing_messages(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    client, SessionLocal = client_and_session
+    building = get_first_building(client)
+    headers = auth_headers(client)
+
+    with SessionLocal() as session:
+        user = session.query(User).filter(User.username == "alice").one()
+        session.add(
+            Message(
+                building_id=building["id"],
+                user_id=user.id,
+                content="历史房间留言",
+                display_name="Other",
+                room_name="历史教室-101",
+                status="normal",
+            )
+        )
+        session.commit()
+
+    response = client.post(
+        f"/api/buildings/{building['id']}/messages",
+        json={
+            "content": "跟帖留言",
+            "room_name": "历史教室-101",
+            **message_location_payload(building),
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 201
+    assert response.json()["room_name"] == "历史教室-101"

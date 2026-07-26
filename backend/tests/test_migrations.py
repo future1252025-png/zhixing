@@ -106,6 +106,12 @@ def test_upgrade_on_empty_sqlite_creates_current_schema(tmp_path: Path) -> None:
         }
         assert course_columns["room_name"]["type"].length == 120
         assert message_columns["room_name"]["type"].length == 120
+        message_indexes = {
+            index["name"]: index for index in inspector.get_indexes("messages")
+        }
+        assert message_indexes["ix_messages_building_room_status_created"][
+            "column_names"
+        ] == ["building_id", "room_name", "status", "created_at"]
         assert any(
             "source_kind IN ('manual', 'import')" in constraint["sqltext"]
             for constraint in inspector.get_check_constraints("courses")
@@ -164,7 +170,7 @@ def test_upgrade_adopts_database_stamped_by_previous_initial_migration(
     try:
         inspector = inspect(engine)
         with engine.connect() as connection:
-            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260721_03"
+            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260726_04"
             assert connection.scalar(text("SELECT COUNT(*) FROM courses")) == 1
             assert connection.scalar(text("SELECT weeks FROM courses WHERE id = 1")) == "1-20"
         assert {"semester_settings", "course_import_sources"} <= set(
@@ -488,7 +494,7 @@ def test_migration_round_trip_preserves_legacy_course_and_recreates_current_sche
     try:
         inspector = inspect(engine)
         with engine.connect() as connection:
-            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260721_03"
+            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260726_04"
             assert connection.scalar(text("SELECT COUNT(*) FROM courses")) == 1
         assert "source_kind" in {
             column["name"] for column in inspector.get_columns("courses")
@@ -537,7 +543,7 @@ def test_alembic_upgrade_is_idempotent(tmp_path: Path) -> None:
     engine = create_engine(database_url)
     try:
         with engine.connect() as connection:
-            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260721_03"
+            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260726_04"
     finally:
         engine.dispose()
 
@@ -562,7 +568,7 @@ def test_upgrade_database_serializes_simultaneous_threads(
     engine = create_engine(database_url)
     try:
         with engine.connect() as connection:
-            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260721_03"
+            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260726_04"
         assert {"semester_settings", "course_import_sources"} <= set(
             inspect(engine).get_table_names()
         )
@@ -605,7 +611,7 @@ def test_upgrade_database_serializes_simultaneous_processes(
     engine = create_engine(database_url)
     try:
         with engine.connect() as connection:
-            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260721_03"
+            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260726_04"
         assert {"semester_settings", "course_import_sources"} <= set(
             inspect(engine).get_table_names()
         )
