@@ -37,6 +37,16 @@ export function extractBusinessError(error: unknown): BusinessError {
       details: data.details
     }
   }
+  if (data && typeof data.detail === 'string' && data.detail.trim().length > 0) {
+    // FastAPI 默认错误只带 detail 字符串，作为兜底文案透出。
+    return {
+      status,
+      code: 'unexpected_error',
+      message: data.detail,
+      fields: [],
+      details: {}
+    }
+  }
   return {
     status,
     code: 'unexpected_error',

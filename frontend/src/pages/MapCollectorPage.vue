@@ -596,8 +596,16 @@ function estimateMapY(latitude: number): number {
 }
 
 async function copySeedData() {
-  await navigator.clipboard.writeText(seedPreview.value)
-  showSuccessToast('已复制采点数据')
+  if (!navigator.clipboard) {
+    showFailToast('复制失败，请手动选择文本复制')
+    return
+  }
+  try {
+    await navigator.clipboard.writeText(seedPreview.value)
+    showSuccessToast('已复制采点数据')
+  } catch {
+    showFailToast('复制失败，请手动选择文本复制')
+  }
 }
 
 function escapeHtml(value: string): string {

@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
-import { isAxiosError } from 'axios'
 import { showFailToast, showSuccessToast } from 'vant'
 import { useRouter } from 'vue-router'
 
+import { extractBusinessError } from '@/api/errors'
 import TechIcon from '@/components/TechIcon.vue'
 import { useAuthStore } from '@/stores/auth'
 
@@ -27,11 +27,7 @@ const avatarStyle = computed(() => ({
 }))
 
 function getErrorMessage(error: unknown): string {
-  if (isAxiosError(error)) {
-    const detail = error.response?.data?.detail
-    if (typeof detail === 'string') return detail
-  }
-  return '资料保存失败，请稍后重试'
+  return extractBusinessError(error).message
 }
 
 function syncProfileForm() {

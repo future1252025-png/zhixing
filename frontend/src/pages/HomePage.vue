@@ -3,13 +3,14 @@ import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { animate, stagger } from 'animejs'
 
-import { getBuildings, type Building } from '@/api/buildings'
-import { getCourses } from '@/api/courses'
+import type { Building } from '@/api/buildings'
 import RealCampusMap from '@/components/RealCampusMap.vue'
 import TechIcon from '@/components/TechIcon.vue'
 import CourseCard from '@/components/course/CourseCard.vue'
 import SemesterGate from '@/components/course/SemesterGate.vue'
 import { useAuthStore } from '@/stores/auth'
+import { useBuildingsStore } from '@/stores/buildings'
+import { useCoursesStore } from '@/stores/courses'
 import { useSemesterStore } from '@/stores/semester'
 import type { Course } from '@/types/course'
 import {
@@ -34,6 +35,8 @@ import {
 
 const router = useRouter()
 const authStore = useAuthStore()
+const buildingsStore = useBuildingsStore()
+const coursesStore = useCoursesStore()
 const semesterStore = useSemesterStore()
 const buildings = ref<Building[]>([])
 const courses = ref<Course[]>([])
@@ -105,8 +108,8 @@ async function loadHomeData() {
   }
   try {
     const [buildingResult, courseResult] = await Promise.all([
-      getBuildings(),
-      getCourses(),
+      buildingsStore.ensureLoaded(),
+      coursesStore.ensureLoaded(),
       semesterStore.load(userId)
     ])
     buildings.value = buildingResult

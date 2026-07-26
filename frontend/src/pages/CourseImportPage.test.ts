@@ -1,6 +1,8 @@
 import { flushPromises, mount } from '@vue/test-utils'
+import { createPinia, setActivePinia, type Pinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { useCoursesStore } from '@/stores/courses'
 import type { ImportPreviewResponse } from '@/types/courseImport'
 
 import CourseImportPage from './CourseImportPage.vue'
@@ -8,6 +10,7 @@ import CourseImportPage from './CourseImportPage.vue'
 const mocks = vi.hoisted(() => ({
   push: vi.fn(),
   getBuildings: vi.fn(),
+  getCourses: vi.fn(),
   previewCourseImport: vi.fn(),
   commitCourseImport: vi.fn(),
   createCourse: vi.fn(),
@@ -24,6 +27,7 @@ vi.mock('@/api/buildings', () => ({
 }))
 
 vi.mock('@/api/courses', () => ({
+  getCourses: mocks.getCourses,
   previewCourseImport: mocks.previewCourseImport,
   commitCourseImport: mocks.commitCourseImport,
   createCourse: mocks.createCourse
@@ -101,10 +105,13 @@ function businessError(code: string, message: string, details: Record<string, un
   }
 }
 
+let pinia: Pinia
+
 async function mountPage() {
   const wrapper = mount(CourseImportPage, {
     attachTo: document.body,
     global: {
+      plugins: [pinia],
       stubs: {
         'van-nav-bar': { template: '<header />' },
         'van-button': {
@@ -135,6 +142,9 @@ async function chooseAndPreview(wrapper: Awaited<ReturnType<typeof mountPage>>) 
 
 describe('CourseImportPage', () => {
   beforeEach(() => {
+    // 每个用例重置 Pinia，避免 buildings/courses store 缓存跨用例泄漏。
+    pinia = createPinia()
+    setActivePinia(pinia)
     mocks.getBuildings.mockResolvedValue([
       {
         id: 3,
@@ -176,11 +186,15 @@ describe('CourseImportPage', () => {
       .get('[data-row-ref="row-2"] [name="room_name"]')
       .setValue('北区三层完整语言实验教室 301')
 
+    const coursesStore = useCoursesStore(pinia)
+    coursesStore.loaded = true
+
     expect(wrapper.get('[data-testid="commit-import"]').attributes('disabled')).toBeUndefined()
     await wrapper.get('[data-testid="commit-import"]').trigger('click')
     await flushPromises()
 
     expect(mocks.commitCourseImport).toHaveBeenCalledTimes(1)
+    expect(coursesStore.loaded).toBe(false)
     expect(mocks.commitCourseImport).toHaveBeenCalledWith(file, 'a'.repeat(64), [
       {
         row_ref: 'row-1',

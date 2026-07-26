@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
-import { isAxiosError } from 'axios'
 import { showFailToast, showSuccessToast } from 'vant'
 import { useRoute, useRouter } from 'vue-router'
 import { getBuildingDetail, type Building } from '@/api/buildings'
+import { extractBusinessError } from '@/api/errors'
 import { createBuildingMessage, getBuildingMessages, validateMessageContent, type BuildingMessage, type MessageLocationSource } from '@/api/messages'
 import TechIcon from '@/components/TechIcon.vue'
 import { parseApiDateTime } from '@/utils/dateTime'
@@ -72,44 +72,53 @@ const composerStyle = computed(() => ({
 }))
 
 function getErrorMessage(error: unknown): string {
-  if (isAxiosError(error) && typeof error.response?.data?.detail === 'string') {
-    const detail = error.response.data.detail
-    if (
-      detail.includes('过远') ||
-      detail.toLowerCase().includes('location is too far')
-    ) {
-      return '当前位置距离该建筑过远，不能在这里留言'
-    }
-    return detail
+  const message = extractBusinessError(error).message
+  if (
+    message.includes('过远') ||
+    message.toLowerCase().includes('location is too far')
+  ) {
+    return '当前位置距离该建筑过远，不能在这里留言'
   }
-  return '留言请求失败，请稍后重试'
+  return message
 }
 function formatTime(value: string): string { const date = parseApiDateTime(value); return Number.isNaN(date.getTime()) ? '' : date.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }) }
 function formatDistance(value: number | null): string { if (value === null) return ''; return value >= 1000 ? `${(value / 1000).toFixed(1)} km` : `${Math.round(value)} m` }
 async function scrollToBottom() { await nextTick(); if (messageListRef.value) messageListRef.value.scrollTop = messageListRef.value.scrollHeight }
+// 每次发起留言请求就递增；响应返回时序号不匹配说明已被更新的请求取代，丢弃过期结果。
+let messagesRequestSeq = 0
 async function loadMessages() {
   if (!Number.isFinite(buildingId.value)) return
+  const requestSeq = ++messagesRequestSeq
   try {
     const nextMessages = await getBuildingMessages(buildingId.value, { roomName: selectedRoomName.value, limit: MESSAGE_PAGE_SIZE, offset: 0 })
+    if (requestSeq !== messagesRequestSeq) return
     messages.value = nextMessages
     hasMoreMessages.value = hasMoreMessagePages(nextMessages)
     await scrollToBottom()
   } catch (error) {
+    if (requestSeq !== messagesRequestSeq) return
     errorMessage.value = getErrorMessage(error)
+  } finally {
+    if (requestSeq === messagesRequestSeq) loading.value = false
   }
 }
 async function loadOlderMessages() {
   if (!Number.isFinite(buildingId.value) || loadingOlder.value || !hasMoreMessages.value) return
+  const oldestMessageId = messages.value[0]?.id
+  if (oldestMessageId === undefined) return
+  const requestSeq = ++messagesRequestSeq
   loadingOlder.value = true
   try {
     const olderMessages = await getBuildingMessages(buildingId.value, {
       roomName: selectedRoomName.value,
       limit: MESSAGE_PAGE_SIZE,
-      offset: messages.value.length
+      before_id: oldestMessageId
     })
+    if (requestSeq !== messagesRequestSeq) return
     messages.value = mergeOlderMessages(messages.value, olderMessages)
     hasMoreMessages.value = hasMoreMessagePages(olderMessages)
   } catch (error) {
+    if (requestSeq !== messagesRequestSeq) return
     showFailToast(getErrorMessage(error))
   } finally {
     loadingOlder.value = false
@@ -117,18 +126,24 @@ async function loadOlderMessages() {
 }
 async function loadPage() {
   if (!Number.isFinite(buildingId.value)) { errorMessage.value = '建筑编号无效'; loading.value = false; return }
+  const requestSeq = ++messagesRequestSeq
   loading.value = true; errorMessage.value = ''
   try {
     const [nextBuilding, nextMessages] = await Promise.all([
       getBuildingDetail(buildingId.value),
       getBuildingMessages(buildingId.value, { roomName: selectedRoomName.value, limit: MESSAGE_PAGE_SIZE, offset: 0 })
     ])
+    if (requestSeq !== messagesRequestSeq) return
     building.value = nextBuilding
     messages.value = nextMessages
     hasMoreMessages.value = hasMoreMessagePages(nextMessages)
     await scrollToBottom()
+  } catch (error) {
+    if (requestSeq !== messagesRequestSeq) return
+    errorMessage.value = getErrorMessage(error)
+  } finally {
+    if (requestSeq === messagesRequestSeq) loading.value = false
   }
-  catch (error) { errorMessage.value = getErrorMessage(error) } finally { loading.value = false }
 }
 function useBuildingLocation() {
   if (!building.value) return showFailToast('建筑信息尚未加载')

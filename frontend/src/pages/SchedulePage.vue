@@ -3,13 +3,14 @@ import { computed, onMounted, ref } from 'vue'
 import { showFailToast, showToast } from 'vant'
 import { useRoute, useRouter } from 'vue-router'
 
-import { getBuildings, type Building } from '@/api/buildings'
+import type { Building } from '@/api/buildings'
 import { extractBusinessError } from '@/api/errors'
 import { getScheduleSuggestion } from '@/api/schedule'
 import RealCampusMap from '@/components/RealCampusMap.vue'
 import TechIcon from '@/components/TechIcon.vue'
 import SemesterGate from '@/components/course/SemesterGate.vue'
 import { useAuthStore } from '@/stores/auth'
+import { useBuildingsStore } from '@/stores/buildings'
 import { useLocationStore } from '@/stores/location'
 import { useSemesterStore } from '@/stores/semester'
 import type { CampusMapPoint } from '@/types/map'
@@ -32,6 +33,7 @@ type ScheduleLocationOption = SearchableScheduleLocation & {
 const router = useRouter()
 const route = useRoute()
 const authStore = useAuthStore()
+const buildingsStore = useBuildingsStore()
 const locationStore = useLocationStore()
 const semesterStore = useSemesterStore()
 const buildings = ref<Building[]>([])
@@ -156,7 +158,7 @@ async function loadScheduleData() {
   }
   try {
     const [buildingResult] = await Promise.all([
-      getBuildings(),
+      buildingsStore.ensureLoaded(),
       semesterStore.load(userId)
     ])
     buildings.value = buildingResult

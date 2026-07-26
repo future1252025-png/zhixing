@@ -1,6 +1,8 @@
 import { flushPromises, mount } from '@vue/test-utils'
+import { createPinia, setActivePinia, type Pinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { useCoursesStore } from '@/stores/courses'
 import type { Course } from '@/types/course'
 
 import CourseFormPage from './CourseFormPage.vue'
@@ -81,9 +83,12 @@ function businessError(code: string, message: string, details: Record<string, un
   }
 }
 
+let pinia: Pinia
+
 async function mountPage() {
   const wrapper = mount(CourseFormPage, {
     global: {
+      plugins: [pinia],
       stubs,
       directives: { reveal: {} }
     }
@@ -94,6 +99,9 @@ async function mountPage() {
 
 describe('CourseFormPage', () => {
   beforeEach(() => {
+    // 每个用例重置 Pinia，避免 buildings/courses store 缓存跨用例泄漏。
+    pinia = createPinia()
+    setActivePinia(pinia)
     mocks.route.params = {}
     mocks.route.query = {}
     mocks.getBuildings.mockResolvedValue([
@@ -152,6 +160,24 @@ describe('CourseFormPage', () => {
     expect(wrapper.text()).toContain('请先设置学期')
     expect(wrapper.find('a[href="/courses#semester-settings"]').exists()).toBe(true)
     expect(mocks.push).not.toHaveBeenCalled()
+  })
+
+  it('reuses the cached lists and invalidates the course cache after saving', async () => {
+    mocks.route.params = { id: '7' }
+    mocks.getCourses.mockResolvedValue([existingCourse])
+    const wrapper = await mountPage()
+
+    const coursesStore = useCoursesStore(pinia)
+    expect(mocks.getBuildings).toHaveBeenCalledTimes(1)
+    expect(mocks.getCourses).toHaveBeenCalledTimes(1)
+    expect(coursesStore.loaded).toBe(true)
+
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    expect(mocks.updateCourse).toHaveBeenCalledOnce()
+    expect(coursesStore.loaded).toBe(false)
+    expect(mocks.push).toHaveBeenCalledWith('/courses')
   })
 
   it('keeps saving text outside the spinner so neither can cover the other', async () => {

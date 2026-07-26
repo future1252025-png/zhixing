@@ -34,6 +34,8 @@ export type GetBuildingMessagesOptions = {
   roomName?: string | null
   limit?: number
   offset?: number
+  /** 游标分页：只返回 id 小于该值的更早留言，排序不变。 */
+  before_id?: number
 }
 
 export function validateMessageContent(content: string): string | null {
@@ -64,6 +66,9 @@ export async function getBuildingMessages(
   }
   if (options?.offset !== undefined) {
     params.offset = options.offset
+  }
+  if (options?.before_id !== undefined) {
+    params.before_id = options.before_id
   }
   const config = Object.keys(params).length ? { params } : undefined
   const url = `/api/buildings/${buildingId}/messages`

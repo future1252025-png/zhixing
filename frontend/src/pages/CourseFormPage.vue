@@ -3,9 +3,11 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { showFailToast, showSuccessToast } from 'vant'
 import { useRoute, useRouter } from 'vue-router'
 
-import { getBuildings, type Building } from '@/api/buildings'
-import { createCourse, getCourses, updateCourse } from '@/api/courses'
+import type { Building } from '@/api/buildings'
+import { createCourse, updateCourse } from '@/api/courses'
 import { extractBusinessError } from '@/api/errors'
+import { useBuildingsStore } from '@/stores/buildings'
+import { useCoursesStore } from '@/stores/courses'
 import type { Course } from '@/types/course'
 import { filterBuildingsByKeyword, includeSelectedBuilding } from '@/utils/buildings'
 import {
@@ -22,6 +24,8 @@ import { useKeyboardAwarePage } from '@/utils/keyboardInset'
 
 const route = useRoute()
 const router = useRouter()
+const buildingsStore = useBuildingsStore()
+const coursesStore = useCoursesStore()
 const form = reactive(buildEmptyCourseForm())
 const buildings = ref<Building[]>([])
 const courses = ref<Course[]>([])
@@ -124,7 +128,10 @@ async function loadFormData() {
   loading.value = true
   errorMessage.value = ''
   try {
-    const [buildingResult, courseResult] = await Promise.all([getBuildings(), getCourses()])
+    const [buildingResult, courseResult] = await Promise.all([
+      buildingsStore.ensureLoaded(),
+      coursesStore.ensureLoaded()
+    ])
     buildings.value = buildingResult
     courses.value = courseResult
     if (isEdit.value && courseId.value !== null) {
@@ -163,6 +170,7 @@ async function submitCourse() {
       await createCourse(payload)
       showSuccessToast('课程已新增')
     }
+    coursesStore.invalidate()
     router.push('/courses')
   } catch (error) {
     const businessError = extractBusinessError(error)

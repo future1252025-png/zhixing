@@ -34,9 +34,44 @@ describe('API errors', () => {
     })
   })
 
+  it('falls back to the FastAPI detail string when no structured error exists', () => {
+    expect(
+      extractBusinessError({
+        response: {
+          status: 403,
+          data: { detail: '当前位置距离建筑过远' }
+        }
+      })
+    ).toEqual({
+      status: 403,
+      code: 'unexpected_error',
+      message: '当前位置距离建筑过远',
+      fields: [],
+      details: {}
+    })
+  })
+
+  it('prefers the structured business error over a detail string', () => {
+    expect(
+      extractBusinessError({
+        response: {
+          status: 409,
+          data: {
+            code: 'course_conflict',
+            message: '该时间与已有课程冲突',
+            fields: [],
+            details: {},
+            detail: 'legacy detail'
+          }
+        }
+      }).message
+    ).toBe('该时间与已有课程冲突')
+  })
+
   it.each<[unknown, number]>([
     [null, 0],
-    [{ response: { status: 500, data: { detail: 'raw server detail' } } }, 500],
+    [{ response: { status: 500, data: { detail: '   ' } } }, 500],
+    [{ response: { status: 500, data: { detail: 42 } } }, 500],
     [{
       response: {
         status: 422,

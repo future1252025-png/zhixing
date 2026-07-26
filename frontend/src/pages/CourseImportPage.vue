@@ -3,11 +3,13 @@ import { computed, nextTick, onMounted, ref } from 'vue'
 import { showFailToast } from 'vant'
 import { useRouter } from 'vue-router'
 
-import { getBuildings, type Building } from '@/api/buildings'
+import type { Building } from '@/api/buildings'
 import { commitCourseImport, previewCourseImport } from '@/api/courses'
 import { extractBusinessError } from '@/api/errors'
 import ImportCandidateCard from '@/components/import/ImportCandidateCard.vue'
 import ImportSummary from '@/components/import/ImportSummary.vue'
+import { useBuildingsStore } from '@/stores/buildings'
+import { useCoursesStore } from '@/stores/courses'
 import type {
   ImportCandidate,
   ImportIssue,
@@ -30,6 +32,8 @@ const LOCATION_ERROR_CODES = new Set(['building_unrecognized', 'room_missing'])
 const LOCATION_PLACEHOLDERS = new Set(['待确认教室', '待确认', '未知', '暂无'])
 
 const router = useRouter()
+const buildingsStore = useBuildingsStore()
+const coursesStore = useCoursesStore()
 const buildings = ref<Building[]>([])
 const selectedFile = ref<File | null>(null)
 const preview = ref<ImportPreviewResponse | null>(null)
@@ -260,6 +264,7 @@ async function commitImport() {
       buildCommitResolutions()
     )
     createdCount.value = result.created_count
+    coursesStore.invalidate()
     state.value = 'success'
   } catch (error) {
     const businessError = extractBusinessError(error)
@@ -273,7 +278,7 @@ async function commitImport() {
 
 async function loadBuildings() {
   try {
-    buildings.value = await getBuildings()
+    buildings.value = await buildingsStore.ensureLoaded()
   } catch (error) {
     errorMessage.value = extractBusinessError(error).message
     state.value = 'failed'

@@ -3,11 +3,12 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { showConfirmDialog, showFailToast, showSuccessToast } from 'vant'
 import { useRouter } from 'vue-router'
 
-import { deleteCourse, getCourses } from '@/api/courses'
+import { deleteCourse } from '@/api/courses'
 import { extractBusinessError } from '@/api/errors'
 import TechIcon from '@/components/TechIcon.vue'
 import SemesterSettingsCard from '@/components/course/SemesterSettingsCard.vue'
 import { useAuthStore } from '@/stores/auth'
+import { useCoursesStore } from '@/stores/courses'
 import { useSemesterStore } from '@/stores/semester'
 import type { Course } from '@/types/course'
 import type { SemesterUpdate } from '@/types/semester'
@@ -27,6 +28,7 @@ import {
 
 const router = useRouter()
 const authStore = useAuthStore()
+const coursesStore = useCoursesStore()
 const semesterStore = useSemesterStore()
 const courses = ref<Course[]>([])
 const loading = ref(true)
@@ -132,7 +134,7 @@ async function loadCourses() {
   loading.value = true
   errorMessage.value = ''
   try {
-    courses.value = await getCourses()
+    courses.value = await coursesStore.ensureLoaded()
   } catch (error) {
     errorMessage.value = getErrorMessage(error)
   } finally {
@@ -229,6 +231,7 @@ async function confirmDelete(course: Course) {
   deletingId.value = course.id
   try {
     await deleteCourse(course.id)
+    coursesStore.invalidate()
     showSuccessToast('课程已删除')
     await loadCourses()
   } catch (error) {
