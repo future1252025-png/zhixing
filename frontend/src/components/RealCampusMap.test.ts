@@ -193,7 +193,8 @@ describe('RealCampusMap async lifecycle', () => {
       addControl: vi.fn(),
       on: vi.fn(),
       off: vi.fn(),
-      getZoom: vi.fn(() => 16),
+      // 建筑层级 zoom：普通 pin 只在 >=17.5 显示，本测试关注的是标记重建不动视角
+      getZoom: vi.fn(() => 18),
       setFitView: vi.fn(),
       setCenter: vi.fn(),
       destroy: vi.fn()
@@ -251,6 +252,69 @@ describe('RealCampusMap async lifecycle', () => {
 
     expect(mapInstance.add).toHaveBeenCalledTimes(3)
     expect(mapInstance.setFitView).toHaveBeenCalledTimes(2)
+
+    application.unmount()
+  })
+
+  it('reveals ordinary pins only after zoomend crosses into building level', async () => {
+    const marker = { on: vi.fn() }
+    let zoom = 16
+    const listeners: Record<string, () => void> = {}
+    const mapInstance = {
+      add: vi.fn(),
+      remove: vi.fn(),
+      addControl: vi.fn(),
+      on: vi.fn((event: string, handler: () => void) => {
+        listeners[event] = handler
+      }),
+      off: vi.fn(),
+      getZoom: vi.fn(() => zoom),
+      setFitView: vi.fn(),
+      setCenter: vi.fn(),
+      destroy: vi.fn()
+    }
+    const amap = {
+      Map: vi.fn(function FakeMap() {
+        return mapInstance
+      }),
+      Marker: vi.fn(function FakeMarker() {
+        return marker
+      }),
+      Scale: vi.fn(),
+      ToolBar: vi.fn()
+    }
+    vi.mocked(loadAMapSdk).mockResolvedValue(amap)
+    vi.mocked(loadAMapPlugin).mockResolvedValue(amap)
+
+    const building = {
+      id: 1,
+      name: '教学楼',
+      type: '教学楼',
+      description: '',
+      latitude: 30.59,
+      longitude: 114.33,
+      map_x: 0,
+      map_y: 0,
+      walk_hint: null
+    }
+    const application = createApp(defineComponent({
+      render() {
+        return h(RealCampusMap, { buildings: [building] })
+      }
+    }))
+    application.mount(host)
+    await settle()
+
+    // mixed 档位（zoom 16）：普通 pin 隐藏，不构造任何标记
+    expect(amap.Marker).not.toHaveBeenCalled()
+
+    zoom = 18
+    listeners.zoomend?.()
+    await settle()
+
+    // 跨入 building 档位：zoomend 驱动重建，普通 pin 出现
+    expect(amap.Marker).toHaveBeenCalledTimes(1)
+    expect(mapInstance.add).toHaveBeenCalledTimes(1)
 
     application.unmount()
   })

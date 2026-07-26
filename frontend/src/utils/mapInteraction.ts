@@ -41,16 +41,20 @@ export function getBuildingHitZoneSize(zoom: number, active = false): number {
   return 38
 }
 
-/** 可见水滴 pin 的宽度：随 zoom 微调，针尖始终锚定在命中区几何中心 */
-export function getBuildingPinSize(zoom: number, active = false): number {
+/**
+ * 普通地点 pin 只在放大到建筑层级后显示：低倍率下 102 个标点会盖住
+ * 底图路网和地名文字。选中 pin 是用户的明确意图，任何倍率都保留。
+ */
+export function shouldShowBuildingPin(zoom: number, active = false): boolean {
   if (active) {
-    return 24
+    return true
   }
-  const level = getMapInteractionLevel(zoom)
-  if (level === 'area') {
-    return 16
-  }
-  return 20
+  return getMapInteractionLevel(zoom) === 'building'
+}
+
+/** 可见水滴 pin 的宽度：针尖始终锚定在命中区几何中心 */
+export function getBuildingPinSize(active = false): number {
+  return active ? 24 : 20
 }
 
 export function shouldShowBuildingHighlight(active: boolean): boolean {

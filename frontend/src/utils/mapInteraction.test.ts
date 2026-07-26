@@ -5,7 +5,8 @@ import {
   getBuildingHitZoneSize,
   getMapInteractionLevel,
   MAP_DRAG_HOLD_DELAY_MS,
-  shouldShowBuildingHighlight
+  shouldShowBuildingHighlight,
+  shouldShowBuildingPin
 } from './mapInteraction'
 
 describe('map interaction helpers', () => {
@@ -29,6 +30,14 @@ describe('map interaction helpers', () => {
   it('only shows visible building highlight for selected points', () => {
     expect(shouldShowBuildingHighlight(false)).toBe(false)
     expect(shouldShowBuildingHighlight(true)).toBe(true)
+  })
+
+  it('hides ordinary building pins until building-level zoom, keeps the selected pin', () => {
+    expect(shouldShowBuildingPin(14)).toBe(false)
+    expect(shouldShowBuildingPin(16)).toBe(false)
+    expect(shouldShowBuildingPin(18)).toBe(true)
+    expect(shouldShowBuildingPin(14, true)).toBe(true)
+    expect(shouldShowBuildingPin(16, true)).toBe(true)
   })
 
   it('distinguishes a steady hold from an early scroll gesture', () => {

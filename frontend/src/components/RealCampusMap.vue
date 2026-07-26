@@ -11,7 +11,9 @@ import {
   getMapInteractionLevel,
   hasMapPointerMovedBeyondTolerance,
   MAP_DRAG_HOLD_DELAY_MS,
-  shouldShowBuildingHighlight
+  shouldShowBuildingHighlight,
+  shouldShowBuildingPin,
+  type MapInteractionLevel
 } from '@/utils/mapInteraction'
 import { filterMapBuildings } from '@/utils/mapSearch'
 
@@ -65,6 +67,7 @@ let dragPointerId: number | null = null
 let dragPointerStart: { x: number; y: number } | null = null
 let dragPointerLast: { x: number; y: number } | null = null
 let dragHoldTimer: ReturnType<typeof setTimeout> | null = null
+let lastRenderedInteractionLevel: MapInteractionLevel | null = null
 
 const hasConfig = computed(() => isAMapConfigured())
 const markerBuildings = computed(() =>
@@ -201,7 +204,7 @@ function getMapCenter(): [number, number] {
 
 function buildingHitZoneContent(active = false): string {
   const size = getBuildingHitZoneSize(currentZoom.value, active)
-  const pinWidth = getBuildingPinSize(currentZoom.value, active)
+  const pinWidth = getBuildingPinSize(active)
   const pinHeight = Math.round((pinWidth * 31) / 24)
   const fill = active ? '#e2493b' : '#3d73e0'
   const ringSize = 20
@@ -316,11 +319,15 @@ function renderMapContent(adjustView = false) {
 
   clearWalkingRoute()
   clearOverlays()
+  lastRenderedInteractionLevel = interactionLevel.value
   const nextOverlays: any[] = []
 
   markerBuildings.value.forEach((building) => {
     const active = building.id === props.activeBuildingId ||
       building.id === selectedSearchBuildingId.value
+    if (!shouldShowBuildingPin(currentZoom.value, active)) {
+      return
+    }
     const marker = new amap.value.Marker({
       position: pointToLngLat(building),
       content: buildingHitZoneContent(active),
@@ -533,8 +540,13 @@ watch(
   () => renderMapContent(false)
 )
 
-// zoom 档位影响 pin/命中区尺寸，缩放结束后重建标记（同样不动视角）。
-watch(currentZoom, () => renderMapContent(false))
+// zoom 档位决定 pin 显隐和命中区尺寸；只在档位真正变化时重建标记
+// （同样不动视角），同档位内缩放不做无谓的整批重建。
+watch(currentZoom, () => {
+  if (interactionLevel.value !== lastRenderedInteractionLevel) {
+    renderMapContent(false)
+  }
+})
 
 onBeforeUnmount(() => {
   disposed = true
