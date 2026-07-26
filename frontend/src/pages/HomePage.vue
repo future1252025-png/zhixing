@@ -193,6 +193,16 @@ function openRecentChat(entry: RecentChatEntry) {
   openBuildingChat({ id: entry.buildingId, name: entry.buildingName }, entry.roomName)
 }
 
+function openQuickChannels() {
+  const latest = recentChats.value[0]
+  if (latest) {
+    openRecentChat(latest)
+    return
+  }
+  // 还没聊过：带用户到常去处板块，那里每张卡都是频道入口
+  document.querySelector('.places-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+
 function openBuilding(buildingId: number) {
   const building = buildings.value.find((item) => item.id === buildingId)
   if (building) {
@@ -302,6 +312,11 @@ onUnmounted(() => {
         class="quick-notes"
         aria-label="快捷操作"
       >
+        <button type="button" class="note note-lilac" @click="openQuickChannels">
+          <span><TechIcon name="chat" :size="21" /></span>
+          <strong>地点频道</strong>
+          <small>{{ recentChats.length ? '回到上次聊过的' : '挑个地点聊聊' }}</small>
+        </button>
         <button type="button" class="note note-green" @click="router.push('/courses/import')">
           <span><TechIcon name="upload" :size="21" /></span>
           <strong>导入课表</strong>
@@ -326,7 +341,7 @@ onUnmounted(() => {
         <div class="fresh-section-heading">
           <div>
             <h2>想去哪里看看？</h2>
-            <p>搜索教学楼、图书馆或具体教室</p>
+            <p>搜地点或教室，直接进对应频道</p>
           </div>
           <span class="search-flower" aria-hidden="true"><i></i><i></i><i></i></span>
         </div>
@@ -383,7 +398,7 @@ onUnmounted(() => {
         class="places-section"
       >
         <div class="fresh-section-heading">
-          <div><h2>校园里的常去处</h2><p>从熟悉的地方开始逛逛</p></div>
+          <div><h2>校园里的常去处</h2><p>点一下，进这个地点的频道聊聊</p></div>
           <span>{{ buildings.length }} 个地点</span>
         </div>
 
@@ -398,7 +413,7 @@ onUnmounted(() => {
             <span class="place-index">{{ String(index + 1).padStart(2, '0') }}</span>
             <small>{{ building.type }}</small>
             <strong>{{ building.name }}</strong>
-            <span class="place-enter">看看这里 <TechIcon name="arrow" :size="15" /></span>
+            <span class="place-enter"><TechIcon name="chat" :size="14" /> 进频道聊聊 <TechIcon name="arrow" :size="15" /></span>
           </button>
         </div>
       </section>
@@ -414,7 +429,7 @@ onUnmounted(() => {
             title=""
             subtitle=""
             height="430px"
-            selected-action-text="打开地点"
+            selected-action-text="进频道"
             @building-click="openBuilding"
           />
           <div v-if="loading" class="home-loading">
@@ -793,7 +808,7 @@ onUnmounted(() => {
 
 .quick-notes {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 9px;
 }
 
@@ -814,6 +829,7 @@ onUnmounted(() => {
 
 .note:nth-child(2) { transform: rotate(1.1deg); }
 .note:nth-child(3) { transform: rotate(-0.8deg); }
+.note:nth-child(4) { transform: rotate(0.9deg); }
 
 .note > span {
   display: grid;
@@ -838,6 +854,7 @@ onUnmounted(() => {
 .note-green { background: var(--fresh-mint); }
 .note-blue { background: var(--fresh-sky); }
 .note-yellow { background: var(--cm-amber-soft); }
+.note-lilac { background: var(--fresh-lilac); }
 
 .search-sheet,
 .map-sheet {
