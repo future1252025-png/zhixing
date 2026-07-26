@@ -103,6 +103,16 @@ describe('readability policy', () => {
   })
 })
 
+describe('map marker policy', () => {
+  it('keeps building pins self-contained so anchoring cannot drift', () => {
+    const source = frontendFile('src/components/RealCampusMap.vue')
+    // 曾因 :deep 覆盖 amap 标记子元素并施加 transform 动画，把 pin 从坐标点上挪走；
+    // 标记内容必须自包含（内联 SVG 配色 + 像素定位），不允许再深度覆盖标记内部元素
+    expect(source).not.toContain('.amap-marker-content > div > span')
+    expect(source).toMatch(/anchor: 'center'/)
+  })
+})
+
 describe('SPA response security headers', () => {
   const expected = {
     'Content-Security-Policy': "frame-ancestors 'none'",

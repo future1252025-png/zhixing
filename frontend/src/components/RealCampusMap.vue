@@ -201,46 +201,49 @@ function getMapCenter(): [number, number] {
 
 function buildingHitZoneContent(active = false): string {
   const size = getBuildingHitZoneSize(currentZoom.value, active)
-  const pinSize = getBuildingPinSize(currentZoom.value, active)
-  const showHighlight = shouldShowBuildingHighlight(active)
-  // 非选中建筑也渲染可见叶形 pin：用户不用再靠底图 POI 猜哪里能点
+  const pinWidth = getBuildingPinSize(currentZoom.value, active)
+  const pinHeight = Math.round((pinWidth * 31) / 24)
+  const fill = active ? '#e2493b' : '#3d73e0'
+  const ringSize = 20
+  // 经典水滴 pin，配色随底图惯例（蓝=可点地点，红=选中）而非应用 UI；
+  // 针尖用纯像素定位落在命中区几何中心（即坐标点），不依赖 transform，
+  // 外部样式/动画覆盖不会再把它从坐标点上挪走
   return `
     <div style="
       position:relative;
       width:${size}px;
       height:${size}px;
-      border-radius:999px;
       background:transparent;
       cursor:pointer;
-      transform:translateZ(0);
     ">
-      <span style="
-        position:absolute;
-        top:50%;
-        left:50%;
-        width:${pinSize}px;
-        height:${pinSize}px;
-        border:1.5px solid rgba(255,253,248,.92);
-        border-radius:70% 30% 62% 38%;
-        background:${active ? '#0f7f78' : '#4f7d58'};
-        box-shadow:0 2px 6px rgba(38,54,42,.35);
-        transform:translate(-50%,-50%) rotate(34deg);
-      "></span>
       ${
-        showHighlight
+        shouldShowBuildingHighlight(active)
           ? `<span style="
               position:absolute;
-              inset:50%;
-              width:18px;
-              height:18px;
-              border:2px solid #0f7f78;
+              left:${(size - ringSize) / 2}px;
+              top:${(size - ringSize) / 2}px;
+              width:${ringSize}px;
+              height:${ringSize}px;
               border-radius:999px;
-              background:rgba(15,127,120,.16);
-              box-shadow:0 0 0 8px rgba(15,127,120,.14);
-              transform:translate(-50%,-50%);
+              background:rgba(226,73,59,.16);
+              box-shadow:0 0 0 6px rgba(226,73,59,.09);
             "></span>`
           : ''
       }
+      <svg viewBox="0 0 24 31" style="
+        position:absolute;
+        left:${(size - pinWidth) / 2}px;
+        bottom:${size / 2}px;
+        width:${pinWidth}px;
+        height:${pinHeight}px;
+        filter:drop-shadow(0 2px 2px rgba(30,40,34,.35));
+      ">
+        <path
+          d="M12 1C6.2 1 1.5 5.6 1.5 11.3c0 2.6.9 5 2.6 7.2L12 31l7.9-12.5c1.7-2.2 2.6-4.6 2.6-7.2C22.5 5.6 17.8 1 12 1z"
+          fill="${fill}" stroke="#fff" stroke-width="1.5"
+        />
+        <circle cx="12" cy="11.3" r="4.2" fill="#fff"/>
+      </svg>
     </div>
   `
 }
@@ -529,6 +532,9 @@ watch(
   () => props.activeBuildingId,
   () => renderMapContent(false)
 )
+
+// zoom 档位影响 pin/命中区尺寸，缩放结束后重建标记（同样不动视角）。
+watch(currentZoom, () => renderMapContent(false))
 
 onBeforeUnmount(() => {
   disposed = true
@@ -1103,15 +1109,6 @@ onBeforeUnmount(() => {
   text-shadow: 0 1px 3px #000;
 }
 
-.real-map-container :deep(.amap-marker-content > div > span) {
-  border-color: var(--map-cyan) !important;
-  background: rgb(var(--map-cyan-rgb) / 18%) !important;
-  box-shadow:
-    0 0 0 7px rgb(var(--map-cyan-rgb) / 11%),
-    0 0 20px rgb(var(--map-cyan-rgb) / 65%) !important;
-  animation: map-marker-pulse 2.2s ease-in-out infinite;
-}
-
 .map-selected-card {
   position: absolute;
   z-index: 11;
@@ -1499,19 +1496,6 @@ onBeforeUnmount(() => {
   }
 }
 
-@keyframes map-marker-pulse {
-  0%,
-  100% {
-    filter: brightness(.88);
-    transform: scale(.92);
-  }
-
-  50% {
-    filter: brightness(1.22);
-    transform: scale(1.08);
-  }
-}
-
 @media (max-width: 640px) {
   .map-search {
     right: 11px;
@@ -1872,13 +1856,6 @@ onBeforeUnmount(() => {
   text-shadow: 0 1px 2px #fff;
 }
 
-.real-map-container :deep(.amap-marker-content > div > span) {
-  border-color: #5d8d62 !important;
-  background: rgba(101, 153, 104, .22) !important;
-  box-shadow: 0 0 0 7px rgba(101, 153, 104, .12) !important;
-  animation: map-marker-breathe 2.6s ease-in-out infinite;
-}
-
 .map-selected-card {
   right: 70px;
   border: 1px solid rgba(87, 121, 83, .18);
@@ -1996,11 +1973,6 @@ onBeforeUnmount(() => {
 @keyframes map-leaf-nod {
   0%, 100% { rotate: 0deg; }
   50% { rotate: 10deg; }
-}
-
-@keyframes map-marker-breathe {
-  0%, 100% { transform: scale(.92); opacity: .8; }
-  50% { transform: scale(1.08); opacity: 1; }
 }
 
 @keyframes map-flower-turn {

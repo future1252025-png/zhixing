@@ -41,16 +41,16 @@ export function getBuildingHitZoneSize(zoom: number, active = false): number {
   return 38
 }
 
-/** 可见 pin 的直径：随 zoom 缩放，与命中区同心 */
+/** 可见水滴 pin 的宽度：随 zoom 微调，针尖始终锚定在命中区几何中心 */
 export function getBuildingPinSize(zoom: number, active = false): number {
   if (active) {
-    return 14
+    return 24
   }
   const level = getMapInteractionLevel(zoom)
   if (level === 'area') {
-    return 8
+    return 16
   }
-  return 10
+  return 20
 }
 
 export function shouldShowBuildingHighlight(active: boolean): boolean {
