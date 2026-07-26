@@ -68,6 +68,8 @@ let dragPointerStart: { x: number; y: number } | null = null
 let dragPointerLast: { x: number; y: number } | null = null
 let dragHoldTimer: ReturnType<typeof setTimeout> | null = null
 let lastRenderedInteractionLevel: MapInteractionLevel | null = null
+let lastRenderedZoom: number | null = null
+let moveEndHandler: (() => void) | null = null
 
 const hasConfig = computed(() => isAMapConfigured())
 const markerBuildings = computed(() =>
@@ -202,7 +204,13 @@ function getMapCenter(): [number, number] {
   return [114.3235, 30.5828]
 }
 
-function buildingHitZoneContent(active = false): string {
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (character) => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character] ?? character
+  ))
+}
+
+function buildingHitZoneContent(name: string, active = false): string {
   const size = getBuildingHitZoneSize(currentZoom.value, active)
   const pinWidth = getBuildingPinSize(active)
   const pinHeight = Math.round((pinWidth * 31) / 24)
@@ -212,7 +220,7 @@ function buildingHitZoneContent(active = false): string {
   // 针尖用纯像素定位落在命中区几何中心（即坐标点），不依赖 transform，
   // 外部样式/动画覆盖不会再把它从坐标点上挪走
   return `
-    <div style="
+    <div class="map-pin" style="
       position:relative;
       width:${size}px;
       height:${size}px;
@@ -247,6 +255,24 @@ function buildingHitZoneContent(active = false): string {
         />
         <circle cx="12" cy="11.3" r="4.2" fill="#fff"/>
       </svg>
+      <span class="map-pin-tip" style="
+        position:absolute;
+        left:50%;
+        bottom:${size / 2 + pinHeight + 7}px;
+        max-width:220px;
+        overflow:hidden;
+        padding:4px 9px;
+        border:1px solid rgba(0,0,0,.08);
+        border-radius:7px;
+        background:#fff;
+        box-shadow:0 2px 10px rgba(0,0,0,.2);
+        color:#333;
+        font-size:12px;
+        line-height:1.35;
+        white-space:nowrap;
+        text-overflow:ellipsis;
+        transform:translateX(-50%);
+      ">${escapeHtml(name)}</span>
     </div>
   `
 }
@@ -320,7 +346,15 @@ function renderMapContent(adjustView = false) {
   clearWalkingRoute()
   clearOverlays()
   lastRenderedInteractionLevel = interactionLevel.value
+  lastRenderedZoom = currentZoom.value
   const nextOverlays: any[] = []
+
+  // 视野过滤：只为当前可见区域内的建筑建 pin。bounds 能力缺失时
+  // （如测试桩）退化为全部渲染。
+  const bounds = typeof map.value.getBounds === 'function' ? map.value.getBounds() : null
+  const isInView = bounds && typeof bounds.contains === 'function'
+    ? (lngLat: [number, number]) => bounds.contains(lngLat)
+    : () => true
 
   markerBuildings.value.forEach((building) => {
     const active = building.id === props.activeBuildingId ||
@@ -328,9 +362,13 @@ function renderMapContent(adjustView = false) {
     if (!shouldShowBuildingPin(currentZoom.value, active)) {
       return
     }
+    const position = pointToLngLat(building)
+    if (!active && !isInView(position)) {
+      return
+    }
     const marker = new amap.value.Marker({
-      position: pointToLngLat(building),
-      content: buildingHitZoneContent(active),
+      position,
+      content: buildingHitZoneContent(building.name, active),
       anchor: 'center',
       zIndex: active ? 120 : 100
     })
@@ -506,6 +544,16 @@ async function initMap() {
       }
     }
     targetMap.on('zoomend', zoomEndHandler)
+    // 建筑档位下 pin 只覆盖可见区域，平移结束后要按新视野重建
+    moveEndHandler = () => {
+      if (
+        map.value === targetMap &&
+        getMapInteractionLevel(targetMap.getZoom()) === 'building'
+      ) {
+        renderMapContent(false)
+      }
+    }
+    targetMap.on('moveend', moveEndHandler)
     currentZoom.value = targetMap.getZoom()
     renderMapContent(true)
   } catch {
@@ -540,10 +588,13 @@ watch(
   () => renderMapContent(false)
 )
 
-// zoom 档位决定 pin 显隐和命中区尺寸；只在档位真正变化时重建标记
-// （同样不动视角），同档位内缩放不做无谓的整批重建。
-watch(currentZoom, () => {
-  if (interactionLevel.value !== lastRenderedInteractionLevel) {
+// zoom 档位决定 pin 显隐和命中区尺寸：档位跨越时重建标记（不动视角）；
+// 建筑档位内缩放会改变可见区域，也要按新视野重建，其余档位不做无谓重建。
+watch(currentZoom, (zoom) => {
+  const levelChanged = interactionLevel.value !== lastRenderedInteractionLevel
+  const viewChangedAtBuildingLevel =
+    interactionLevel.value === 'building' && zoom !== lastRenderedZoom
+  if (levelChanged || viewChangedAtBuildingLevel) {
     renderMapContent(false)
   }
 })
@@ -560,9 +611,13 @@ onBeforeUnmount(() => {
     if (zoomEndHandler) {
       map.value.off?.('zoomend', zoomEndHandler)
     }
+    if (moveEndHandler) {
+      map.value.off?.('moveend', moveEndHandler)
+    }
     map.value.destroy()
   }
   zoomEndHandler = null
+  moveEndHandler = null
   map.value = null
   amap.value = null
   routePlanner.value = null
@@ -1119,6 +1174,22 @@ onBeforeUnmount(() => {
 .real-map-container :deep(.amap-scale-text) {
   color: rgb(229 250 255 / 72%) !important;
   text-shadow: 0 1px 3px #000;
+}
+
+/* pin 悬浮提示：只作用于自有 .map-pin 类，不触碰 amap 标记内部结构 */
+.real-map-container :deep(.map-pin-tip) {
+  opacity: 0;
+  transition: opacity 140ms ease;
+  pointer-events: none;
+}
+
+.real-map-container :deep(.map-pin:hover .map-pin-tip) {
+  opacity: 1;
+}
+
+/* 悬浮的标记浮到相邻标记之上，避免提示气泡被遮住 */
+.real-map-container :deep(.amap-marker:hover) {
+  z-index: 130 !important;
 }
 
 .map-selected-card {

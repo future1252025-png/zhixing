@@ -319,6 +319,57 @@ describe('RealCampusMap async lifecycle', () => {
     application.unmount()
   })
 
+  it('renders only pins inside the current viewport and embeds hover name tips', async () => {
+    const marker = { on: vi.fn() }
+    const bounds = { contains: vi.fn((lngLat: [number, number]) => lngLat[0] < 114.4) }
+    const mapInstance = {
+      add: vi.fn(),
+      remove: vi.fn(),
+      addControl: vi.fn(),
+      on: vi.fn(),
+      off: vi.fn(),
+      getZoom: vi.fn(() => 18),
+      getBounds: vi.fn(() => bounds),
+      setFitView: vi.fn(),
+      setCenter: vi.fn(),
+      destroy: vi.fn()
+    }
+    const amap = {
+      Map: vi.fn(function FakeMap() {
+        return mapInstance
+      }),
+      Marker: vi.fn(function FakeMarker() {
+        return marker
+      }),
+      Scale: vi.fn(),
+      ToolBar: vi.fn()
+    }
+    vi.mocked(loadAMapSdk).mockResolvedValue(amap)
+    vi.mocked(loadAMapPlugin).mockResolvedValue(amap)
+
+    const base = { type: '教学楼', description: '', map_x: 0, map_y: 0, walk_hint: null }
+    const application = createApp(defineComponent({
+      render() {
+        return h(RealCampusMap, {
+          buildings: [
+            { ...base, id: 1, name: '教学楼', latitude: 30.59, longitude: 114.33 },
+            { ...base, id: 2, name: '图书馆', latitude: 30.59, longitude: 114.6 }
+          ]
+        })
+      }
+    }))
+    application.mount(host)
+    await settle()
+
+    // 视野外的图书馆不建 pin；视野内的教学楼 pin 自带悬浮名称提示
+    expect(amap.Marker).toHaveBeenCalledTimes(1)
+    const content = String((amap.Marker.mock.calls[0] as unknown[] as [{ content: string }])[0].content)
+    expect(content).toContain('map-pin-tip')
+    expect(content).toContain('教学楼')
+
+    application.unmount()
+  })
+
   it('requires a steady touch hold before manually panning the map', async () => {
     vi.useFakeTimers()
     const originalMatchMedia = window.matchMedia
