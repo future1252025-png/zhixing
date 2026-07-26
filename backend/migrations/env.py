@@ -10,7 +10,9 @@ from app import models  # noqa: F401
 
 config = context.config
 if config.config_file_name is not None:
-    fileConfig(config.config_file_name)
+    # disable_existing_loggers=False so running migrations in-process (e.g. via
+    # upgrade_database on startup) does not silence the application's own loggers.
+    fileConfig(config.config_file_name, disable_existing_loggers=False)
 
 if not config.get_main_option("sqlalchemy.url"):
     config.set_main_option("sqlalchemy.url", settings.database_url.replace("%", "%%"))

@@ -1,15 +1,21 @@
 from collections.abc import Mapping
 from dataclasses import dataclass
 from ipaddress import IPv4Address, IPv6Address, ip_address
+import logging
 import os
 from pathlib import Path
 import re
+import secrets
 from typing import Final
 from urllib.parse import urlsplit
 
 
+logger = logging.getLogger(__name__)
+
 BACKEND_DIR = Path(__file__).resolve().parents[2]
 DEFAULT_DATABASE_PATH = BACKEND_DIR / "data" / "campusmind.db"
+# Retained only so production validation can reject the historical public
+# default value; it is never used as an actual signing key anymore.
 DEFAULT_JWT_SECRET = "dev-only-change-me-before-production"
 DEFAULT_CORS_ALLOW_ORIGINS = (
     "http://127.0.0.1:5173",
@@ -23,6 +29,22 @@ MIN_JWT_SECRET_BYTES: Final = 32
 MAX_ACCESS_TOKEN_EXPIRE_MINUTES: Final = 24 * 60
 _UNSET: Final = object()
 _DOMAIN_LABEL = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
+_generated_dev_jwt_secret: str | None = None
+
+
+def _dev_fallback_jwt_secret() -> str:
+    """Per-process random fallback so a public default never signs tokens.
+
+    Cached at module level: every Settings instance created in this process
+    sees the same secret, keeping issued tokens verifiable until restart.
+    """
+    global _generated_dev_jwt_secret
+    if _generated_dev_jwt_secret is None:
+        _generated_dev_jwt_secret = secrets.token_urlsafe(48)
+        logger.warning(
+            "JWT_SECRET_KEY 未设置，开发模式使用临时随机密钥；进程重启后已签发的 token 将失效。"
+        )
+    return _generated_dev_jwt_secret
 
 
 def _parse_cors_allow_origins(configured: str | None) -> tuple[str, ...]:
@@ -140,7 +162,9 @@ def _normalize_cors_origin(origin: str) -> str | None:
 
 
 def _normalize_configured_origins(origins: tuple[str, ...]) -> tuple[str, ...]:
-    return tuple(_normalize_cors_origin(origin) or origin.strip() for origin in origins)
+    """Keep only origins that normalize cleanly; wildcards and junk are dropped."""
+    normalized = (_normalize_cors_origin(origin) for origin in origins)
+    return tuple(origin for origin in normalized if origin is not None)
 
 
 def get_cors_allow_origins(
@@ -193,10 +217,10 @@ class Settings:
             "JWT_SECRET_KEY" in source if jwt_secret_key is _UNSET else True
         )
         resolved_secret = (
-            source.get("JWT_SECRET_KEY", DEFAULT_JWT_SECRET)
-            if jwt_secret_key is _UNSET
-            else jwt_secret_key
+            source.get("JWT_SECRET_KEY") if jwt_secret_key is _UNSET else jwt_secret_key
         )
+        if resolved_secret is None:
+            resolved_secret = _dev_fallback_jwt_secret()
         resolved_expire_minutes = (
             int(source.get("ACCESS_TOKEN_EXPIRE_MINUTES", "60"))
             if access_token_expire_minutes is _UNSET

@@ -1,4 +1,5 @@
 import json
+import os
 from collections import Counter
 from pathlib import Path
 
@@ -250,7 +251,18 @@ def _seed_user_demo_messages(
             )
 
 
+def _demo_seed_allowed_in_production() -> bool:
+    return os.environ.get("SEED_ALLOW_DEMO") == "1"
+
+
 def seed_demo_data(session: Session) -> dict[str, int]:
+    # Demo credentials are public knowledge; never create or repair them in a
+    # production database unless explicitly requested via SEED_ALLOW_DEMO=1.
+    if settings.is_production and not _demo_seed_allowed_in_production():
+        raise RuntimeError(
+            "Refusing to seed demo data in production. "
+            "Set SEED_ALLOW_DEMO=1 to explicitly allow it."
+        )
     user, seed_owned_user = _get_or_create_demo_user(session)
     buildings = _seed_buildings(session)
 

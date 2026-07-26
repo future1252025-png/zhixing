@@ -36,6 +36,7 @@ from app.models import (
     SemesterSetting,
     User,
 )
+from app.core.config import Settings
 from app.core.security import hash_password, verify_password
 import app.db.database as database_module
 
@@ -503,6 +504,45 @@ def test_new_demo_user_password_and_repeated_seed_are_stable(tmp_path: Path) -> 
         user = session.scalar(select(User).where(User.username == DEMO_USERNAME))
         assert user is not None
         assert user.password_hash == first_hash
+
+
+def test_seed_demo_data_refuses_to_run_in_production(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    engine = create_sqlite_engine(make_test_database_url(tmp_path / "prod-guard.db"))
+    init_db(engine)
+    SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+    monkeypatch.delenv("SEED_ALLOW_DEMO", raising=False)
+    monkeypatch.setattr("app.db.seed.settings", Settings(app_env="production"))
+
+    with SessionLocal() as session:
+        with pytest.raises(RuntimeError, match="SEED_ALLOW_DEMO"):
+            seed_demo_data(session)
+        assert (
+            session.scalar(select(User).where(User.username == DEMO_USERNAME))
+            is None
+        )
+
+
+def test_seed_demo_data_runs_in_production_with_explicit_override(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    engine = create_sqlite_engine(make_test_database_url(tmp_path / "prod-override.db"))
+    init_db(engine)
+    SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+    monkeypatch.setenv("SEED_ALLOW_DEMO", "1")
+    monkeypatch.setattr("app.db.seed.settings", Settings(app_env="production"))
+
+    with SessionLocal() as session:
+        counts = seed_demo_data(session)
+
+        assert counts["users"] >= 1
+        assert (
+            session.scalar(select(User).where(User.username == DEMO_USERNAME))
+            is not None
+        )
 
 
 def test_initialize_database_creates_sqlite_file(tmp_path: Path) -> None:

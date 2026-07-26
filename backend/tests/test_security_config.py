@@ -1,6 +1,48 @@
+import logging
+
 import pytest
 
 from app.core.config import DEFAULT_JWT_SECRET, Settings, validate_settings
+
+
+def test_missing_jwt_secret_falls_back_to_stable_process_random_secret() -> None:
+    first = Settings(environ={})
+    second = Settings(environ={})
+
+    assert first.jwt_secret_key != DEFAULT_JWT_SECRET
+    assert len(first.jwt_secret_key.encode("utf-8")) >= 32
+    assert first.jwt_secret_key_explicit is False
+    # Cached per process so already-issued dev tokens stay verifiable.
+    assert first.jwt_secret_key == second.jwt_secret_key
+
+
+def test_dev_fallback_secret_warns_once_per_process(monkeypatch, caplog) -> None:
+    import app.core.config as config_module
+
+    monkeypatch.setattr(config_module, "_generated_dev_jwt_secret", None)
+    with caplog.at_level(logging.WARNING, logger="app.core.config"):
+        first = Settings(environ={})
+        second = Settings(environ={})
+
+    warnings = [
+        record for record in caplog.records if "临时随机密钥" in record.getMessage()
+    ]
+    assert len(warnings) == 1
+    assert first.jwt_secret_key == second.jwt_secret_key
+    assert first.jwt_secret_key != DEFAULT_JWT_SECRET
+
+
+def test_validate_settings_rejects_implicit_fallback_secret_in_production() -> None:
+    config = Settings(
+        environ={
+            "APP_ENV": "production",
+            "CORS_ALLOW_ORIGINS": "https://campus.example.edu",
+        }
+    )
+
+    assert config.jwt_secret_key_explicit is False
+    with pytest.raises(RuntimeError, match="JWT_SECRET_KEY"):
+        validate_settings(config)
 
 
 def test_validate_settings_blocks_default_jwt_in_production(monkeypatch) -> None:
@@ -171,6 +213,20 @@ def test_validate_settings_rejects_local_origin_mixed_with_remote_https() -> Non
 
     with pytest.raises(RuntimeError, match="CORS_ALLOW_ORIGINS"):
         validate_settings(config)
+
+
+def test_settings_drops_wildcard_and_invalid_configured_origins() -> None:
+    config = Settings(
+        cors_allow_origins=(
+            "*",
+            "not-a-url",
+            "ftp://campus.example.edu",
+            "http://127.0.0.1:5173",
+        ),
+    )
+
+    # Invalid values (including "*") must never leak into the CORS allowlist.
+    assert config.cors_allow_origins == ("http://127.0.0.1:5173",)
 
 
 def test_settings_normalizes_valid_https_origin_host_port_and_trailing_dot() -> None:

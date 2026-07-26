@@ -79,7 +79,7 @@ async def request_validation_error_handler(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=list(settings.cors_allow_origins),
-    allow_credentials=True,
+    allow_credentials=False,  # Pure Bearer-token auth; no cookies are ever used.
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type"],
 )

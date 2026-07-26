@@ -27,6 +27,11 @@ _SQLITE_IDENTITY_UNIQUE_ERROR = re.compile(
     re.IGNORECASE,
 )
 
+# Verifying against this dummy hash keeps the unknown-username path roughly as
+# slow as a real password check, so login response timing does not reveal
+# whether a username exists.
+_TIMING_EQUALIZATION_HASH = hash_password("campusmind-timing-equalization")
+
 
 def _is_identity_unique_collision(error: IntegrityError) -> bool:
     original = error.orig
@@ -74,6 +79,7 @@ def authenticate_user(
 ) -> User | None:
     user = get_user_by_username(session, username)
     if user is None:
+        verify_password(password, _TIMING_EQUALIZATION_HASH)
         return None
     if not verify_password(password, user.password_hash):
         return None
