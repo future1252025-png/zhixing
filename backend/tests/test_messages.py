@@ -431,7 +431,7 @@ def test_get_building_chatrooms_includes_general_and_course_rooms(
 
     assert response.status_code == 200
     data = response.json()
-    assert data[0]["name"] == "建筑总聊"
+    assert data[0]["name"] == "地点频道"
     assert data[0]["room_name"] is None
     assert any(room["room_name"] for room in data)
 

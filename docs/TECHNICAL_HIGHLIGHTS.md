@@ -23,7 +23,7 @@ flowchart LR
 | --- | --- | --- |
 | 认证 | `backend/app/api/auth.py` | 注册、登录、当前用户、资料编辑、JWT 鉴权 |
 | 建筑 | `backend/app/api/buildings.py` | 建筑列表、建筑详情、位置数据 |
-| 留言 | `backend/app/api/messages.py` | 建筑总频道、教室频道、匿名留言、定位距离校验 |
+| 留言 | `backend/app/api/messages.py` | 地点频道、教室频道、匿名留言、定位距离校验 |
 | 课程 | `backend/app/api/courses.py` | 课程 CRUD、HTML/Excel 导入预览 |
 | 建议 | `backend/app/api/schedule.py` | 下一节课识别、出发建议、距离和状态计算 |
 
@@ -33,7 +33,7 @@ flowchart LR
 | --- | --- | --- |
 | 地图首页 | `frontend/src/pages/HomePage.vue` | 校园地图、地点搜索、登录欢迎卡、地图点位分层 |
 | 地图组件 | `frontend/src/components/RealCampusMap.vue` | 高德地图加载、叶形点位、点选确认卡、路线预览 |
-| 聊天室 | `frontend/src/pages/BuildingChatroomsPage.vue` | 建筑总频道和教室频道选择 |
+| 聊天室 | `frontend/src/pages/BuildingChatroomsPage.vue` | 地点频道和教室频道选择 |
 | 留言页 | `frontend/src/pages/BuildingMessagesPage.vue` | 气泡聊天、按日分隔、作者头像、定位状态、禁用输入 |
 | 课程表 | `frontend/src/pages/CoursesPage.vue` | 周次筛选与滑动切周、整周课表网格、当前节次高亮、课程操作 |
 | 课表导入 | `frontend/src/pages/CourseImportPage.vue` | HTML/Excel 上传预览和导入 |
@@ -60,7 +60,7 @@ flowchart LR
 
 建筑会话被拆成两层：
 
-1. 建筑总频道：适合讨论建筑整体信息，例如教学楼开放、拥堵、失物招领。
+1. 地点频道：适合讨论建筑整体信息，例如教学楼开放、拥堵、失物招领。
 2. 教室频道：从建筑进入后可选择具体教室，例如教4-203，适合更具体的课堂或自习信息。
 
 这样既保留了项目最初的“建筑留言”特色，又能支撑更真实的校园交流场景。
@@ -126,7 +126,7 @@ flowchart LR
 最近一次整理验证：
 
 ```text
-backend: 61 passed
+backend: 365 passed（另 2 跳过）
 frontend: 276 passed（43 个测试文件，美化改造后基线）
 npm run build: passed
 ```

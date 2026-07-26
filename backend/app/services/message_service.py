@@ -51,7 +51,7 @@ def list_building_messages(
 ) -> list[MessageRead]:
     """List messages for one channel.
 
-    - room_name is None → 建筑总聊 (only messages with room_name IS NULL)
+    - room_name is None → 地点频道 (only messages with room_name IS NULL)
     - room_name is set  → that classroom channel only
     - before_id is set  → cursor pagination: only messages with id < before_id.
       Message ids are monotonically increasing and inserted in created_at order,
@@ -88,7 +88,7 @@ def list_building_chatrooms(session: Session, building_id: int) -> list[ChatRoom
         for room_name, count in message_count_rows
         if room_name is not None
     }
-    # 建筑总聊 only counts messages that belong to the general channel.
+    # 地点频道 only counts messages that belong to the general channel.
     general_count = sum(
         int(count) for room_name, count in message_count_rows if room_name is None
     )
@@ -96,7 +96,7 @@ def list_building_chatrooms(session: Session, building_id: int) -> list[ChatRoom
 
     return [
         ChatRoomRead(
-            name="建筑总聊",
+            name="地点频道",
             room_name=None,
             message_count=general_count,
             is_general=True,
