@@ -8,6 +8,12 @@ import { commitCourseImport, previewCourseImport } from '@/api/courses'
 import { extractBusinessError } from '@/api/errors'
 import ImportCandidateCard from '@/components/import/ImportCandidateCard.vue'
 import ImportSummary from '@/components/import/ImportSummary.vue'
+import {
+  captureHubuCourseTable,
+  captureToHtmlFile,
+  HUBU_ACADEMIC_SYSTEM_URL,
+  supportsNativeHubuCourseImport
+} from '@/native/hubuCourseImport'
 import { useBuildingsStore } from '@/stores/buildings'
 import { useCoursesStore } from '@/stores/courses'
 import type {
@@ -44,6 +50,10 @@ const highlightedRowRefs = ref<string[]>([])
 const state = ref<ImportPageState>('idle')
 const errorMessage = ref('')
 const createdCount = ref(0)
+const nativeImporting = ref(false)
+const importSource = ref<'file' | 'hubu'>('file')
+const captureSourceUrl = ref('')
+const nativeHubuImportAvailable = supportsNativeHubuCourseImport()
 const { pageStyle, onFieldFocus } = useKeyboardAwarePage({ basePaddingPx: 34 })
 
 const candidates = computed(() => preview.value?.candidates ?? [])
@@ -64,7 +74,9 @@ const canCommit = computed(() =>
       unresolvedCount.value === 0
   )
 )
-const isBusy = computed(() => state.value === 'previewing' || state.value === 'committing')
+const isBusy = computed(() =>
+  nativeImporting.value || state.value === 'previewing' || state.value === 'committing'
+)
 
 function hasParsedCourse(candidate: ImportCandidate): boolean {
   return Boolean(
@@ -114,6 +126,8 @@ function resetPreview() {
 function handleFileChange(event: Event) {
   const input = event.target as HTMLInputElement
   selectedFile.value = input.files?.[0] ?? null
+  importSource.value = 'file'
+  captureSourceUrl.value = ''
   resetPreview()
   state.value = 'idle'
 }
@@ -151,6 +165,42 @@ async function previewFile() {
     errorMessage.value = extractBusinessError(error).message
     state.value = 'failed'
     showFailToast(errorMessage.value)
+  }
+}
+
+function nativeImportErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message.trim()) return error.message
+  if (
+    error !== null &&
+    typeof error === 'object' &&
+    'message' in error &&
+    typeof error.message === 'string' &&
+    error.message.trim()
+  ) {
+    return error.message
+  }
+  return '暂时无法打开教务系统，请稍后再试'
+}
+
+async function startHubuImport() {
+  if (!nativeHubuImportAvailable || isBusy.value) return
+
+  nativeImporting.value = true
+  try {
+    const capture = await captureHubuCourseTable()
+    if (capture.cancelled) return
+
+    selectedFile.value = captureToHtmlFile(capture)
+    importSource.value = 'hubu'
+    captureSourceUrl.value = capture.sourceUrl ?? ''
+    await previewFile()
+  } catch (error) {
+    const message = nativeImportErrorMessage(error)
+    errorMessage.value = message
+    state.value = 'failed'
+    showFailToast(message)
+  } finally {
+    nativeImporting.value = false
   }
 }
 
@@ -296,9 +346,9 @@ onMounted(loadBuildings)
     <main class="page-content import-content" :style="pageStyle" @focusin="onFieldFocus">
       <header v-reveal="{ from: 'left', distance: 36, stagger: 60 }" class="import-hero">
         <div>
-          <span class="eyebrow">保留文件里的每一个字</span>
-          <h1>先核对原文，再整批导入</h1>
-          <p>文件内容保持只读。你只需要确认建筑和完整教室，最后一次提交全部课程。</p>
+          <span class="eyebrow">密码只留在学校官方页面</span>
+          <h1>从教务系统，把整周课表带回来</h1>
+          <p>安卓 App 可直接采集当前课表；HTML 与 Excel 文件仍然可以照常导入。</p>
         </div>
         <div class="paper-garden" :class="{ busy: isBusy }" aria-hidden="true">
           <span class="paper paper-back"></span>
@@ -307,10 +357,56 @@ onMounted(loadBuildings)
         </div>
       </header>
 
-      <section v-reveal="{ from: 'right', distance: 30, delay: 60 }" class="upload-sheet">
+      <section v-reveal="{ from: 'right', distance: 30, delay: 60 }" class="hubu-import-sheet">
         <header>
           <span>01</span>
-          <div><h2>选择原始课表</h2><p>支持 HTM / HTML / XLS / XLSX</p></div>
+          <div>
+            <small>湖北大学 · 官方教务系统</small>
+            <h2>登录后，一键读取当前课表</h2>
+          </div>
+          <b :class="{ available: nativeHubuImportAvailable }">
+            {{ nativeHubuImportAvailable ? '安卓已就绪' : '需安卓 App' }}
+          </b>
+        </header>
+
+        <ol class="hubu-import-steps">
+          <li><i>1</i><span><strong>进入官方页面</strong><small>学号和密码只在湖北大学页面输入</small></span></li>
+          <li><i>2</i><span><strong>打开学期理论课表</strong><small>先选好学年学期，确认课表已经完整显示</small></span></li>
+          <li><i>3</i><span><strong>点击“导入课表”</strong><small>智行只读取你主动确认的课表表格</small></span></li>
+        </ol>
+
+        <button
+          type="button"
+          class="hubu-import-button"
+          data-testid="hubu-native-import"
+          :disabled="!nativeHubuImportAvailable || isBusy"
+          @click="startHubuImport"
+        >
+          <i v-if="nativeImporting" aria-hidden="true"></i>
+          <span>{{ nativeImporting ? '等待教务系统返回课表' : '进入教务系统并导入' }}</span>
+          <b aria-hidden="true">↗</b>
+        </button>
+
+        <a
+          v-if="!nativeHubuImportAvailable"
+          class="hubu-browser-link"
+          :href="HUBU_ACADEMIC_SYSTEM_URL"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          当前是网页版，可先打开湖北大学教务系统
+        </a>
+
+        <p class="privacy-note">
+          <span aria-hidden="true">✓</span>
+          不读取密码，不导出登录 Cookie；采集内容仍会进入逐行预览，不会直接写入课表。
+        </p>
+      </section>
+
+      <section v-reveal="{ from: 'right', distance: 30, delay: 60 }" class="upload-sheet">
+        <header>
+          <span>02</span>
+          <div><h2>或者选择原始课表文件</h2><p>支持 HTM / HTML / XLS / XLSX</p></div>
         </header>
         <label class="file-picker" :class="{ selected: selectedFile }">
           <input
@@ -322,10 +418,22 @@ onMounted(loadBuildings)
           <span class="file-icon" aria-hidden="true">↥</span>
           <span>
             <strong>{{ selectedFile?.name || '选择一个课表文件' }}</strong>
-            <small>{{ selectedFile ? '原文件会原样用于最终提交' : '单个文件不超过 10MB' }}</small>
+            <small v-if="selectedFile && importSource === 'hubu'">
+              已从湖北大学教务系统安全采集
+            </small>
+            <small v-else>{{ selectedFile ? '原文件会原样用于最终提交' : '单个文件不超过 10MB' }}</small>
           </span>
           <b>{{ selectedFile ? '更换' : '浏览' }}</b>
         </label>
+        <a
+          v-if="captureSourceUrl"
+          class="capture-source"
+          :href="captureSourceUrl"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          来源：{{ captureSourceUrl }}
+        </a>
         <button
           type="button"
           class="preview-button"
@@ -362,7 +470,7 @@ onMounted(loadBuildings)
 
         <section class="candidate-list" aria-label="逐行确认课程">
           <div class="list-heading">
-            <span>02</span>
+            <span>03</span>
             <div><h2>逐行核对</h2><p>上半部分是只读原文，下半部分才是执行映射。</p></div>
           </div>
           <ImportCandidateCard
@@ -445,6 +553,7 @@ onMounted(loadBuildings)
 .paper-garden.busy .paper-front { animation: paper-read 1.45s ease-in-out infinite; }
 
 .upload-sheet,
+.hubu-import-sheet,
 .success-sheet,
 .commit-sheet {
   border: 1px solid var(--fresh-line);
@@ -452,6 +561,165 @@ onMounted(loadBuildings)
   background: var(--fresh-paper);
   box-shadow: 0 16px 38px rgba(59,79,57,.08);
   padding: 18px;
+}
+.hubu-import-sheet {
+  display: grid;
+  gap: 16px;
+  overflow: hidden;
+  border-color: rgba(83, 120, 89, .22);
+  background:
+    radial-gradient(circle at 100% 0, rgba(234, 197, 125, .22), transparent 13rem),
+    linear-gradient(145deg, #fdfcf6, #edf5eb);
+}
+.hubu-import-sheet > header {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 11px;
+}
+.hubu-import-sheet > header > span {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  place-items: center;
+  border-radius: 50%;
+  background: #dfeede;
+  color: #47694e;
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+  font-weight: 900;
+}
+.hubu-import-sheet header small {
+  color: #718074;
+  font-size: 11px;
+  font-weight: 700;
+}
+.hubu-import-sheet h2 {
+  margin: 3px 0 0;
+  color: var(--fresh-ink);
+  font-size: 19px;
+}
+.hubu-import-sheet header > b {
+  border: 1px solid #d8ded4;
+  border-radius: var(--radius-pill);
+  background: rgba(255,255,255,.72);
+  color: #7f877e;
+  font-size: 11px;
+  padding: 6px 9px;
+}
+.hubu-import-sheet header > b.available {
+  border-color: #a8c6aa;
+  background: #dfeede;
+  color: #3f6748;
+}
+.hubu-import-steps {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.hubu-import-steps li {
+  display: grid;
+  min-width: 0;
+  align-content: start;
+  gap: 9px;
+  border: 1px solid rgba(91, 121, 91, .13);
+  border-radius: 16px;
+  background: rgba(255,255,255,.68);
+  padding: 12px;
+}
+.hubu-import-steps li > i {
+  display: grid;
+  width: 27px;
+  height: 27px;
+  place-items: center;
+  border-radius: 50%;
+  background: #608966;
+  color: #fff;
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 900;
+}
+.hubu-import-steps li > span {
+  display: grid;
+  gap: 4px;
+}
+.hubu-import-steps strong {
+  color: var(--fresh-ink);
+  font-size: 13px;
+}
+.hubu-import-steps small {
+  color: var(--fresh-muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+.hubu-import-button {
+  display: grid;
+  min-height: 54px;
+  grid-template-columns: auto auto auto;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  border: 1px solid #567e5e;
+  border-radius: 17px;
+  background: #52775a;
+  box-shadow: 0 13px 24px rgba(63, 98, 71, .17);
+  color: #fff;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 850;
+  padding: 0 17px;
+  transition: transform 300ms var(--fresh-spring), box-shadow 300ms ease, background 300ms ease;
+}
+.hubu-import-button > b {
+  font-size: 19px;
+}
+.hubu-import-button:disabled {
+  border-color: #cbd3c8;
+  background: #e4e8e1;
+  box-shadow: none;
+  color: #7e887d;
+  cursor: not-allowed;
+}
+.hubu-import-button > i {
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(255,255,255,.45);
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+.hubu-browser-link {
+  justify-self: center;
+  color: #4e7055;
+  font-size: 12px;
+  font-weight: 760;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.privacy-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin: 0;
+  color: #607064;
+  font-size: 11px;
+  line-height: 1.55;
+}
+.privacy-note span {
+  display: grid;
+  width: 17px;
+  height: 17px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 50%;
+  background: #d8ead8;
+  color: #42694b;
+  font-size: 10px;
+  font-weight: 900;
 }
 .upload-sheet { display: grid; gap: 14px; }
 .upload-sheet > header,
@@ -471,6 +739,13 @@ onMounted(loadBuildings)
 .file-picker strong { color: var(--fresh-ink); font-size: 14px; overflow-wrap: anywhere; }
 .file-picker small { color: var(--fresh-muted); font-size: 12px; }
 .file-picker > b { border-radius: var(--radius-pill); background: var(--fresh-paper); color: var(--fresh-green-dark); font-size: 12px; padding: 8px 10px; }
+.capture-source {
+  overflow: hidden;
+  color: var(--fresh-muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 .preview-button,
 .commit-sheet button,
@@ -510,13 +785,19 @@ onMounted(loadBuildings)
   .file-picker:hover { border-color: #799c79; background: var(--fresh-mint); transform: translateY(-2px); }
   .preview-button:not(:disabled):hover,
   .commit-sheet button:not(:disabled):hover,
-  .success-sheet button:hover { background: var(--fresh-green); transform: translateY(-2px); }
+  .success-sheet button:hover,
+  .hubu-import-button:not(:disabled):hover {
+    background: var(--fresh-green);
+    transform: translateY(-2px);
+  }
 }
 
 @media (max-width: 580px) {
   .import-hero { grid-template-columns: minmax(0,1fr) 105px; min-height: 235px; padding: 22px 18px; }
   .paper-garden { width: 105px; transform: scale(.74); transform-origin: center; }
   .commit-sheet { grid-template-columns: 1fr; }
+  .hubu-import-steps { grid-template-columns: 1fr; }
+  .hubu-import-steps li { grid-template-columns: auto minmax(0,1fr); }
 }
 
 @media (max-width: 390px) {
@@ -524,12 +805,15 @@ onMounted(loadBuildings)
   .paper-garden { position: absolute; right: -7px; bottom: -15px; }
   .file-picker { grid-template-columns: auto minmax(0,1fr); }
   .file-picker > b { grid-column: 1 / -1; justify-self: stretch; text-align: center; }
+  .hubu-import-sheet > header { grid-template-columns: auto minmax(0,1fr); }
+  .hubu-import-sheet header > b { grid-column: 1 / -1; justify-self: start; margin-left: 51px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .paper-garden,
   .paper-garden b,
   .paper-garden.busy .paper-front,
+  .hubu-import-button > i,
   .preview-button i,
   .commit-sheet button i,
   .success-sheet > span { animation: none; }

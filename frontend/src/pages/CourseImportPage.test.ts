@@ -15,7 +15,10 @@ const mocks = vi.hoisted(() => ({
   commitCourseImport: vi.fn(),
   createCourse: vi.fn(),
   showFailToast: vi.fn(),
-  showSuccessToast: vi.fn()
+  showSuccessToast: vi.fn(),
+  nativeHubuImportAvailable: vi.fn(),
+  captureHubuCourseTable: vi.fn(),
+  captureToHtmlFile: vi.fn()
 }))
 
 vi.mock('vue-router', () => ({
@@ -35,6 +38,13 @@ vi.mock('@/api/courses', () => ({
 
 vi.mock('@/utils/keyboardInset', () => ({
   useKeyboardAwarePage: () => ({ pageStyle: {}, onFieldFocus: vi.fn() })
+}))
+
+vi.mock('@/native/hubuCourseImport', () => ({
+  HUBU_ACADEMIC_SYSTEM_URL: 'https://jwxt.hubu.edu.cn/jsxsd/',
+  supportsNativeHubuCourseImport: mocks.nativeHubuImportAvailable,
+  captureHubuCourseTable: mocks.captureHubuCourseTable,
+  captureToHtmlFile: mocks.captureToHtmlFile
 }))
 
 vi.mock('vant', () => ({
@@ -160,6 +170,13 @@ describe('CourseImportPage', () => {
     ])
     mocks.previewCourseImport.mockResolvedValue(preview)
     mocks.commitCourseImport.mockResolvedValue({ created_count: 2, course_ids: [31, 32] })
+    mocks.nativeHubuImportAvailable.mockReturnValue(false)
+    mocks.captureHubuCourseTable.mockResolvedValue({ cancelled: true })
+    mocks.captureToHtmlFile.mockImplementation((capture: { html: string; filename?: string }) =>
+      new File([capture.html], capture.filename ?? '湖北大学教务系统课表.html', {
+        type: 'text/html'
+      })
+    )
     Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
       value: vi.fn(),
       configurable: true
@@ -177,6 +194,40 @@ describe('CourseImportPage', () => {
     expect(wrapper.text()).toContain('HTM / HTML / XLS / XLSX')
     expect(wrapper.get('[data-testid="commit-import"]').attributes('disabled')).toBeDefined()
     expect(wrapper.text()).toContain('还有 1 门课程需要处理')
+  })
+
+  it('makes the Android-only boundary explicit without exposing a fake web capture action', async () => {
+    const wrapper = await mountPage()
+
+    expect(wrapper.text()).toContain('需安卓 App')
+    expect(wrapper.get('[data-testid="hubu-native-import"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('.hubu-browser-link').attributes('href')).toBe(
+      'https://jwxt.hubu.edu.cn/jsxsd/'
+    )
+    expect(wrapper.text()).toContain('不读取密码，不导出登录 Cookie')
+  })
+
+  it('previews the HTML returned by the native Hubu browser through the existing import pipeline', async () => {
+    mocks.nativeHubuImportAvailable.mockReturnValue(true)
+    const capture = {
+      cancelled: false,
+      filename: '2026-2027-1-湖北大学课表.html',
+      html: '<table><tr><th>星期一</th></tr></table>',
+      sourceUrl: 'https://jwxt.hubu.edu.cn/jsxsd/xskb/xskb_list.do'
+    }
+    const capturedFile = new File([capture.html], capture.filename, { type: 'text/html' })
+    mocks.captureHubuCourseTable.mockResolvedValue(capture)
+    mocks.captureToHtmlFile.mockReturnValue(capturedFile)
+
+    const wrapper = await mountPage()
+    await wrapper.get('[data-testid="hubu-native-import"]').trigger('click')
+    await flushPromises()
+
+    expect(mocks.captureHubuCourseTable).toHaveBeenCalledTimes(1)
+    expect(mocks.captureToHtmlFile).toHaveBeenCalledWith(capture)
+    expect(mocks.previewCourseImport).toHaveBeenCalledWith(capturedFile)
+    expect(wrapper.text()).toContain('已从湖北大学教务系统安全采集')
+    expect(wrapper.get('.capture-source').attributes('href')).toBe(capture.sourceUrl)
   })
 
   it('submits the unchanged original file once with every explicit resolution', async () => {

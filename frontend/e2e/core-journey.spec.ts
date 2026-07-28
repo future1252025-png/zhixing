@@ -104,6 +104,7 @@ test('mobile core journey keeps weeks, locations, sessions, text, and actions tr
   await page.locator('input[name="username"]').fill(username)
   await page.locator('input[name="student_id"]').fill('E2E2026001')
   await page.locator('input[name="password"]').fill(password)
+  await page.locator('input[name="confirm_password"]').fill(password)
   await page.getByRole('button', { name: /创建账号/ }).click()
   await page.waitForURL('**/home')
 
@@ -149,6 +150,13 @@ test('mobile core journey keeps weeks, locations, sessions, text, and actions tr
   expect(coursesAfterConflict.some((course) => course.course_name === '不应写入的冲突课程')).toBe(false)
 
   await page.goto('/courses/import')
+  await expect(page.getByTestId('hubu-native-import')).toBeDisabled()
+  await expect(page.locator('.hubu-import-sheet')).toContainText('需安卓 App')
+  await expect(page.locator('.privacy-note')).toContainText('不读取密码，不导出登录 Cookie')
+  await expect(page.locator('.hubu-browser-link')).toHaveAttribute(
+    'href',
+    'https://jwxt.hubu.edu.cn/jsxsd/'
+  )
   await page.locator('input[type="file"]').setInputFiles(fixturePath)
   await page.getByTestId('preview-import').click()
   await expect(page.getByTestId('raw-location')).toHaveText('教4')
@@ -196,7 +204,8 @@ test('mobile core journey keeps weeks, locations, sessions, text, and actions tr
   const coursePalette = await page.locator('.timetable-course').evaluateAll((cards) =>
     cards.map((card) => ({
       subject: card.querySelector('strong')?.textContent?.trim() ?? '',
-      accent: getComputedStyle(card).getPropertyValue('--course-accent').trim()
+      accent: getComputedStyle(card).getPropertyValue('--course-accent').trim(),
+      background: getComputedStyle(card).backgroundImage
     }))
   )
   const subjectAccents = new Map<string, Set<string>>()
@@ -207,10 +216,17 @@ test('mobile core journey keeps weeks, locations, sessions, text, and actions tr
   }
   expect([...subjectAccents.values()].every((accents) => accents.size === 1)).toBe(true)
   expect(new Set(coursePalette.map((entry) => entry.accent)).size).toBe(subjectAccents.size)
+  expect(new Set(coursePalette.map((entry) => entry.background)).size).toBe(subjectAccents.size)
   const courseCardHeights = await page.locator('.timetable-course').evaluateAll((cards) =>
     cards.map((card) => Math.round(card.getBoundingClientRect().height))
   )
   expect(new Set(courseCardHeights).size).toBe(1)
+  const overflowingCourseCards = await page.locator('.course-content').evaluateAll((cards) =>
+    cards
+      .filter((card) => card.scrollHeight > card.clientHeight + 2)
+      .map((card) => card.getAttribute('aria-label'))
+  )
+  expect(overflowingCourseCards).toEqual([])
   await importedCourseCard.getByText(`教4 · ${fullImportRoom}`).scrollIntoViewIfNeeded()
   await screenshot(page, testInfo, 'course-list.png')
   await assertPageQuality(page)
@@ -237,7 +253,7 @@ test('mobile core journey keeps weeks, locations, sessions, text, and actions tr
       return duration.trim().endsWith('ms') ? value : value * 1000
     }))
   )
-  expect(weekAnimationDuration).toBeGreaterThanOrEqual(700)
+  expect(weekAnimationDuration).toBeGreaterThanOrEqual(1100)
   await expect(page.locator('.timetable-week-stage[data-week="9"]')).toBeVisible()
   expect(await page.evaluate(() => window.scrollY)).toBe(scrollBeforeWeekChange)
   await settleMotion(page)

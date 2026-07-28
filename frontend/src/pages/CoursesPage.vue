@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { showConfirmDialog, showFailToast, showSuccessToast } from 'vant'
 import { useRouter } from 'vue-router'
 
@@ -35,17 +35,28 @@ const loading = ref(true)
 const deletingId = ref<number | null>(null)
 const activeCourse = ref<Course | null>(null)
 const actionSheetVisible = ref(false)
+const timetableGridRef = ref<HTMLElement | null>(null)
+const timetableTransitionFrameRef = ref<HTMLElement | null>(null)
+const courseCardHeight = ref(170)
+const weekStageLockedHeight = ref<number | null>(null)
 const weekTransitionName = ref<'week-forward' | 'week-backward'>('week-forward')
 const errorMessage = ref('')
 const semesterErrorMessage = ref('')
+let weekScrollTop: number | null = null
+let weekScrollRestoreFrame: number | undefined
 const selectedWeek = computed({
   get: () => semesterStore.browsingWeek,
   set: (week: number) => {
     if (week === semesterStore.browsingWeek) return
+    prepareWeekTransition()
     weekTransitionName.value = week > semesterStore.browsingWeek
       ? 'week-forward'
       : 'week-backward'
     semesterStore.setBrowsingWeek(week)
+    void nextTick().then(() => {
+      restoreWeekScrollPosition()
+      scheduleWeekScrollRestore()
+    })
   }
 })
 const weekOptions = computed(() =>
@@ -94,6 +105,9 @@ const todayWeekday = computed(() => {
 // 当前时刻（分钟精度），驱动"此刻正在上的节次"呼吸高亮
 const nowMinutes = ref(getMinutesOfDay())
 let nowTimer: ReturnType<typeof setInterval> | undefined
+let timetableResizeObserver: ResizeObserver | undefined
+let courseHeightFrame: number | undefined
+let observedGridWidth = 0
 
 function getMinutesOfDay(): number {
   const now = new Date()
@@ -240,6 +254,69 @@ function getCourseStyle(course: Course): Record<string, string> {
   }
 }
 
+async function syncCourseCardHeight() {
+  courseCardHeight.value = 170
+  await nextTick()
+  const contents = timetableGridRef.value?.querySelectorAll<HTMLElement>('.course-content')
+  if (!contents?.length) return
+
+  courseCardHeight.value = Math.max(
+    170,
+    ...Array.from(contents, (content) => Math.ceil(content.scrollHeight + 2))
+  )
+}
+
+function scheduleCourseCardHeightSync() {
+  if (courseHeightFrame !== undefined) return
+  courseHeightFrame = window.requestAnimationFrame(() => {
+    courseHeightFrame = undefined
+    void syncCourseCardHeight()
+  })
+}
+
+function prepareWeekTransition() {
+  weekScrollTop = window.scrollY
+  weekStageLockedHeight.value =
+    timetableTransitionFrameRef.value?.getBoundingClientRect().height ?? null
+  if (weekScrollRestoreFrame !== undefined) {
+    window.cancelAnimationFrame(weekScrollRestoreFrame)
+    weekScrollRestoreFrame = undefined
+  }
+}
+
+function restoreWeekScrollPosition() {
+  if (weekScrollTop === null) return
+  window.scrollTo({
+    left: window.scrollX,
+    top: weekScrollTop,
+    behavior: 'auto'
+  })
+}
+
+function scheduleWeekScrollRestore() {
+  if (weekScrollTop === null || weekScrollRestoreFrame !== undefined) return
+  weekScrollRestoreFrame = window.requestAnimationFrame(() => {
+    weekScrollRestoreFrame = undefined
+    restoreWeekScrollPosition()
+  })
+}
+
+function finishWeekTransition() {
+  restoreWeekScrollPosition()
+  weekStageLockedHeight.value = null
+  void nextTick().then(() => {
+    if (weekScrollTop === null) return
+    if (weekScrollRestoreFrame !== undefined) {
+      window.cancelAnimationFrame(weekScrollRestoreFrame)
+    }
+    weekScrollRestoreFrame = window.requestAnimationFrame(() => {
+      weekScrollRestoreFrame = undefined
+      restoreWeekScrollPosition()
+      weekScrollTop = null
+    })
+  })
+}
+
 function openCourseActions(course: Course) {
   activeCourse.value = course
   actionSheetVisible.value = true
@@ -292,6 +369,25 @@ watch(
   }
 )
 
+watch(visibleCourses, () => {
+  void syncCourseCardHeight()
+}, { flush: 'post' })
+
+watch(timetableGridRef, (grid) => {
+  timetableResizeObserver?.disconnect()
+  timetableResizeObserver = undefined
+  observedGridWidth = 0
+  if (!grid || typeof ResizeObserver === 'undefined') return
+
+  timetableResizeObserver = new ResizeObserver(([entry]) => {
+    const width = entry?.contentRect.width ?? 0
+    if (Math.abs(width - observedGridWidth) < 1) return
+    observedGridWidth = width
+    scheduleCourseCardHeightSync()
+  })
+  timetableResizeObserver.observe(grid)
+}, { flush: 'post' })
+
 onMounted(() => {
   void Promise.all([loadCourses(), loadSemester()])
   nowTimer = setInterval(() => {
@@ -301,6 +397,13 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   if (nowTimer) clearInterval(nowTimer)
+  timetableResizeObserver?.disconnect()
+  if (courseHeightFrame !== undefined) {
+    window.cancelAnimationFrame(courseHeightFrame)
+  }
+  if (weekScrollRestoreFrame !== undefined) {
+    window.cancelAnimationFrame(weekScrollRestoreFrame)
+  }
 })
 </script>
 
@@ -435,15 +538,26 @@ onBeforeUnmount(() => {
           <span><i></i> {{ courseCountText }}</span>
         </header>
 
-        <Transition :name="weekTransitionName">
-          <div
-            :key="selectedWeek"
-            class="timetable-week-stage"
-            :data-week="selectedWeek"
-            @touchstart.passive="handleWeekTouchStart"
-            @touchend.passive="handleWeekTouchEnd"
+        <div
+          ref="timetableTransitionFrameRef"
+          class="timetable-transition-frame"
+          :style="weekStageLockedHeight === null
+            ? undefined
+            : { minHeight: `${weekStageLockedHeight}px` }"
+        >
+          <Transition
+            :name="weekTransitionName"
+            @after-enter="finishWeekTransition"
+            @enter-cancelled="finishWeekTransition"
           >
-            <div class="timetable-viewport" aria-label="完整展示周一到周日的周课表">
+            <div
+              :key="selectedWeek"
+              class="timetable-week-stage"
+              :data-week="selectedWeek"
+              @touchstart.passive="handleWeekTouchStart"
+              @touchend.passive="handleWeekTouchEnd"
+            >
+              <div class="timetable-viewport" aria-label="完整展示周一到周日的周课表">
               <div class="week-head" aria-hidden="true">
                 <div class="time-head"><span>时间</span></div>
                 <div
@@ -464,7 +578,11 @@ onBeforeUnmount(() => {
                 </div>
               </div>
 
-              <div class="timetable-grid">
+              <div
+                ref="timetableGridRef"
+                class="timetable-grid"
+                :style="{ '--course-card-height': `${courseCardHeight}px` }"
+              >
                 <section
                   v-for="slot in timeSlots"
                   :key="slot.section"
@@ -530,9 +648,10 @@ onBeforeUnmount(() => {
                   </div>
                 </section>
               </div>
+              </div>
             </div>
-          </div>
-        </Transition>
+          </Transition>
+        </div>
       </section>
 
       <van-action-sheet
@@ -551,6 +670,7 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .courses-page {
+  overflow-anchor: none;
   background:
     radial-gradient(circle at 100% 0%, rgba(153, 166, 215, 0.18), transparent 24rem),
     linear-gradient(180deg, #f8f8f2 0%, #eef2f7 46%, #e7edf6 100%);
@@ -984,6 +1104,11 @@ onBeforeUnmount(() => {
   overflow: visible;
 }
 
+.timetable-transition-frame {
+  position: relative;
+  overflow-anchor: none;
+}
+
 .timetable-week-stage {
   min-width: 0;
   transform-origin: center top;
@@ -1003,9 +1128,9 @@ onBeforeUnmount(() => {
 }
 
 .timetable-grid {
+  --course-card-height: 170px;
   display: grid;
-  /* 行高按内容自适应：稀疏课表整页更短，同格双课不再爆行 */
-  grid-auto-rows: minmax(96px, auto);
+  grid-auto-rows: minmax(var(--course-card-height), auto);
   width: 100%;
   background: #eef1f7;
 }
@@ -1099,7 +1224,7 @@ onBeforeUnmount(() => {
 
 .time-cell {
   display: grid;
-  min-height: 170px;
+  min-height: var(--course-card-height);
   align-content: center;
   justify-items: center;
   background: #e5eaf2;
@@ -1135,9 +1260,9 @@ onBeforeUnmount(() => {
 .course-cell {
   position: relative;
   display: grid;
-  min-height: 170px;
+  min-height: var(--course-card-height);
   align-content: stretch;
-  grid-auto-rows: minmax(0, 1fr);
+  grid-auto-rows: var(--course-card-height);
   gap: 3px;
   background: rgba(249, 250, 253, 0.78);
   padding: clamp(2px, 0.7vw, 5px);
@@ -1228,17 +1353,17 @@ onBeforeUnmount(() => {
   box-sizing: border-box;
   height: 100%;
   min-width: 0;
-  border: 1px solid color-mix(in srgb, var(--course-accent) 48%, #dbe3ee);
+  border: 1px solid color-mix(in srgb, var(--course-accent) 84%, #dbe3ee);
   border-radius: clamp(7px, 1.5vw, 12px);
   background:
     linear-gradient(
       155deg,
-      color-mix(in srgb, var(--course-accent) 51%, #ffffff),
-      color-mix(in srgb, var(--course-accent) 35%, #edf3fb)
+      color-mix(in srgb, var(--course-accent) 66%, #ffffff),
+      color-mix(in srgb, var(--course-accent) 50%, #f4f7fb)
     );
   box-shadow:
     inset 0 0 0 1px rgba(255, 255, 255, 0.42),
-    0 4px 10px color-mix(in srgb, var(--course-accent) 14%, transparent);
+    0 4px 10px color-mix(in srgb, var(--course-accent) 22%, transparent);
   transition:
     box-shadow 280ms var(--fresh-spring),
     transform 280ms var(--fresh-spring);
@@ -1277,36 +1402,36 @@ onBeforeUnmount(() => {
 }
 
 .course-content strong {
+  color: color-mix(in srgb, var(--course-accent) 18%, #172b21);
   font-size: clamp(10px, 1.8vw, 14px);
   line-height: 1.4;
   font-weight: 700;
   overflow-wrap: anywhere;
+  text-wrap: balance;
 }
 
 .compact-location {
-  display: flex;
+  display: block;
   width: 100%;
   min-width: 0;
-  align-items: flex-start;
-  justify-content: center;
-  gap: 1px;
   margin-top: auto;
-  color: color-mix(in srgb, var(--course-accent) 52%, var(--fresh-ink));
+  color: color-mix(in srgb, var(--course-accent) 38%, #21362a);
   font-size: clamp(9px, 1.4vw, 12px);
-  line-height: 1.3;
+  line-height: 1.35;
   text-align: center;
+  text-wrap: pretty;
 }
 
 .location-mark {
-  flex: 0 0 auto;
+  margin-right: 1px;
   font-weight: 800;
 }
 
 .compact-location > span:last-child {
-  min-width: 0;
   font-size: inherit;
   font-weight: 600;
-  overflow-wrap: anywhere;
+  overflow-wrap: break-word;
+  word-break: normal;
 }
 
 .course-content .exception-time {
@@ -1349,13 +1474,14 @@ onBeforeUnmount(() => {
 .week-backward-enter-active,
 .week-backward-leave-active {
   transition:
-    opacity 640ms ease,
-    transform 760ms var(--fresh-spring);
+    opacity 900ms ease,
+    transform 1150ms var(--fresh-spring);
 }
 
 .week-forward-leave-active,
 .week-backward-leave-active {
   position: absolute;
+  top: 0;
   z-index: 1;
   right: 0;
   left: 0;

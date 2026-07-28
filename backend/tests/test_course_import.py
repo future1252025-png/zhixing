@@ -168,6 +168,53 @@ def test_preview_html_course_import_returns_parsed_items(client: TestClient) -> 
     assert data["candidates"][1]["source"]["raw_location"] == "教3-205"
 
 
+def test_preview_native_capture_preserves_full_hubu_location(client: TestClient) -> None:
+    html = """
+    <!doctype html>
+    <html>
+      <body>
+        <table>
+          <tr>
+            <th>节次</th><th>星期一</th><th>星期二</th><th>星期三</th>
+            <th>星期四</th><th>星期五</th>
+          </tr>
+          <tr>
+            <td>第一二节<br>08:00-09:40</td>
+            <td></td><td></td>
+            <td>
+              计算机组成原理<br>陈老师<br>1-16(周)[01-02节]<br>
+              湖北大学(武昌主校区)-教4<br>教4-211
+            </td>
+            <td></td><td></td>
+          </tr>
+        </table>
+      </body>
+    </html>
+    """
+
+    response = client.post(
+        "/api/courses/import/preview",
+        files={
+            "file": (
+                "湖北大学教务系统课表.html",
+                html.encode("utf-8"),
+                "text/html",
+            )
+        },
+        headers=auth_headers(client),
+    )
+
+    assert response.status_code == 200
+    item = response.json()["candidates"][0]
+    assert item["course_name"] == "计算机组成原理"
+    assert item["weekday"] == 3
+    assert item["source"]["raw_location"] == (
+        "湖北大学(武昌主校区)-教4\n教4-211"
+    )
+    assert item["suggested_building_name"] == "湖北大学(武昌主校区)-教4"
+    assert item["suggested_room_name"] == "教4-211"
+
+
 def test_preview_xlsx_course_import_returns_parsed_items(client: TestClient) -> None:
     workbook = Workbook()
     sheet = workbook.active

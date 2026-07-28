@@ -2,12 +2,17 @@ import os
 import sys
 from datetime import datetime
 from pathlib import Path
+from tempfile import gettempdir
 from zoneinfo import ZoneInfo
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BACKEND_ROOT))
-DATABASE_PATH = BACKEND_ROOT / ".pytest_cache" / "campusmind-e2e.db"
+DATABASE_PATH = (
+    Path(os.environ.get("CAMPUSMIND_E2E_DATA_DIR", gettempdir()))
+    / "campusmind-e2e"
+    / "campusmind-e2e.db"
+)
 DATABASE_PATH.parent.mkdir(parents=True, exist_ok=True)
 for suffix in ("", "-wal", "-shm"):
     Path(f"{DATABASE_PATH}{suffix}").unlink(missing_ok=True)

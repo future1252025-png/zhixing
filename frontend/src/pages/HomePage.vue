@@ -855,6 +855,7 @@ onUnmounted(() => {
 .note-blue { background: var(--fresh-sky); }
 .note-yellow { background: var(--cm-amber-soft); }
 .note-lilac { background: var(--fresh-lilac); }
+.note-lilac small { color: #314438; }
 
 .search-sheet,
 .map-sheet {

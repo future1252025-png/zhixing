@@ -260,6 +260,11 @@ describe('course helpers', () => {
       ...numberedTeachingBuildingCourse,
       building: { ...baseCourse.building, name: '4号教学楼' }
     }
+    const longTrainingRoomCourse = {
+      ...baseCourse,
+      building: { ...baseCourse.building, name: '综合实训大楼' },
+      room_name: '实训大楼413-418数据中国实验室2-3'
+    }
 
     expect(formatCourseLocation(course)).toBe('湖北大学(武昌主校区)-教4 · 教4-211')
     expect(formatTimetableCourseLocation(course)).toBe('教4-211')
@@ -269,6 +274,9 @@ describe('course helpers', () => {
     expect(formatTimetableCourseLocation(numberedTeachingBuildingCourse)).toBe('教3-205')
     expect(formatTimetableCourseLocation(mismatchedTeachingBuildingCourse)).toBe(
       '4号教学楼 · 教3-205'
+    )
+    expect(formatTimetableCourseLocation(longTrainingRoomCourse)).toBe(
+      '实训大楼 413-418 · 数据中国实验室 2-3'
     )
   })
 

@@ -18,10 +18,13 @@ const viewport = {
   width: Number.parseInt(process.env.E2E_VIEWPORT_WIDTH ?? '390', 10),
   height: Number.parseInt(process.env.E2E_VIEWPORT_HEIGHT ?? '844', 10)
 }
+const reuseExistingServer = process.env.E2E_REUSE_SERVER === 'true'
 
 export default defineConfig({
   testDir: './e2e',
-  outputDir: './test-results',
+  // Keep screenshots/traces outside Vite's frontend root. Writing artifacts
+  // under frontend/ can trigger a dev-server full reload during the journey.
+  outputDir: resolve(frontendDir, '../.e2e-artifacts/test-results'),
   fullyParallel: false,
   workers: 1,
   retries: 0,
@@ -39,14 +42,14 @@ export default defineConfig({
       command: `"${python}" tools/run_e2e_server.py`,
       cwd: backendDir,
       url: 'http://127.0.0.1:8010/health',
-      reuseExistingServer: false,
+      reuseExistingServer,
       timeout: 120_000
     },
     {
-      command: 'npm run dev:e2e',
+      command: 'npm run serve:e2e',
       cwd: frontendDir,
       url: 'http://127.0.0.1:5179',
-      reuseExistingServer: false,
+      reuseExistingServer,
       timeout: 120_000
     }
   ],

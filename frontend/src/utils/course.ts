@@ -63,6 +63,15 @@ function normalizeLocationPart(value: string): string {
   return value.replace(/[\s·()（）\-—_]/g, '').toLocaleLowerCase('zh-Hans-CN')
 }
 
+function formatTimetableRoomName(room: string): string {
+  return room
+    .trim()
+    .replace(/([\p{Script=Han}])(?=\d{2,4}\s*[-—]\s*\d{2,4})/gu, '$1 ')
+    .replace(/(\d{2,4}\s*[-—]\s*\d{2,4})(?=\p{Script=Han})/gu, '$1 · ')
+    .replace(/(实验室|教室|体育馆|体育场|球场)(?=\d)/gu, '$1 ')
+    .replace(/\s{2,}/g, ' ')
+}
+
 function roomNamesTeachingBuilding(building: string, room: string): boolean {
   const buildingNumber = building.match(/(?:^|\D)(\d+)\s*号?\s*教学楼/u)?.[1]
   if (!buildingNumber) return false
@@ -78,13 +87,22 @@ export function formatTimetableCourseLocation(
   course: Pick<Course, 'building' | 'room_name'>
 ): string {
   const building = compactBuildingName(course.building.name)
-  const room = course.room_name.trim()
+  const rawRoom = course.room_name.trim()
+  const room = formatTimetableRoomName(rawRoom)
   const normalizedBuilding = normalizeLocationPart(building)
-  const normalizedRoom = normalizeLocationPart(room)
+  const normalizedRoom = normalizeLocationPart(rawRoom)
+  const normalizedBuildingWithoutGeneralPrefix = normalizeLocationPart(
+    building.replace(/^综合(?=.{4,}$)/u, '')
+  )
 
   if (
     (normalizedBuilding && normalizedRoom.includes(normalizedBuilding)) ||
-    roomNamesTeachingBuilding(building, room)
+    (
+      normalizedBuildingWithoutGeneralPrefix &&
+      normalizedBuildingWithoutGeneralPrefix !== normalizedBuilding &&
+      normalizedRoom.includes(normalizedBuildingWithoutGeneralPrefix)
+    ) ||
+    roomNamesTeachingBuilding(building, rawRoom)
   ) {
     return room
   }
@@ -213,23 +231,22 @@ export function buildCourseCreateQuery(
 }
 
 /**
- * 课程色策展调色板：从「清新自然」体系派生的 12 个中等明度低饱和色。
- * 消费端（CourseCard）会用 color-mix 与白/墨混出底色与文字色，
- * 因此这里保持中等深度、色相拉开即可。
+ * 课程色策展调色板：保留自然感，同时拉开蓝、绿、橙、紫、红等色相。
+ * 色值需要有足够饱和度，经过课表卡片的白色混合后仍可快速区分科目。
  */
 export const COURSE_ACCENT_PALETTE = [
-  '#4f7d58', // 松绿
-  '#7ca06b', // 叶绿
-  '#8a9a4e', // 橄榄
-  '#b8863e', // 赭金
-  '#bf7a55', // 陶土
-  '#b56d76', // 玫瑰
-  '#9784b5', // 丁香
-  '#6f9faa', // 雾蓝
-  '#4f8577', // 湖绿
-  '#6d84b0', // 远山蓝
-  '#7d8a97', // 青灰
-  '#8c7a5b' // 麦茶棕
+  '#2f78d0', // 湖蓝
+  '#249b75', // 翡翠
+  '#d38a24', // 琥珀
+  '#9a5bc4', // 紫藤
+  '#d15f68', // 山茶红
+  '#258ca6', // 青蓝
+  '#72a33c', // 新叶绿
+  '#c44f8a', // 木槿
+  '#665fc2', // 鸢尾蓝
+  '#d06e3f', // 陶橙
+  '#4f6dad', // 远山蓝
+  '#3d9250' // 森林绿
 ] as const
 
 function hashSubjectName(subject: string): number {
