@@ -157,22 +157,39 @@ body {
 
 .van-nav-bar {
   position: sticky;
-  top: 0;
+  top: env(safe-area-inset-top, 0px);
   z-index: 100;
-  width: min(100%, var(--page-max));
+  width: min(calc(100% - 32px), calc(var(--page-max) - 32px));
   height: auto;
   min-height: var(--nav-height);
-  margin: 0 auto;
-  /* Push the bar clear of the status bar / notch on cover-viewport devices */
-  padding-top: env(safe-area-inset-top);
-  border-bottom: 1px solid rgba(79, 125, 88, 0.09);
-  background: rgba(250, 251, 246, 0.88);
-  box-shadow: none;
-  backdrop-filter: blur(16px);
+  margin: 10px auto 0;
+  overflow: hidden;
+  padding-top: 0;
+  border: 1px solid rgba(79, 125, 88, 0.12);
+  border-radius: 19px 19px 14px 19px;
+  background:
+    radial-gradient(circle at 88% -55%, rgba(135, 168, 120, 0.2), transparent 48%),
+    rgba(255, 253, 248, 0.9);
+  box-shadow:
+    0 9px 26px rgba(49, 72, 49, 0.075),
+    inset 0 1px rgba(255, 255, 255, 0.86);
+  backdrop-filter: blur(18px) saturate(1.08);
 }
 
 .van-nav-bar::after {
   display: none;
+}
+
+.van-nav-bar::before {
+  position: absolute;
+  right: 18px;
+  bottom: 0;
+  left: 18px;
+  height: 2px;
+  border-radius: var(--radius-pill);
+  background: linear-gradient(90deg, transparent, var(--fresh-leaf), transparent);
+  content: "";
+  opacity: 0.42;
 }
 
 .van-nav-bar__content {
@@ -180,15 +197,54 @@ body {
 }
 
 .van-nav-bar__title {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
   color: var(--fresh-ink);
-  font-size: 16px;
+  font-family: var(--font-serif);
+  font-size: 19px;
   font-weight: 700;
-  letter-spacing: 0.01em;
+  letter-spacing: 0.025em;
+}
+
+.van-nav-bar__title::before {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-radius: 50% 50% 50% 22%;
+  background: var(--fresh-leaf);
+  box-shadow: 0 0 0 5px rgba(135, 168, 120, 0.12);
+  content: "";
+  transform: rotate(-18deg);
 }
 
 .van-nav-bar .van-icon,
 .van-nav-bar__text {
   color: var(--fresh-green-dark);
+}
+
+.van-nav-bar .van-icon-arrow-left {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border: 1px solid rgba(79, 125, 88, 0.11);
+  border-radius: 12px;
+  background: rgba(231, 240, 227, 0.76);
+  font-size: 18px;
+  transition:
+    background 240ms var(--fresh-spring),
+    transform 240ms var(--fresh-spring);
+}
+
+.van-nav-bar__left {
+  padding: 0 11px;
+}
+
+.van-nav-bar__left:active .van-icon-arrow-left {
+  background: var(--fresh-mint);
+  transform: scale(0.92);
 }
 
 /* 路由转场：离场一律快出仅透明度；进层从右滑入、返回从左滑入，tab 互切/同层只淡入 */
