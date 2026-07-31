@@ -20,12 +20,12 @@ defineProps<{
     </header>
     <div class="summary-numbers">
       <span><small>识别总数</small><b>{{ total }}</b></span>
-      <span><small>已解决</small><b>{{ resolved }}</b></span>
-      <span :class="{ warning: unresolved }"><small>待处理</small><b>{{ unresolved }}</b></span>
+      <span><small>可导入</small><b>{{ resolved }}</b></span>
+      <span :class="{ warning: unresolved }"><small>解析异常</small><b>{{ unresolved }}</b></span>
       <span :class="{ danger: conflicts }"><small>冲突</small><b>{{ conflicts }}</b></span>
     </div>
-    <p v-if="ready"><i aria-hidden="true">✓</i> 全部校验通过，可以整批导入</p>
-    <p v-else><i aria-hidden="true">!</i> 请处理所有标记项后再导入</p>
+    <p v-if="ready"><i aria-hidden="true">✓</i> 核心排课信息完整，可以整批导入</p>
+    <p v-else><i aria-hidden="true">!</i> 部分课程的时间等核心信息无法识别</p>
   </section>
 </template>
 

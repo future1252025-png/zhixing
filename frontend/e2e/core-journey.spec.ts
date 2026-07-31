@@ -8,7 +8,6 @@ const fixturePath = resolve(currentDir, 'fixtures/import-schedule.html')
 const username = 'e2e_student'
 const password = 'e2e-pass-2026'
 const fullManualRoom = '东区三层 A101 交互设计实验室'
-const fullImportRoom = 'A座四层 423-425 数据中国实验室 1'
 
 async function settleMotion(page: Page): Promise<void> {
   await page.waitForTimeout(1100)
@@ -159,16 +158,11 @@ test('mobile core journey keeps weeks, locations, sessions, text, and actions tr
   )
   await page.locator('input[type="file"]').setInputFiles(fixturePath)
   await page.getByTestId('preview-import').click()
-  await expect(page.getByTestId('raw-location')).toHaveText('教4')
-  await page.getByTestId('raw-location').scrollIntoViewIfNeeded()
-  await screenshot(page, testInfo, 'import-needs-resolution.png')
-  await page.locator('input[name="room_name"]').fill(fullImportRoom)
-  const buildingTrigger = page.locator('.candidate-card .building-picker .picker-trigger')
-  if ((await buildingTrigger.innerText()).includes('请选择建筑')) {
-    await buildingTrigger.click()
-    await page.locator('.picker-sheet .sheet-search input').fill('教4')
-    await page.locator('.picker-sheet .sheet-option', { hasText: '教4' }).first().click()
-  }
+  const importPreview = page.locator('.candidate-preview').filter({ hasText: '自然语言处理' })
+  await expect(importPreview.getByText('教4', { exact: true })).toBeVisible()
+  await expect(importPreview).toContainText('地点会照原文导入，不影响课表查看')
+  await importPreview.scrollIntoViewIfNeeded()
+  await screenshot(page, testInfo, 'import-direct-preview.png')
   await expect(page.getByTestId('commit-import')).toBeEnabled()
   await page.getByTestId('commit-import').click()
   await expect(page.getByText('1 门课程已完整导入')).toBeVisible()
@@ -180,7 +174,7 @@ test('mobile core journey keeps weeks, locations, sessions, text, and actions tr
   await expect(manualCourseCard).toHaveCount(1)
   await expect(importedCourseCard).toHaveCount(1)
   await expect(manualCourseCard.getByText(`国际教育学院 · ${fullManualRoom}`)).toBeVisible()
-  await expect(importedCourseCard.getByText(`教4 · ${fullImportRoom}`)).toBeVisible()
+  await expect(importedCourseCard.getByText('教4', { exact: true })).toBeVisible()
   await expect(manualCourseCard.locator('time')).toHaveText('09:00—10:40')
   await expect(importedCourseCard.locator('time')).toHaveCount(0)
   await expect(page.locator('.course-place-index')).toHaveCount(0)
@@ -227,14 +221,12 @@ test('mobile core journey keeps weeks, locations, sessions, text, and actions tr
       .map((card) => card.getAttribute('aria-label'))
   )
   expect(overflowingCourseCards).toEqual([])
-  await importedCourseCard.getByText(`教4 · ${fullImportRoom}`).scrollIntoViewIfNeeded()
+  await importedCourseCard.getByText('教4', { exact: true }).scrollIntoViewIfNeeded()
   await screenshot(page, testInfo, 'course-list.png')
   await assertPageQuality(page)
 
   await importedCourseCard.locator('.course-content').click()
-  await expect(page.locator('.van-action-sheet__description')).toHaveText(
-    `湖北大学(武昌主校区)-教4 · ${fullImportRoom}`
-  )
+  await expect(page.locator('.van-action-sheet__description')).toHaveText('教4')
   await page.getByRole('button', { name: /查看地点/ }).click()
   await page.waitForURL('**/buildings/**')
   await page.goBack()

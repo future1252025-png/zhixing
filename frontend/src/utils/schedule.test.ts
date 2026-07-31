@@ -57,11 +57,47 @@ describe('schedule helpers', () => {
       code: 'course_location_incomplete',
       message: 'location missing',
       fields: ['building_id', 'room_name'],
-      details: { course_id: 18, course_name: '软件工程' }
+      details: {
+        course_id: 18,
+        course_name: '软件工程',
+        missing_fields: ['building_id', 'room_name']
+      }
     })).toMatchObject({
       courseId: 18,
       courseName: '软件工程',
       title: '“软件工程”地点不完整'
+    })
+  })
+
+  it('explains exactly which imported location field is needed for routing', () => {
+    expect(toSchedulePageError({
+      status: 409,
+      code: 'course_location_incomplete',
+      message: 'location missing',
+      fields: ['building_id'],
+      details: {
+        course_id: 18,
+        course_name: '软件工程',
+        missing_fields: ['building_id']
+      }
+    })).toMatchObject({
+      title: '“软件工程”地图地点未匹配',
+      message: '请为这门课选择地图上的上课建筑，再重新生成出发建议。'
+    })
+
+    expect(toSchedulePageError({
+      status: 409,
+      code: 'course_location_incomplete',
+      message: 'room missing',
+      fields: ['room_name'],
+      details: {
+        course_id: 18,
+        course_name: '软件工程',
+        missing_fields: ['room_name']
+      }
+    })).toMatchObject({
+      title: '“软件工程”教室信息不完整',
+      message: '请补全这门课的教室信息，再重新生成出发建议。'
     })
   })
 

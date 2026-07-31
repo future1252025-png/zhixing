@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { showFailToast } from 'vant'
 import { useRouter } from 'vue-router'
 
 import type { Building } from '@/api/buildings'
@@ -178,6 +179,11 @@ function openNextCourseChat() {
     router.push('/courses/import')
     return
   }
+  if (!target.buildingId || !target.buildingName) {
+    showFailToast('这个上课地点还未匹配校园地图，请先补全地点后再打开')
+    if (nextCourse.value) openCourseEdit(nextCourse.value.id)
+    return
+  }
   openBuildingChat({ id: target.buildingId, name: target.buildingName }, target.roomName)
 }
 
@@ -247,7 +253,7 @@ onUnmounted(() => {
               <small>登录成功 · 校园路线已接上</small>
               <strong>{{ loginWelcomeSnapshot?.courseName || '欢迎回来，慢慢开始今天' }}</strong>
               <p v-if="loginWelcomeSnapshot">
-                {{ loginWelcomeSnapshot.startTime }} · {{ loginWelcomeSnapshot.buildingName }} · {{ loginWelcomeSnapshot.roomName }} · 点我看课表
+                {{ loginWelcomeSnapshot.startTime }} · {{ [loginWelcomeSnapshot.buildingName, loginWelcomeSnapshot.roomName].filter(Boolean).join(' · ') }} · 点我看课表
               </p>
               <p v-else>课表、地点和出发建议已经准备好了。</p>
             </div>

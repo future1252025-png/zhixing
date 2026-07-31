@@ -31,13 +31,16 @@ function course(overrides: Partial<Course>): Course {
     end_time: '10:40',
     building_id: 2,
     room_name: '东区三层 A101',
+    source_location: null,
     teacher: null,
     weeks: '4',
     source_kind: 'manual',
     needs_location_review: false,
     created_at: '2026-09-01T00:00:00Z',
     ...rest,
-    building: building ?? { id: 2, name: '综合教学楼', type: '教学楼' }
+    building: Object.prototype.hasOwnProperty.call(overrides, 'building')
+      ? building ?? null
+      : { id: 2, name: '综合教学楼', type: '教学楼' }
   }
 }
 
@@ -123,6 +126,27 @@ describe('HomePage', () => {
     expect(wrapper.text()).toContain('真实周课程')
     expect(wrapper.text()).toContain('综合教学楼 · 东区三层 A101')
     expect(wrapper.text()).not.toContain('浏览周课程')
+    wrapper.unmount()
+  })
+
+  it('opens course editing instead of an invalid building route for an unmapped location', async () => {
+    vi.mocked(getCourses).mockResolvedValue([
+      course({
+        id: 5,
+        course_name: '地图未收录课程',
+        building_id: null,
+        building: null,
+        source_location: '创新创业中心西区 302',
+        needs_location_review: true
+      })
+    ])
+
+    const wrapper = await mountHome()
+    const router = wrapper.vm.$router
+    await wrapper.get('.home-next-course .course-card__main').trigger('click')
+    await flushPromises()
+
+    expect(router.currentRoute.value.path).toBe('/courses/5/edit')
     wrapper.unmount()
   })
 

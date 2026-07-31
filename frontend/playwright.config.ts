@@ -19,6 +19,7 @@ const viewport = {
   height: Number.parseInt(process.env.E2E_VIEWPORT_HEIGHT ?? '844', 10)
 }
 const reuseExistingServer = process.env.E2E_REUSE_SERVER === 'true'
+const browserChannel = process.env.E2E_BROWSER_CHANNEL
 
 export default defineConfig({
   testDir: './e2e',
@@ -58,7 +59,8 @@ export default defineConfig({
       name: 'mobile-chromium',
       use: {
         ...devices['Desktop Chrome'],
-        viewport
+        viewport,
+        channel: browserChannel
       }
     }
   ]

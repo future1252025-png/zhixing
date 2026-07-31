@@ -1,12 +1,10 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 import { showFailToast } from 'vant'
 import { useRouter } from 'vue-router'
 
-import type { Building } from '@/api/buildings'
 import { commitCourseImport, previewCourseImport } from '@/api/courses'
 import { extractBusinessError } from '@/api/errors'
-import ImportCandidateCard from '@/components/import/ImportCandidateCard.vue'
 import ImportSummary from '@/components/import/ImportSummary.vue'
 import {
   captureHubuCourseTable,
@@ -14,14 +12,11 @@ import {
   HUBU_ACADEMIC_SYSTEM_URL,
   supportsNativeHubuCourseImport
 } from '@/native/hubuCourseImport'
-import { useBuildingsStore } from '@/stores/buildings'
 import { useCoursesStore } from '@/stores/courses'
 import type {
   ImportCandidate,
   ImportIssue,
-  ImportPreviewResponse,
-  ImportResolution,
-  ImportResolutionDraft
+  ImportPreviewResponse
 } from '@/types/courseImport'
 import { useKeyboardAwarePage } from '@/utils/keyboardInset'
 import { goBack } from '@/utils/navigation'
@@ -36,15 +31,11 @@ type ImportPageState =
   | 'failed'
 
 const LOCATION_ERROR_CODES = new Set(['building_unrecognized', 'room_missing'])
-const LOCATION_PLACEHOLDERS = new Set(['待确认教室', '待确认', '未知', '暂无'])
 
 const router = useRouter()
-const buildingsStore = useBuildingsStore()
 const coursesStore = useCoursesStore()
-const buildings = ref<Building[]>([])
 const selectedFile = ref<File | null>(null)
 const preview = ref<ImportPreviewResponse | null>(null)
-const resolutions = ref<Record<string, ImportResolutionDraft>>({})
 const serverIssues = ref<Record<string, ImportIssue[]>>({})
 const highlightedRowRefs = ref<string[]>([])
 const state = ref<ImportPageState>('idle')
@@ -58,7 +49,7 @@ const { pageStyle, onFieldFocus } = useKeyboardAwarePage({ basePaddingPx: 34 })
 
 const candidates = computed(() => preview.value?.candidates ?? [])
 const resolvedCount = computed(() =>
-  candidates.value.filter((candidate) => isCandidateResolved(candidate)).length
+  candidates.value.filter((candidate) => isCandidateImportable(candidate)).length
 )
 const unresolvedCount = computed(() => candidates.value.length - resolvedCount.value)
 const conflictCount = computed(() =>
@@ -92,23 +83,11 @@ function hasBlockingSourceIssue(candidate: ImportCandidate): boolean {
   return candidate.errors.some((issue) => !LOCATION_ERROR_CODES.has(issue.code))
 }
 
-function isConfirmedRoom(roomName: string): boolean {
-  const room = roomName.trim()
-  return room.length > 0 && room.length <= 120 && !LOCATION_PLACEHOLDERS.has(room)
+function isCandidateImportable(candidate: ImportCandidate): boolean {
+  return hasParsedCourse(candidate) && !hasBlockingSourceIssue(candidate)
 }
 
-function isCandidateResolved(candidate: ImportCandidate): boolean {
-  const resolution = resolutions.value[candidate.row_ref]
-  return Boolean(
-    hasParsedCourse(candidate) &&
-      !hasBlockingSourceIssue(candidate) &&
-      resolution?.building_id &&
-      buildings.value.some((building) => building.id === resolution.building_id) &&
-      isConfirmedRoom(resolution.room_name)
-  )
-}
-
-function syncResolutionState() {
+function syncPreviewState() {
   if (!preview.value || state.value === 'previewing' || state.value === 'committing') return
   if (state.value === 'success') return
   state.value = canCommit.value ? 'ready' : 'needs_resolution'
@@ -116,7 +95,6 @@ function syncResolutionState() {
 
 function resetPreview() {
   preview.value = null
-  resolutions.value = {}
   serverIssues.value = {}
   highlightedRowRefs.value = []
   errorMessage.value = ''
@@ -132,18 +110,6 @@ function handleFileChange(event: Event) {
   state.value = 'idle'
 }
 
-function buildInitialResolutions(result: ImportPreviewResponse) {
-  resolutions.value = Object.fromEntries(
-    result.candidates.map((candidate) => [
-      candidate.row_ref,
-      {
-        building_id: candidate.suggested_building_id,
-        room_name: candidate.suggested_room_name ?? ''
-      }
-    ])
-  )
-}
-
 async function previewFile() {
   if (!selectedFile.value) {
     showFailToast('请先选择课表文件')
@@ -154,13 +120,12 @@ async function previewFile() {
   try {
     const result = await previewCourseImport(selectedFile.value)
     preview.value = result
-    buildInitialResolutions(result)
     if (result.candidates.length === 0) {
       errorMessage.value = '文件中没有识别到课程，请检查文件内容。'
       state.value = 'failed'
       return
     }
-    syncResolutionState()
+    syncPreviewState()
   } catch (error) {
     errorMessage.value = extractBusinessError(error).message
     state.value = 'failed'
@@ -194,6 +159,7 @@ async function startHubuImport() {
     importSource.value = 'hubu'
     captureSourceUrl.value = capture.sourceUrl ?? ''
     await previewFile()
+    if (canCommit.value) await commitImport()
   } catch (error) {
     const message = nativeImportErrorMessage(error)
     errorMessage.value = message
@@ -202,17 +168,6 @@ async function startHubuImport() {
   } finally {
     nativeImporting.value = false
   }
-}
-
-function updateResolution(rowRef: string, resolution: ImportResolutionDraft) {
-  resolutions.value = { ...resolutions.value, [rowRef]: resolution }
-  if (serverIssues.value[rowRef]) {
-    const { [rowRef]: _removed, ...remaining } = serverIssues.value
-    serverIssues.value = remaining
-    highlightedRowRefs.value = highlightedRowRefs.value.filter((item) => item !== rowRef)
-    if (Object.keys(remaining).length === 0) errorMessage.value = ''
-  }
-  syncResolutionState()
 }
 
 function issueMessageFromConflict(value: Record<string, unknown>): string {
@@ -291,15 +246,22 @@ async function focusFirstProblem(rowRefs: string[]) {
   })
 }
 
-function buildCommitResolutions(): ImportResolution[] {
-  return candidates.value.map((candidate) => {
-    const resolution = resolutions.value[candidate.row_ref]!
-    return {
-      row_ref: candidate.row_ref,
-      building_id: Number(resolution.building_id),
-      room_name: resolution.room_name.trim()
-    }
-  })
+function candidateBlockingIssues(candidate: ImportCandidate): ImportIssue[] {
+  return [
+    ...candidate.errors.filter((issue) => !LOCATION_ERROR_CODES.has(issue.code)),
+    ...(serverIssues.value[candidate.row_ref] ?? [])
+  ]
+}
+
+function candidateHasLocationNote(candidate: ImportCandidate): boolean {
+  return candidate.errors.some((issue) => LOCATION_ERROR_CODES.has(issue.code))
+}
+
+function candidateSchedule(candidate: ImportCandidate): string {
+  const weekday = candidate.source.raw_weekday.trim()
+  const time = candidate.source.raw_time_or_section.trim()
+  const weeks = candidate.source.raw_weeks.trim()
+  return [weekday, time, weeks].filter(Boolean).join(' · ') || '时间信息未识别'
 }
 
 async function commitImport() {
@@ -309,11 +271,7 @@ async function commitImport() {
   errorMessage.value = ''
   state.value = 'committing'
   try {
-    const result = await commitCourseImport(
-      selectedFile.value,
-      preview.value.file.sha256,
-      buildCommitResolutions()
-    )
+    const result = await commitCourseImport(selectedFile.value, preview.value.file.sha256)
     createdCount.value = result.created_count
     coursesStore.invalidate()
     state.value = 'success'
@@ -327,16 +285,6 @@ async function commitImport() {
   }
 }
 
-async function loadBuildings() {
-  try {
-    buildings.value = await buildingsStore.ensureLoaded()
-  } catch (error) {
-    errorMessage.value = extractBusinessError(error).message
-    state.value = 'failed'
-  }
-}
-
-onMounted(loadBuildings)
 </script>
 
 <template>
@@ -399,7 +347,7 @@ onMounted(loadBuildings)
 
         <p class="privacy-note">
           <span aria-hidden="true">✓</span>
-          不读取密码，不导出登录 Cookie；采集内容仍会进入逐行预览，不会直接写入课表。
+          不读取密码，不导出登录 Cookie；课程和地点按课表原文保存，地点未匹配地图也不影响查看。
         </p>
       </section>
 
@@ -449,7 +397,7 @@ onMounted(loadBuildings)
       <section v-if="state === 'success'" class="success-sheet" aria-live="polite">
         <span aria-hidden="true">✓</span>
         <h2>{{ createdCount }} 门课程已完整导入</h2>
-        <p>原始文件、逐行来源和完整地点都已保存。</p>
+        <p>课程与地点原文均已保存；需要路线时，再补全尚未匹配的地图地点。</p>
         <button type="button" data-testid="view-courses" @click="router.push('/courses')">
           查看我的课表
         </button>
@@ -468,34 +416,64 @@ onMounted(loadBuildings)
 
         <p v-if="errorMessage" class="page-error" role="alert">{{ errorMessage }}</p>
 
-        <section class="candidate-list" aria-label="逐行确认课程">
+        <section class="candidate-list" aria-label="导入课程预览">
           <div class="list-heading">
             <span>03</span>
-            <div><h2>逐行核对</h2><p>上半部分是只读原文，下半部分才是执行映射。</p></div>
+            <div>
+              <h2>导入内容预览</h2>
+              <p>课程与地点按原文保存；只有核心排课信息无法识别时才会阻止导入。</p>
+            </div>
           </div>
-          <ImportCandidateCard
+          <article
             v-for="(candidate, index) in candidates"
             :key="candidate.row_ref"
+            :id="`import-${candidate.row_ref}`"
+            class="candidate-preview"
+            :class="{
+              'has-error': candidateBlockingIssues(candidate).length,
+              'is-highlighted': highlightedRowRefs.includes(candidate.row_ref)
+            }"
+            :data-row-ref="candidate.row_ref"
             v-reveal="{
               from: index % 2 ? 'right' : 'left',
               distance: 32,
               delay: Math.min(index * 65, 260)
             }"
-            :candidate="candidate"
-            :buildings="buildings"
-            :resolution="resolutions[candidate.row_ref]!"
-            :index="index"
-            :server-issues="serverIssues[candidate.row_ref] ?? []"
-            :highlighted="highlightedRowRefs.includes(candidate.row_ref)"
-            @update:resolution="updateResolution(candidate.row_ref, $event)"
-          />
+          >
+            <header>
+              <span>{{ String(index + 1).padStart(2, '0') }}</span>
+              <div>
+                <strong>{{ candidate.source.raw_course_name || candidate.course_name || '未识别课程' }}</strong>
+                <small>{{ candidateSchedule(candidate) }}</small>
+              </div>
+            </header>
+            <dl>
+              <div>
+                <dt>教师</dt>
+                <dd>{{ candidate.source.raw_teacher || '—' }}</dd>
+              </div>
+              <div>
+                <dt>地点原文</dt>
+                <dd>{{ candidate.source.raw_location || '—' }}</dd>
+              </div>
+            </dl>
+            <p v-if="candidateHasLocationNote(candidate)" class="location-note">
+              <span aria-hidden="true">i</span>
+              地点会照原文导入，不影响课表查看；发起路线时若仍未匹配地图，再提示补全。
+            </p>
+            <ul v-if="candidateBlockingIssues(candidate).length" class="candidate-issues">
+              <li v-for="issue in candidateBlockingIssues(candidate)" :key="`${issue.code}-${issue.field}-${issue.message}`">
+                {{ issue.message }}
+              </li>
+            </ul>
+          </article>
         </section>
 
         <footer class="commit-sheet">
           <div>
-            <strong v-if="canCommit">全部课程已经可以安全导入</strong>
-            <strong v-else>还有 {{ unresolvedCount }} 门课程需要处理</strong>
-            <p>提交时会重新解析同一份原文件；任一课程失败，整批都不会写入。</p>
+            <strong v-if="canCommit">全部课程都可按原文导入</strong>
+            <strong v-else>还有 {{ unresolvedCount }} 门课程的排课信息无法识别</strong>
+            <p>地点缺少地图映射不会阻止导入；提交时仍会校验课程时间与冲突。</p>
           </div>
           <button
             type="button"
@@ -763,6 +741,120 @@ onMounted(loadBuildings)
 
 .candidate-list { display: grid; gap: 14px; }
 .list-heading { padding: 4px 3px; }
+.candidate-preview {
+  display: grid;
+  gap: 14px;
+  border: 1px solid var(--fresh-line);
+  border-radius: 22px;
+  background: var(--fresh-paper);
+  box-shadow: 0 12px 28px rgba(59, 79, 57, .07);
+  padding: 17px;
+  transition: border-color 240ms ease, box-shadow 240ms ease;
+}
+.candidate-preview.has-error {
+  border-color: #dfad9f;
+  background: linear-gradient(145deg, var(--fresh-paper), #fff8f5);
+}
+.candidate-preview.is-highlighted {
+  border-color: #ba6f5d;
+  box-shadow: 0 0 0 3px rgba(186, 111, 93, .14), 0 14px 32px rgba(86, 55, 48, .11);
+}
+.candidate-preview > header {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 11px;
+}
+.candidate-preview > header > span {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--fresh-mint);
+  color: var(--fresh-green-dark);
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+  font-weight: 900;
+}
+.candidate-preview > header > div {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+.candidate-preview > header strong {
+  color: var(--fresh-ink);
+  font-size: 16px;
+  overflow-wrap: anywhere;
+}
+.candidate-preview > header small {
+  color: var(--fresh-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.candidate-preview dl {
+  display: grid;
+  grid-template-columns: minmax(120px, .6fr) minmax(0, 1.4fr);
+  gap: 9px;
+  margin: 0;
+}
+.candidate-preview dl > div {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+  border-radius: 14px;
+  background: var(--fresh-bg);
+  padding: 11px 12px;
+}
+.candidate-preview dt {
+  color: var(--fresh-muted);
+  font-size: 11px;
+}
+.candidate-preview dd {
+  margin: 0;
+  color: var(--fresh-ink);
+  font-size: 13px;
+  font-weight: 750;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+.location-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+  border-radius: 13px;
+  background: #f4f1e7;
+  color: #667065;
+  font-size: 12px;
+  line-height: 1.6;
+  padding: 10px 12px;
+}
+.location-note span {
+  display: grid;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 50%;
+  background: #dce9d8;
+  color: #476a4d;
+  font-family: ui-serif, serif;
+  font-size: 11px;
+  font-weight: 900;
+}
+.candidate-issues {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  border-radius: 13px;
+  background: var(--cm-red-soft);
+  color: #7c3c32;
+  font-size: 12px;
+  line-height: 1.55;
+  padding: 10px 12px 10px 29px;
+}
 .page-error { border: 1px solid #e1b0a3; border-radius: 16px; background: var(--cm-red-soft); color: #7c3c32; font-size: 13px; line-height: 1.6; margin: 0; padding: 12px 14px; }
 
 .commit-sheet { display: grid; grid-template-columns: minmax(0,1fr) minmax(220px,.65fr); align-items: center; gap: 14px; background: var(--fresh-mint); }
@@ -798,6 +890,7 @@ onMounted(loadBuildings)
   .commit-sheet { grid-template-columns: 1fr; }
   .hubu-import-steps { grid-template-columns: 1fr; }
   .hubu-import-steps li { grid-template-columns: auto minmax(0,1fr); }
+  .candidate-preview dl { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 390px) {

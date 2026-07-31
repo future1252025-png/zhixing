@@ -12,9 +12,10 @@ export type Course = {
   weekday: number
   start_time: string
   end_time: string
-  building_id: number
-  building: CourseBuilding
+  building_id: number | null
+  building: CourseBuilding | null
   room_name: string
+  source_location: string | null
   teacher: string | null
   weeks: string
   source_kind: CourseSourceKind

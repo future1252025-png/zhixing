@@ -8,7 +8,12 @@ from sqlalchemy.orm import Session, selectinload
 
 from app.core.errors import BusinessError
 from app.models import Building, Course
-from app.schemas.course import CourseCreate, CourseUpdate, parse_course_time
+from app.schemas.course import (
+    CourseCreate,
+    CourseImportCreate,
+    CourseUpdate,
+    parse_course_time,
+)
 from app.services.course_policy import (
     CourseConflict,
     CourseValue,
@@ -26,6 +31,7 @@ from app.services.week_rule import WeekExpressionError, normalize_weeks
 
 
 CourseSourceKind = Literal["manual", "import"]
+CourseWritePayload = CourseCreate | CourseImportCreate
 
 
 def building_exists(session: Session, building_id: int) -> bool:
@@ -35,7 +41,7 @@ def building_exists(session: Session, building_id: int) -> bool:
 def list_courses(session: Session, user_id: int) -> list[Course]:
     statement = (
         select(Course)
-        .options(selectinload(Course.building))
+        .options(selectinload(Course.building), selectinload(Course.import_source))
         .where(Course.user_id == user_id)
         .order_by(Course.weekday.asc(), Course.start_time.asc(), Course.id.asc())
     )
@@ -45,7 +51,7 @@ def list_courses(session: Session, user_id: int) -> list[Course]:
 def get_course_for_user(session: Session, course_id: int, user_id: int) -> Course | None:
     return session.scalar(
         select(Course)
-        .options(selectinload(Course.building))
+        .options(selectinload(Course.building), selectinload(Course.import_source))
         .where(Course.id == course_id, Course.user_id == user_id)
     )
 
@@ -54,7 +60,7 @@ def add_course(
     session: Session,
     *,
     user_id: int,
-    payload: CourseCreate,
+    payload: CourseWritePayload,
     source_kind: CourseSourceKind = "manual",
     guard: UserMutationGuard | None = None,
 ) -> Course:
@@ -68,7 +74,13 @@ def add_course(
     if setting is None:
         raise BusinessError(409, "semester_unconfigured", "Semester is not configured")
     values = payload.model_dump()
-    values["weeks"] = _validate_course_values(session, user_id, values, setting.total_weeks)
+    values["weeks"] = _validate_course_values(
+        session,
+        user_id,
+        values,
+        setting.total_weeks,
+        require_location=source_kind == "manual",
+    )
     course = Course(user_id=user_id, source_kind=source_kind, **values)
     session.add(course)
     session.flush()
@@ -83,9 +95,10 @@ def validate_course_batch(
     session: Session,
     *,
     user_id: int,
-    entries: Sequence[tuple[str, CourseCreate]],
+    entries: Sequence[tuple[str, CourseWritePayload]],
     guard: UserMutationGuard,
-) -> list[tuple[str, CourseCreate]]:
+    require_location: bool = True,
+) -> list[tuple[str, CourseWritePayload]]:
     """Validate a complete batch before its first course row is inserted."""
 
     require_user_mutation_guard(session, user_id, guard)
@@ -102,7 +115,7 @@ def validate_course_batch(
     )
     comparison_values = list(existing_values)
     batch_row_refs: dict[int, str] = {}
-    validated: list[tuple[str, CourseCreate]] = []
+    validated: list[tuple[str, CourseWritePayload]] = []
 
     for index, (row_ref, payload) in enumerate(entries, start=1):
         synthetic_id = -index
@@ -112,6 +125,7 @@ def validate_course_batch(
             values,
             setting.total_weeks,
             candidate_id=synthetic_id,
+            require_location=require_location,
         )
         conflicts = detect_conflicts(
             candidate,
@@ -221,12 +235,14 @@ def _validate_course_values(
     *,
     excluded_course_id: int | None = None,
     allow_other_invalid: bool = False,
+    require_location: bool = True,
 ) -> str:
     normalized_weeks, candidate = _validated_course_value(
         session,
         values,
         max_week,
         candidate_id=excluded_course_id,
+        require_location=require_location,
     )
     conflicts = detect_conflicts(
         candidate,
@@ -244,12 +260,14 @@ def _validated_course_value(
     max_week: int,
     *,
     candidate_id: int | None,
+    require_location: bool = True,
 ) -> tuple[str, CourseValue]:
-    if not building_exists(session, _required_int(values, "building_id")):
-        raise BusinessError(404, "building_not_found", "Building not found", fields=["building_id"])
-    room_name = _required_str(values, "room_name")
-    if location_requires_review(room_name):
-        raise BusinessError(422, "invalid_room_name", "Room name must be a confirmed location", fields=["room_name"])
+    if require_location:
+        if not building_exists(session, _required_int(values, "building_id")):
+            raise BusinessError(404, "building_not_found", "Building not found", fields=["building_id"])
+        room_name = _required_str(values, "room_name")
+        if location_requires_review(room_name):
+            raise BusinessError(422, "invalid_room_name", "Room name must be a confirmed location", fields=["room_name"])
     try:
         start_time = parse_course_time(_required_str(values, "start_time"))
         end_time = parse_course_time(_required_str(values, "end_time"))

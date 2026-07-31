@@ -17,8 +17,8 @@ export type ChatSearchResult = {
 }
 
 export type NextCourseChatTarget = {
-  buildingId: number
-  buildingName: string
+  buildingId: number | null
+  buildingName: string | null
   roomName: string | null
   title: string
   subtitle: string
@@ -54,12 +54,16 @@ function extractBuildingKeyword(query: string): string {
 
 export function buildNextCourseChatTarget(course: Course): NextCourseChatTarget {
   const roomName = course.room_name.trim() || null
+  const buildingName = course.building?.name ?? null
+  const sourceLocation = course.source_location?.trim()
   return {
     buildingId: course.building_id,
-    buildingName: course.building.name,
+    buildingName,
     roomName,
     title: course.course_name,
-    subtitle: roomName ? `${course.building.name} · ${roomName}` : course.building.name
+    subtitle: sourceLocation || (
+      buildingName && roomName ? `${buildingName} · ${roomName}` : buildingName || roomName || '地点待补充'
+    )
   }
 }
 

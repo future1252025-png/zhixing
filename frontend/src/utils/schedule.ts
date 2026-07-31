@@ -110,13 +110,33 @@ export function toSchedulePageError(error: BusinessError): SchedulePageError {
     case 'course_location_incomplete': {
       const courseId = positiveInteger(error.details.course_id)
       const courseName = nonEmptyString(error.details.course_name)
+      const detailFields = Array.isArray(error.details.missing_fields)
+        ? error.details.missing_fields
+        : error.fields
+      const missingFields = new Set(
+        detailFields.filter((field): field is string => typeof field === 'string')
+      )
+      const missingBuilding = missingFields.has('building_id')
+      const missingRoom = missingFields.has('room_name')
+      const locationProblem = missingBuilding && !missingRoom
+        ? '地图地点未匹配'
+        : !missingBuilding && missingRoom
+          ? '教室信息不完整'
+          : '地点不完整'
+      const recoveryMessage = missingBuilding && !missingRoom
+        ? '请为这门课选择地图上的上课建筑，再重新生成出发建议。'
+        : !missingBuilding && missingRoom
+          ? '请补全这门课的教室信息，再重新生成出发建议。'
+          : '请补全上课建筑和完整教室，再重新生成出发建议。'
       return {
         ...base,
         code: 'course_location_incomplete',
         courseId,
         courseName,
-        title: courseName ? `“${courseName}”地点不完整` : `课程 #${courseId ?? '未知'} 地点不完整`,
-        message: '请补全上课建筑和完整教室，再重新生成出发建议。'
+        title: courseName
+          ? `“${courseName}”${locationProblem}`
+          : `课程 #${courseId ?? '未知'} ${locationProblem}`,
+        message: recoveryMessage
       }
     }
     case 'schedule_conflict':

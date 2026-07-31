@@ -327,6 +327,11 @@ async function handleCourseAction(action: { name: string }) {
   actionSheetVisible.value = false
   if (!course) return
   if (action.name === '查看地点') {
+    if (!course.building_id || !course.building) {
+      showFailToast('这个上课地点还未匹配校园地图，请先补全地点后再打开')
+      openEditPage(course.id)
+      return
+    }
     router.push(`/buildings/${course.building_id}`)
   }
   if (action.name === '编辑课程') {
@@ -628,12 +633,6 @@ onBeforeUnmount(() => {
                           :disabled="deletingId === course.id"
                           @click="openCourseActions(course)"
                         >
-                          <i
-                            v-if="course.needs_location_review"
-                            class="review-flag"
-                            aria-hidden="true"
-                            title="地点待确认"
-                          ></i>
                           <strong>{{ course.course_name }}</strong>
                           <span class="compact-location">
                             <span class="location-mark" aria-hidden="true">@</span>
@@ -1387,18 +1386,6 @@ onBeforeUnmount(() => {
 
 .course-content::before {
   content: none;
-}
-
-/* 地点待确认微徽标：只提示，不抢注意力 */
-.review-flag {
-  position: absolute;
-  top: 4px;
-  right: 4px;
-  width: 7px;
-  height: 7px;
-  border-radius: 50% 50% 50% 20%;
-  background: var(--fresh-sun);
-  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.65);
 }
 
 .course-content strong {

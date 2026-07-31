@@ -47,6 +47,7 @@ const baseCourse: Course = {
     type: '学习'
   },
   room_name: 'A101',
+  source_location: null,
   teacher: '李老师',
   weeks: '1-16',
   source_kind: 'manual',
@@ -278,6 +279,27 @@ describe('course helpers', () => {
     expect(formatTimetableCourseLocation(longTrainingRoomCourse)).toBe(
       '实训大楼 413-418 · 数据中国实验室 2-3'
     )
+  })
+
+  it('prefers the exact imported location and stays safe without a mapped building', () => {
+    const importedLocation = {
+      building: { name: '系统猜测的教学楼' },
+      room_name: '待确认教室',
+      source_location: '教务原文：创新创业中心西区 302'
+    }
+
+    expect(formatCourseLocation(importedLocation)).toBe('教务原文：创新创业中心西区 302')
+    expect(formatTimetableCourseLocation(importedLocation)).toBe('教务原文：创新创业中心西区 302')
+    expect(formatCourseLocation({
+      building: null,
+      room_name: '未知场地 101',
+      source_location: null
+    })).toBe('未知场地 101')
+    expect(formatTimetableCourseLocation({
+      building: null,
+      room_name: '',
+      source_location: null
+    })).toBe('地点待补充')
   })
 
   it('finds same-day time overlaps without blocking save', () => {

@@ -47,9 +47,19 @@ export function getCourseTimeSlots(): CourseTimeSlot[] {
 }
 
 export function formatCourseLocation(
-  course: Pick<Course, 'building' | 'room_name'>
+  course: {
+    building: { name: string } | null
+    room_name: string
+    source_location?: string | null
+  }
 ): string {
-  return `${course.building.name.trim()} · ${course.room_name.trim()}`
+  const sourceLocation = course.source_location?.trim()
+  if (sourceLocation) return sourceLocation
+
+  const building = course.building?.name.trim() ?? ''
+  const room = course.room_name.trim()
+  if (building && room) return `${building} · ${room}`
+  return building || room || '地点待补充'
 }
 
 function compactBuildingName(name: string): string {
@@ -84,8 +94,16 @@ function roomNamesTeachingBuilding(building: string, room: string): boolean {
 }
 
 export function formatTimetableCourseLocation(
-  course: Pick<Course, 'building' | 'room_name'>
+  course: {
+    building: { name: string } | null
+    room_name: string
+    source_location?: string | null
+  }
 ): string {
+  const sourceLocation = course.source_location?.trim()
+  if (sourceLocation) return sourceLocation
+
+  if (!course.building) return course.room_name.trim() || '地点待补充'
   const building = compactBuildingName(course.building.name)
   const rawRoom = course.room_name.trim()
   const room = formatTimetableRoomName(rawRoom)
@@ -309,7 +327,7 @@ export function courseToForm(course: Course): CourseForm {
     weekday: course.weekday,
     start_time: course.start_time,
     end_time: course.end_time,
-    building_id: course.building_id,
+    building_id: course.building_id ?? 0,
     room_name: course.room_name,
     teacher: course.teacher ?? '',
     weeks: course.weeks

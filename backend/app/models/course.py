@@ -19,7 +19,11 @@ class Course(Base):
     weekday: Mapped[int] = mapped_column(Integer, index=True)
     start_time: Mapped[str] = mapped_column(String(5))
     end_time: Mapped[str] = mapped_column(String(5))
-    building_id: Mapped[int] = mapped_column(ForeignKey("buildings.id"), index=True)
+    building_id: Mapped[int | None] = mapped_column(
+        ForeignKey("buildings.id"),
+        index=True,
+        nullable=True,
+    )
     room_name: Mapped[str] = mapped_column(String(120))
     teacher: Mapped[str | None] = mapped_column(String(64), nullable=True)
     weeks: Mapped[str] = mapped_column(
@@ -48,3 +52,11 @@ class Course(Base):
         cascade="all, delete-orphan",
         passive_deletes=True,
     )
+
+    @property
+    def source_location(self) -> str | None:
+        """Return the untouched location text captured from an imported timetable."""
+
+        if self.import_source is None:
+            return None
+        return self.import_source.raw_location

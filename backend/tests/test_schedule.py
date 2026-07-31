@@ -561,6 +561,40 @@ def test_same_time_incomplete_courses_report_location_not_schedule_conflict(
     assert raised.value.details["course_ids"] == [first.id, second.id]
 
 
+def test_unmapped_imported_course_is_reported_only_when_route_is_requested(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    _, SessionLocal = client_and_session
+    with SessionLocal() as session:
+        user = create_service_user(session, "unmapped_import")
+        course = Course(
+            user_id=user.id,
+            course_name="校外创新实践",
+            weekday=1,
+            start_time="09:00",
+            end_time="10:40",
+            building_id=None,
+            room_name="校外创新基地 C 座 501",
+            weeks="2",
+            source_kind="import",
+        )
+        session.add(course)
+        session.commit()
+        course_id = course.id
+
+        with pytest.raises(BusinessError) as raised:
+            find_next_course(
+                session,
+                user.id,
+                now=datetime(2026, 9, 7, 8, 0, tzinfo=SHANGHAI_TZ),
+            )
+
+    assert_business_error(raised, "course_location_incomplete")
+    assert raised.value.fields == ["building_id"]
+    assert raised.value.details["course_id"] == course_id
+    assert raised.value.details["missing_fields"] == ["building_id"]
+
+
 @pytest.mark.parametrize("room_name", ["待确认教室", " 未知 ", "暂无"])
 def test_earliest_course_with_incomplete_room_is_not_skipped(
     client_and_session: tuple[TestClient, sessionmaker],

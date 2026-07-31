@@ -63,7 +63,9 @@ class ImportCommitManifest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
-    resolutions: list[ImportResolution]
+    # Optional compatibility path for older app builds. New clients omit this;
+    # legacy values only override internal map routing fields, never source text.
+    resolutions: list[ImportResolution] = Field(default_factory=list)
 
 
 class ImportCommitResponse(BaseModel):

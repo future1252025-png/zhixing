@@ -32,6 +32,7 @@ const course = {
     type: 'Study'
   },
   room_name: 'A101',
+  source_location: 'Library A101',
   teacher: 'Teacher Li',
   weeks: '1-16',
   source_kind: 'import',
@@ -114,15 +115,13 @@ describe('courses api', () => {
     expect(result.file.filename).toBe('schedule.html')
   })
 
-  it('commits the original file once with one complete manifest', async () => {
+  it('commits the original file with only its verified digest', async () => {
     const file = new File(['original'], 'schedule.xlsx')
     vi.mocked(request.post).mockResolvedValue({
       data: { created_count: 1, course_ids: [17] }
     })
 
-    const result = await commitCourseImport(file, 'b'.repeat(64), [
-      { row_ref: 'row-1', building_id: 3, room_name: '完整实验室 301' }
-    ])
+    const result = await commitCourseImport(file, 'b'.repeat(64))
 
     expect(request.post).toHaveBeenCalledTimes(1)
     const [path, body] = vi.mocked(request.post).mock.calls[0]!
@@ -130,12 +129,7 @@ describe('courses api', () => {
     expect(body).toBeInstanceOf(FormData)
     const form = body as FormData
     expect(form.get('file')).toBe(file)
-    expect(JSON.parse(String(form.get('manifest')))).toEqual({
-      sha256: 'b'.repeat(64),
-      resolutions: [
-        { row_ref: 'row-1', building_id: 3, room_name: '完整实验室 301' }
-      ]
-    })
+    expect(JSON.parse(String(form.get('manifest')))).toEqual({ sha256: 'b'.repeat(64) })
     expect(result).toEqual({ created_count: 1, course_ids: [17] })
   })
 })

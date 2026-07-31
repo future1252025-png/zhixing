@@ -187,13 +187,15 @@ describe('CourseImportPage', () => {
     document.body.innerHTML = ''
   })
 
-  it('states all four supported formats and blocks commit while a row is unresolved', async () => {
+  it('allows import when only the map location is unresolved', async () => {
     const wrapper = await mountPage()
     await chooseAndPreview(wrapper)
 
     expect(wrapper.text()).toContain('HTM / HTML / XLS / XLSX')
-    expect(wrapper.get('[data-testid="commit-import"]').attributes('disabled')).toBeDefined()
-    expect(wrapper.text()).toContain('还有 1 门课程需要处理')
+    expect(wrapper.get('[data-testid="commit-import"]').attributes('disabled')).toBeUndefined()
+    expect(wrapper.text()).toContain('地点会照原文导入')
+    expect(wrapper.text()).toContain('全部课程都可按原文导入')
+    expect(wrapper.find('[name="room_name"]').exists()).toBe(false)
   })
 
   it('makes the Android-only boundary explicit without exposing a fake web capture action', async () => {
@@ -207,7 +209,7 @@ describe('CourseImportPage', () => {
     expect(wrapper.text()).toContain('不读取密码，不导出登录 Cookie')
   })
 
-  it('previews the HTML returned by the native Hubu browser through the existing import pipeline', async () => {
+  it('automatically commits an importable HTML table returned by the native Hubu browser', async () => {
     mocks.nativeHubuImportAvailable.mockReturnValue(true)
     const capture = {
       cancelled: false,
@@ -226,16 +228,15 @@ describe('CourseImportPage', () => {
     expect(mocks.captureHubuCourseTable).toHaveBeenCalledTimes(1)
     expect(mocks.captureToHtmlFile).toHaveBeenCalledWith(capture)
     expect(mocks.previewCourseImport).toHaveBeenCalledWith(capturedFile)
+    expect(mocks.commitCourseImport).toHaveBeenCalledWith(capturedFile, 'a'.repeat(64))
     expect(wrapper.text()).toContain('已从湖北大学教务系统安全采集')
     expect(wrapper.get('.capture-source').attributes('href')).toBe(capture.sourceUrl)
+    expect(wrapper.text()).toContain('2 门课程已完整导入')
   })
 
-  it('submits the unchanged original file once with every explicit resolution', async () => {
+  it('submits the unchanged original file without per-row location resolutions', async () => {
     const wrapper = await mountPage()
     const file = await chooseAndPreview(wrapper)
-    await wrapper
-      .get('[data-row-ref="row-2"] [name="room_name"]')
-      .setValue('北区三层完整语言实验教室 301')
 
     const coursesStore = useCoursesStore(pinia)
     coursesStore.loaded = true
@@ -246,18 +247,7 @@ describe('CourseImportPage', () => {
 
     expect(mocks.commitCourseImport).toHaveBeenCalledTimes(1)
     expect(coursesStore.loaded).toBe(false)
-    expect(mocks.commitCourseImport).toHaveBeenCalledWith(file, 'a'.repeat(64), [
-      {
-        row_ref: 'row-1',
-        building_id: 3,
-        room_name: '423-425数据中国实验室1'
-      },
-      {
-        row_ref: 'row-2',
-        building_id: 3,
-        room_name: '北区三层完整语言实验教室 301'
-      }
-    ])
+    expect(mocks.commitCourseImport).toHaveBeenCalledWith(file, 'a'.repeat(64))
     expect(mocks.createCourse).not.toHaveBeenCalled()
     expect(mocks.push).not.toHaveBeenCalled()
     expect(wrapper.text()).toContain('2 门课程已完整导入')
@@ -299,5 +289,25 @@ describe('CourseImportPage', () => {
     expect(row.classes()).toContain('is-highlighted')
     expect(row.text()).toContain('与「数据分析」在第 2、3 周冲突')
     expect(HTMLElement.prototype.scrollIntoView).toHaveBeenCalled()
+  })
+
+  it('still blocks import when a core schedule field cannot be parsed', async () => {
+    mocks.previewCourseImport.mockResolvedValue({
+      ...preview,
+      candidates: [
+        {
+          ...preview.candidates[0]!,
+          start_time: null,
+          end_time: null,
+          errors: [{ code: 'time_unrecognized', field: 'time', message: '无法识别上课时间' }]
+        }
+      ]
+    })
+    const wrapper = await mountPage()
+    await chooseAndPreview(wrapper)
+
+    expect(wrapper.get('[data-testid="commit-import"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.text()).toContain('无法识别上课时间')
+    expect(wrapper.text()).toContain('还有 1 门课程的排课信息无法识别')
   })
 })

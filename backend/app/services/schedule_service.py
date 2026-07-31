@@ -128,29 +128,52 @@ def _validate_course_end_time(course: Course, start_time: time) -> None:
         raise _course_data_error(course, ["start_time", "end_time"])
 
 
-def _location_is_incomplete(course: Course) -> bool:
+def _missing_location_fields(course: Course) -> list[str]:
+    missing: list[str] = []
     building = course.building
-    return (
-        location_requires_review(course.room_name)
-        or not course.room_name.strip()
-        or building is None
-        or not building.name.strip()
-    )
+    if building is None or not building.name.strip():
+        missing.append("building_id")
+    if not course.room_name.strip() or location_requires_review(course.room_name):
+        missing.append("room_name")
+    return missing
+
+
+def _location_is_incomplete(course: Course) -> bool:
+    return bool(_missing_location_fields(course))
 
 
 def _location_error(courses: list[Course]) -> BusinessError:
     ordered_courses = sorted(courses, key=lambda course: course.id)
     primary_course = ordered_courses[0]
     course_ids = [course.id for course in ordered_courses]
+    course_details = [
+        {
+            "course_id": course.id,
+            "course_name": course.course_name,
+            "source_location": course.source_location,
+            "missing_fields": _missing_location_fields(course),
+        }
+        for course in ordered_courses
+    ]
+    missing_fields = list(
+        dict.fromkeys(
+            field
+            for course in ordered_courses
+            for field in _missing_location_fields(course)
+        )
+    )
     return BusinessError(
         409,
         "course_location_incomplete",
         "下一节课的地点信息不完整，请先补全教学楼和教室",
-        fields=["building_id", "room_name"],
+        fields=missing_fields,
         details={
             "course_id": primary_course.id,
             "course_name": primary_course.course_name,
             "course_ids": course_ids,
+            "source_location": primary_course.source_location,
+            "missing_fields": course_details[0]["missing_fields"],
+            "courses": course_details,
         },
     )
 
@@ -168,7 +191,7 @@ def find_next_course(
     courses = list(
         session.scalars(
             select(Course)
-            .options(selectinload(Course.building))
+            .options(selectinload(Course.building), selectinload(Course.import_source))
             .where(Course.user_id == user_id)
             .order_by(Course.start_time.asc(), Course.id.asc())
         ).all()

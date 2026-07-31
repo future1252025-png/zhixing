@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections import Counter
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import time
 from hashlib import sha256
@@ -8,8 +10,6 @@ from io import BytesIO
 from pathlib import PurePath
 import re
 from zipfile import BadZipFile, ZipFile
-from collections import Counter
-from collections.abc import Sequence
 
 from openpyxl import load_workbook
 from pydantic import ValidationError
@@ -19,7 +19,7 @@ import xlrd
 
 from app.core.errors import BusinessError
 from app.models import Building, Course, CourseImportSource
-from app.schemas.course import CourseCreate
+from app.schemas.course import CourseImportCreate
 from app.schemas.course_import import (
     CourseImportPreviewResponse,
     ImportCandidateResponse,
@@ -74,6 +74,8 @@ RAW_WEEKS_RE = re.compile(
 DASH_RE = re.compile(r"^-{3,}$")
 CONNECTOR_CHARS = " -—–·()（）"
 MAX_XLSX_EXPANDED_BYTES = 50 * 1024 * 1024
+LOCATION_ISSUE_CODES = frozenset({"building_unrecognized", "room_missing"})
+UNMAPPED_ROOM_FALLBACK = "待确认教室"
 
 
 @dataclass(frozen=True)
@@ -112,7 +114,7 @@ class ImportCandidate:
 @dataclass(frozen=True)
 class ResolvedImportCourse:
     source: RawCourseRow
-    course: CourseCreate
+    course: CourseImportCreate
 
 
 @dataclass(frozen=True)
@@ -557,7 +559,11 @@ def build_course_import_preview(
             candidate_count=len(candidates),
         ),
         candidates=[_candidate_response(candidate) for candidate in candidates],
-        can_commit=bool(candidates) and all(not candidate.errors for candidate in candidates),
+        can_commit=bool(candidates)
+        and all(
+            all(issue.code in LOCATION_ISSUE_CODES for issue in candidate.errors)
+            for candidate in candidates
+        ),
     )
 
 
@@ -572,10 +578,14 @@ def _parse_import_candidates(
     return [_candidate_from_raw(raw, buildings) for raw in raw_courses]
 
 
-def _match_resolutions(
+def _match_optional_resolutions(
     candidates: Sequence[ImportCandidate],
     resolutions: Sequence[ImportResolution],
 ) -> dict[str, ImportResolution]:
+    """Validate legacy per-row mappings when an older client still sends them."""
+
+    if not resolutions:
+        return {}
     expected = [candidate.source.row_ref for candidate in candidates]
     actual = [resolution.row_ref for resolution in resolutions]
     counts = Counter(actual)
@@ -606,11 +616,10 @@ def _resolve_import_candidates(
 ) -> list[ResolvedImportCourse]:
     resolved: list[ResolvedImportCourse] = []
     unresolved: list[dict[str, object]] = []
-    resolvable_location_codes = {"building_unrecognized", "room_missing"}
 
     for candidate in candidates:
         source = candidate.source
-        resolution = resolutions[source.row_ref]
+        resolution = resolutions.get(source.row_ref)
         issues = [
             {
                 "code": issue.code,
@@ -618,25 +627,26 @@ def _resolve_import_candidates(
                 "message": issue.message,
             }
             for issue in candidate.errors
-            if issue.code not in resolvable_location_codes
+            if issue.code not in LOCATION_ISSUE_CODES
         ]
-        building = session.get(Building, resolution.building_id)
-        if building is None:
-            issues.append(
-                {
-                    "code": "building_not_found",
-                    "field": "building_id",
-                    "message": "确认的建筑不存在",
-                }
-            )
-        if location_requires_review(resolution.room_name):
-            issues.append(
-                {
-                    "code": "room_unresolved",
-                    "field": "room_name",
-                    "message": "教室仍未确认",
-                }
-            )
+        if resolution is not None:
+            building = session.get(Building, resolution.building_id)
+            if building is None:
+                issues.append(
+                    {
+                        "code": "building_not_found",
+                        "field": "building_id",
+                        "message": "确认的建筑不存在",
+                    }
+                )
+            if location_requires_review(resolution.room_name):
+                issues.append(
+                    {
+                        "code": "room_unresolved",
+                        "field": "room_name",
+                        "message": "教室仍未确认",
+                    }
+                )
 
         required_values = {
             "course_name": candidate.course_name,
@@ -658,13 +668,29 @@ def _resolve_import_candidates(
 
         if not issues:
             try:
-                course = CourseCreate(
+                has_missing_room = any(
+                    issue.code == "room_missing" for issue in candidate.errors
+                )
+                mapped_room = (
+                    UNMAPPED_ROOM_FALLBACK
+                    if has_missing_room
+                    else (
+                        candidate.suggested_room_name
+                        or source.raw_location.strip()
+                        or UNMAPPED_ROOM_FALLBACK
+                    )[:120]
+                )
+                building_id = candidate.suggested_building_id
+                if resolution is not None:
+                    building_id = resolution.building_id
+                    mapped_room = resolution.room_name
+                course = CourseImportCreate(
                     course_name=candidate.course_name,
                     weekday=candidate.weekday,
                     start_time=candidate.start_time.strftime("%H:%M"),
                     end_time=candidate.end_time.strftime("%H:%M"),
-                    building_id=resolution.building_id,
-                    room_name=resolution.room_name,
+                    building_id=building_id,
+                    room_name=mapped_room,
                     teacher=candidate.teacher,
                     weeks=candidate.weeks,
                 )
@@ -692,7 +718,7 @@ def _resolve_import_candidates(
             422,
             "import_unresolved",
             "导入文件仍有未解决的课程字段",
-            fields=["resolutions"],
+            fields=["file"],
             details={
                 "row_refs": [item["row_ref"] for item in unresolved],
                 "rows": unresolved,
@@ -752,7 +778,7 @@ def commit_course_import(
         )
 
     candidates = _parse_import_candidates(session, filename, content)
-    resolution_map = _match_resolutions(candidates, manifest.resolutions)
+    resolution_map = _match_optional_resolutions(candidates, manifest.resolutions)
     guard = acquire_user_mutation_guard(session, user_id)
     _ensure_file_not_committed(session, user_id=user_id, file_sha256=actual_sha)
     resolved = _resolve_import_candidates(session, candidates, resolution_map)
@@ -761,6 +787,7 @@ def commit_course_import(
         user_id=user_id,
         entries=[(item.source.row_ref, item.course) for item in resolved],
         guard=guard,
+        require_location=False,
     )
 
     created: list[Course] = []

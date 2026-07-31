@@ -18,10 +18,10 @@ describe('ImportSummary', () => {
 
     expect(wrapper.text()).toContain('2026秋季完整课表.xlsx')
     expect(wrapper.text()).toContain('5')
-    expect(wrapper.text()).toContain('已解决')
-    expect(wrapper.text()).toContain('待处理')
+    expect(wrapper.text()).toContain('可导入')
+    expect(wrapper.text()).toContain('解析异常')
     expect(wrapper.text()).toContain('冲突')
-    expect(wrapper.text()).toContain('请处理所有标记项后再导入')
+    expect(wrapper.text()).toContain('部分课程的时间等核心信息无法识别')
   })
 
   it('states that every row passed validation when ready', () => {
@@ -36,6 +36,6 @@ describe('ImportSummary', () => {
       }
     })
 
-    expect(wrapper.text()).toContain('全部校验通过')
+    expect(wrapper.text()).toContain('核心排课信息完整，可以整批导入')
   })
 })

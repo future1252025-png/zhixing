@@ -33,7 +33,6 @@ const sourceLabel = computed(() =>
     class="course-card"
     :class="{
       'course-card--compact': compact,
-      'course-card--review': course.needs_location_review,
       'course-card--disabled': disabled
     }"
   >
@@ -67,17 +66,6 @@ const sourceLabel = computed(() =>
       </span>
     </button>
 
-    <footer v-if="course.needs_location_review" class="course-card__review" role="status">
-      <span><i aria-hidden="true">!</i> 地点需修正</span>
-      <button
-        type="button"
-        data-testid="repair-location"
-        :disabled="disabled"
-        @click="emit('edit', course.id)"
-      >
-        补全地点
-      </button>
-    </footer>
   </article>
 </template>
 
@@ -186,49 +174,6 @@ const sourceLabel = computed(() =>
   overflow-wrap: anywhere;
 }
 
-.course-card__review {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  border-top: 1px solid #edc9bd;
-  background: var(--cm-red-soft);
-  color: #873d31;
-  padding: 10px 14px;
-}
-
-.course-card__review > span {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  font-size: 13px;
-  font-weight: 800;
-}
-
-.course-card__review i {
-  display: grid;
-  width: 20px;
-  height: 20px;
-  place-items: center;
-  border-radius: 50%;
-  background: var(--cm-red);
-  color: #fff;
-  font-style: normal;
-}
-
-.course-card__review button {
-  min-height: 36px;
-  border: 1px solid var(--cm-red);
-  border-radius: var(--radius-pill);
-  background: var(--fresh-paper);
-  color: #77372e;
-  cursor: pointer;
-  font-size: 13px;
-  font-weight: 800;
-  padding: 7px 12px;
-}
-
-.course-card--review { border-color: #e2a997; }
 .course-card--disabled { filter: grayscale(.35); opacity: .72; }
 
 .course-card--compact .course-card__main {

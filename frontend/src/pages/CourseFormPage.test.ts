@@ -51,6 +51,7 @@ const existingCourse: Course = {
   building_id: 2,
   building: { id: 2, name: '逸夫楼', type: '教学楼' },
   room_name: '三层东侧联合实验室 301',
+  source_location: null,
   teacher: '周老师',
   weeks: '1-16',
   source_kind: 'manual',

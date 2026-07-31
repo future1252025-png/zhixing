@@ -478,13 +478,13 @@ def commit_import_request(
     content: bytes,
     *,
     digest: str,
-    resolutions: list[dict[str, object]],
+    resolutions: list[dict[str, object]] | None = None,
     filename: str = "valid.html",
 ):
-    manifest = json.dumps(
-        {"sha256": digest, "resolutions": resolutions},
-        ensure_ascii=False,
-    )
+    manifest_data: dict[str, object] = {"sha256": digest}
+    if resolutions is not None:
+        manifest_data["resolutions"] = resolutions
+    manifest = json.dumps(manifest_data, ensure_ascii=False)
     return client.post(
         "/api/courses/import",
         data={"manifest": manifest},
@@ -530,8 +530,28 @@ def test_import_reparses_uploaded_file_and_rejects_wrong_sha(
     assert importer_counts(SessionLocal) == (0, 0)
 
 
+def test_import_does_not_require_location_resolutions(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    client, SessionLocal = client_and_session
+    headers = auth_headers(client)
+    content = valid_import_content()
+    digest, _, _ = preview_and_resolutions(client, headers, content)
+
+    response = commit_import_request(
+        client,
+        headers,
+        content,
+        digest=digest,
+    )
+
+    assert response.status_code == 201
+    assert response.json()["created_count"] == 2
+    assert importer_counts(SessionLocal) == (2, 2)
+
+
 @pytest.mark.parametrize("mismatch", ["missing", "duplicate", "extra"])
-def test_import_requires_an_exact_resolution_set(
+def test_import_validates_nonempty_legacy_resolution_sets(
     client_and_session: tuple[TestClient, sessionmaker],
     mismatch: str,
 ) -> None:
@@ -562,27 +582,41 @@ def test_import_requires_an_exact_resolution_set(
     assert importer_counts(SessionLocal) == (0, 0)
 
 
-def test_import_rejects_unresolved_final_location(
+def test_import_keeps_unrecognized_location_without_blocking_timetable(
     client_and_session: tuple[TestClient, sessionmaker],
 ) -> None:
     client, SessionLocal = client_and_session
     headers = auth_headers(client)
-    content = valid_import_content()
-    digest, resolutions, _ = preview_and_resolutions(client, headers, content)
-    resolutions[0]["building_id"] = 999999
+    raw_location = "校外创新基地 C 座 501"
+    content = f"""
+    <table>
+      <tr><th>节次</th><th>星期一</th></tr>
+      <tr>
+        <td>第一二节<br>08:00-09:40</td>
+        <td>创新实践<br>陈老师<br>1-12(周)[01-02节]<br>{raw_location}</td>
+      </tr>
+    </table>
+    """.encode("utf-8")
+    digest, _, preview = preview_and_resolutions(client, headers, content)
+    assert preview["can_commit"] is True
+    assert preview["candidates"][0]["errors"][0]["code"] == "building_unrecognized"
 
     response = commit_import_request(
         client,
         headers,
         content,
         digest=digest,
-        resolutions=resolutions,
     )
 
-    assert response.status_code == 422
-    assert response.json()["code"] == "import_unresolved"
-    assert response.json()["details"]["row_refs"] == ["row-1"]
-    assert importer_counts(SessionLocal) == (0, 0)
+    assert response.status_code == 201
+    assert importer_counts(SessionLocal) == (1, 1)
+    listed = client.get("/api/courses", headers=headers)
+    assert listed.status_code == 200
+    course = listed.json()[0]
+    assert course["building_id"] is None
+    assert course["building"] is None
+    assert course["source_location"] == raw_location
+    assert course["needs_location_review"] is True
 
 
 def test_import_internal_conflict_rolls_back_every_course(
@@ -735,7 +769,7 @@ def test_import_database_error_rolls_back_every_course(
     assert importer_counts(SessionLocal) == (0, 0)
 
 
-def test_import_allows_explicit_room_resolution(
+def test_import_defers_missing_room_review_until_route_time(
     client_and_session: tuple[TestClient, sessionmaker],
 ) -> None:
     client, SessionLocal = client_and_session
@@ -746,9 +780,38 @@ def test_import_allows_explicit_room_resolution(
       <tr><td>第一二节</td><td>形势与政策<br>周老师<br>1-4(周)[01-02节]<br>教4</td></tr>
     </table>
     """.encode("utf-8")
-    digest, resolutions, preview = preview_and_resolutions(client, headers, content)
+    digest, _, preview = preview_and_resolutions(client, headers, content)
     assert preview["candidates"][0]["errors"][0]["code"] == "room_missing"
-    resolutions[0]["room_name"] = "103"
+    assert preview["can_commit"] is True
+
+    response = commit_import_request(
+        client,
+        headers,
+        content,
+        digest=digest,
+    )
+
+    assert response.status_code == 201
+    assert importer_counts(SessionLocal) == (1, 1)
+    with SessionLocal() as session:
+        course = session.scalar(
+            select(Course)
+            .join(User, User.id == Course.user_id)
+            .where(User.username == "importer")
+        )
+        assert course is not None
+        assert course.building_id is not None
+        assert course.room_name == "待确认教室"
+
+
+def test_import_honors_legacy_map_resolution_without_changing_source_text(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    client, SessionLocal = client_and_session
+    headers = auth_headers(client)
+    content = valid_import_content()
+    digest, resolutions, preview = preview_and_resolutions(client, headers, content)
+    resolutions[0]["room_name"] = "旧版确认教室 205"
 
     response = commit_import_request(
         client,
@@ -759,7 +822,18 @@ def test_import_allows_explicit_room_resolution(
     )
 
     assert response.status_code == 201
-    assert importer_counts(SessionLocal) == (1, 1)
+    with SessionLocal() as session:
+        course = session.scalar(
+            select(Course)
+            .join(User, User.id == Course.user_id)
+            .where(User.username == "importer", Course.course_name == "大学英语")
+        )
+        assert course is not None
+        assert course.room_name == "旧版确认教室 205"
+        assert course.import_source is not None
+        assert course.import_source.raw_location == (
+            preview["candidates"][0]["source"]["raw_location"]
+        )
 
 
 def test_import_rejects_non_location_parse_error(

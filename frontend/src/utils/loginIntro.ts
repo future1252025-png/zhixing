@@ -43,8 +43,8 @@ export function buildLoginIntroSnapshot(course: Course | null): LoginIntroSnapsh
   return {
     courseName: course.course_name,
     startTime: course.start_time,
-    buildingName: course.building.name,
-    roomName: course.room_name
+    buildingName: course.source_location?.trim() || course.building?.name || '地点待补充',
+    roomName: course.source_location?.trim() ? '' : course.room_name
   }
 }
 

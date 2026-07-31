@@ -40,6 +40,8 @@ export interface ImportPreviewResponse {
   can_commit: boolean
 }
 
+// Retained for the standalone legacy candidate editor; the active import flow no longer
+// sends per-row resolutions because source locations are persisted verbatim.
 export interface ImportResolution {
   row_ref: string
   building_id: number

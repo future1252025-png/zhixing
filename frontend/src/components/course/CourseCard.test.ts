@@ -21,6 +21,7 @@ const course: Course = {
     type: '教学楼'
   },
   room_name: '北区三层东侧联合创新实验教室 A-301（临时调整）',
+  source_location: '逸夫人文楼北区三层东侧联合创新实验教室 A-301（临时调整）',
   teacher: '罗老师',
   weeks: '1-16（单周）',
   source_kind: 'import',
@@ -32,7 +33,7 @@ describe('CourseCard', () => {
   it('shows the full building and classroom as one exact readable location', () => {
     const wrapper = mount(CourseCard, { props: { course } })
     const location = wrapper.get('[data-testid="course-location"]')
-    const expected = `${course.building.name} · ${course.room_name}`
+    const expected = course.source_location!
 
     expect(location.get('span:last-child').text()).toBe(expected)
     expect(location.attributes('title')).toBe(expected)
@@ -47,21 +48,22 @@ describe('CourseCard', () => {
     expect(wrapper.text()).toContain('08:00—09:40')
   })
 
-  it('keeps the stored location visible and offers repair when review is required', async () => {
+  it('keeps the source location visible without interrupting ordinary viewing', () => {
     const wrapper = mount(CourseCard, {
       props: {
         course: {
           ...course,
+          building_id: null,
+          building: null,
           room_name: '待确认教室',
           needs_location_review: true
         }
       }
     })
 
-    expect(wrapper.get('[data-testid="course-location"]').text()).toContain('待确认教室')
-    expect(wrapper.get('.course-card__review').text()).toContain('地点需修正')
-    await wrapper.get('[data-testid="repair-location"]').trigger('click')
-    expect(wrapper.emitted('edit')).toEqual([[course.id]])
+    expect(wrapper.get('[data-testid="course-location"]').text()).toContain(course.source_location)
+    expect(wrapper.find('.course-card__review').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="repair-location"]').exists()).toBe(false)
   })
 
   it('wraps long locations instead of clipping them with an ellipsis', () => {

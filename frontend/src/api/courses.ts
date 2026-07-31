@@ -6,8 +6,7 @@ import type {
 } from '@/types/course'
 import type {
   ImportCommitResponse,
-  ImportPreviewResponse,
-  ImportResolution
+  ImportPreviewResponse
 } from '@/types/courseImport'
 
 export async function getCourses(): Promise<Course[]> {
@@ -49,12 +48,11 @@ export async function previewCourseImport(
 
 export async function commitCourseImport(
   file: File,
-  sha256: string,
-  resolutions: ImportResolution[]
+  sha256: string
 ): Promise<ImportCommitResponse> {
   const formData = new FormData()
   formData.append('file', file)
-  formData.append('manifest', JSON.stringify({ sha256, resolutions }))
+  formData.append('manifest', JSON.stringify({ sha256 }))
   const response = await request.post<ImportCommitResponse>(
     '/api/courses/import',
     formData,

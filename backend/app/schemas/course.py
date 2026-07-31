@@ -95,6 +95,12 @@ class CourseCreate(CourseBase):
     pass
 
 
+class CourseImportCreate(CourseBase):
+    """Internal write model for imports whose map building is not known yet."""
+
+    building_id: int | None = Field(default=None, gt=0)
+
+
 class CourseUpdate(BaseModel):
     course_name: str | None = Field(default=None, min_length=1, max_length=100)
     weekday: int | None = Field(default=None, ge=1, le=7)
@@ -167,15 +173,21 @@ class CourseRead(BaseModel):
     weekday: int
     start_time: str
     end_time: str
-    building_id: int
+    building_id: int | None
     room_name: str
     teacher: str | None = None
     weeks: str
     source_kind: Literal["manual", "import"]
     created_at: datetime
-    building: CourseBuildingRead
+    building: CourseBuildingRead | None
+    source_location: str | None = None
 
     @computed_field(return_type=bool)
     @property
     def needs_location_review(self) -> bool:
-        return location_requires_review(self.room_name)
+        return (
+            self.building_id is None
+            or self.building is None
+            or not self.room_name.strip()
+            or location_requires_review(self.room_name)
+        )

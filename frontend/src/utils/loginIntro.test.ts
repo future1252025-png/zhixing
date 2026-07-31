@@ -31,17 +31,20 @@ function createCourse(overrides: Partial<Course>): Course {
     end_time: '09:40',
     building_id: 1,
     room_name: '101',
+    source_location: null,
     teacher: null,
     weeks: '1-16',
     source_kind: 'manual',
     needs_location_review: false,
     created_at: '2026-06-01T00:00:00',
     ...restOverrides,
-    building: {
-      id: building?.id ?? overrides.building_id ?? 1,
-      name: building?.name ?? '教1',
-      type: building?.type ?? '教学楼'
-    }
+    building: Object.prototype.hasOwnProperty.call(overrides, 'building')
+      ? building ?? null
+      : {
+          id: overrides.building_id ?? 1,
+          name: '教1',
+          type: '教学楼'
+        }
   }
 }
 
@@ -80,6 +83,7 @@ describe('login intro flag', () => {
         type: '教学楼'
       },
       room_name: '102',
+      source_location: null,
       teacher: '曾星',
       weeks: '1-16',
       source_kind: 'import',
@@ -98,6 +102,18 @@ describe('login intro flag', () => {
       roomName: '102'
     })
     expect(consumeLoginIntroSnapshot(storage)).toBeNull()
+  })
+
+  it('uses imported source text when a course has no mapped building yet', () => {
+    expect(buildLoginIntroSnapshot(createCourse({
+      building_id: null,
+      building: null,
+      room_name: '待确认教室',
+      source_location: '创新创业中心西区 302'
+    }))).toMatchObject({
+      buildingName: '创新创业中心西区 302',
+      roomName: ''
+    })
   })
 
   it('ignores invalid login snapshot data', () => {

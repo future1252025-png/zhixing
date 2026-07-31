@@ -19,6 +19,7 @@ const courses: Course[] = [
     building_id: 2,
     building: { id: 2, name: '综合教学楼', type: '教学楼' },
     room_name: '东区三层 A101',
+    source_location: null,
     teacher: '张老师',
     weeks: '1-16',
     source_kind: 'manual',
