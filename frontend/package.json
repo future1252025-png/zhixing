@@ -18,7 +18,7 @@
     "test:e2e": "playwright test",
     "test:e2e:wide": "cross-env E2E_VIEWPORT_WIDTH=430 E2E_VIEWPORT_HEIGHT=932 playwright test",
     "build:android": "vue-tsc --noEmit && vite build --mode android",
-    "android:sync": "npm run build:android && cap sync android",
+    "android:sync": "npm run build:android && cross-env CAPACITOR_ALLOW_MIXED_CONTENT=true cap sync android",
     "android:test": "cd android && gradlew.bat test",
     "android:open": "cap open android"
   },

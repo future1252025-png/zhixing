@@ -18,6 +18,8 @@ DEFAULT_DATABASE_PATH = BACKEND_DIR / "data" / "campusmind.db"
 # default value; it is never used as an actual signing key anymore.
 DEFAULT_JWT_SECRET = "dev-only-change-me-before-production"
 DEFAULT_CORS_ALLOW_ORIGINS = (
+    "http://localhost",
+    "https://localhost",
     "http://127.0.0.1:5173",
     "http://localhost:5173",
     "http://127.0.0.1:5179",
