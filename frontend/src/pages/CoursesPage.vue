@@ -1116,7 +1116,7 @@ onBeforeUnmount(() => {
 .week-head {
   position: sticky;
   /* 导航栏 58px + 刘海安全区，吸顶表头正好贴住导航底边 */
-  top: calc(var(--nav-height, 58px) + env(safe-area-inset-top, 0px));
+  top: calc(var(--nav-height, 58px) + var(--app-safe-area-top, env(safe-area-inset-top, 0px)));
   z-index: 6;
   display: grid;
   grid-template-columns: var(--time-rail) repeat(7, minmax(0, 1fr));

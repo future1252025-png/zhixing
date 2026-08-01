@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createApp, defineComponent, h, nextTick, ref } from 'vue'
 
 import { isAMapConfigured, loadAMapPlugin, loadAMapSdk } from '@/utils/amap'
-import { MAP_DRAG_HOLD_DELAY_MS } from '@/utils/mapInteraction'
 import RealCampusMap from './RealCampusMap.vue'
 
 
@@ -30,21 +29,6 @@ async function settle(): Promise<void> {
   await Promise.resolve()
   await Promise.resolve()
   await nextTick()
-}
-
-function dispatchPointer(
-  target: Element,
-  type: string,
-  values: { pointerId: number; pointerType: string; clientX: number; clientY: number }
-): void {
-  const event = new Event(type, { bubbles: true, cancelable: true })
-  Object.defineProperties(event, {
-    pointerId: { value: values.pointerId },
-    pointerType: { value: values.pointerType },
-    clientX: { value: values.clientX },
-    clientY: { value: values.clientY }
-  })
-  target.dispatchEvent(event)
 }
 
 
@@ -352,7 +336,7 @@ describe('RealCampusMap async lifecycle', () => {
       render() {
         return h(RealCampusMap, {
           buildings: [
-            { ...base, id: 1, name: '教学楼', latitude: 30.59, longitude: 114.33 },
+            { ...base, id: 1, name: '湖北大学（武昌主校区）教学楼', latitude: 30.59, longitude: 114.33 },
             { ...base, id: 2, name: '图书馆', latitude: 30.59, longitude: 114.6 }
           ]
         })
@@ -366,18 +350,12 @@ describe('RealCampusMap async lifecycle', () => {
     const content = String((amap.Marker.mock.calls[0] as unknown[] as [{ content: string }])[0].content)
     expect(content).toContain('map-pin-tip')
     expect(content).toContain('教学楼')
+    expect(content).not.toContain('湖北大学')
 
     application.unmount()
   })
 
-  it('requires a steady touch hold before manually panning the map', async () => {
-    vi.useFakeTimers()
-    const originalMatchMedia = window.matchMedia
-    Object.defineProperty(window, 'matchMedia', {
-      configurable: true,
-      value: vi.fn(() => ({ matches: true }))
-    })
-
+  it('enables native map dragging immediately without a long-press gate', async () => {
     const mapInstance = {
       add: vi.fn(),
       remove: vi.fn(),
@@ -386,8 +364,6 @@ describe('RealCampusMap async lifecycle', () => {
       off: vi.fn(),
       getZoom: vi.fn(() => 16),
       setCenter: vi.fn(),
-      setStatus: vi.fn(),
-      panBy: vi.fn(),
       destroy: vi.fn()
     }
     const amap = {
@@ -409,53 +385,11 @@ describe('RealCampusMap async lifecycle', () => {
 
       expect(amap.Map).toHaveBeenCalledWith(
         container,
-        expect.objectContaining({ dragEnable: false })
+        expect.objectContaining({ dragEnable: true })
       )
-      dispatchPointer(container, 'pointerdown', {
-        pointerId: 6,
-        pointerType: 'mouse',
-        clientX: 18,
-        clientY: 28
-      })
-      expect(mapInstance.setStatus).toHaveBeenLastCalledWith({ dragEnable: true })
-      dispatchPointer(container, 'pointerdown', {
-        pointerId: 7,
-        pointerType: 'touch',
-        clientX: 20,
-        clientY: 30
-      })
-      await nextTick()
-      expect(mapInstance.setStatus).toHaveBeenLastCalledWith({ dragEnable: false })
-      expect(host.textContent).toContain('继续按住以拖动地图')
-      expect(mapInstance.panBy).not.toHaveBeenCalled()
-
-      await vi.advanceTimersByTimeAsync(MAP_DRAG_HOLD_DELAY_MS)
-      await nextTick()
-      expect(host.textContent).toContain('现在可以拖动地图')
-      dispatchPointer(container, 'pointermove', {
-        pointerId: 7,
-        pointerType: 'touch',
-        clientX: 34,
-        clientY: 38
-      })
-      expect(mapInstance.panBy).toHaveBeenCalledWith(14, 8, 0)
-
-      dispatchPointer(container, 'pointerup', {
-        pointerId: 7,
-        pointerType: 'touch',
-        clientX: 34,
-        clientY: 38
-      })
-      await nextTick()
-      expect(host.textContent).not.toContain('现在可以拖动地图')
-      expect(mapInstance.setStatus).toHaveBeenLastCalledWith({ dragEnable: false })
+      expect(host.textContent).not.toContain('按住以拖动地图')
     } finally {
       application.unmount()
-      Object.defineProperty(window, 'matchMedia', {
-        configurable: true,
-        value: originalMatchMedia
-      })
-      vi.useRealTimers()
     }
   })
 })

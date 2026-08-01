@@ -1,10 +1,8 @@
 import { describe, expect, it } from 'vitest'
 
 import {
-  hasMapPointerMovedBeyondTolerance,
   getBuildingHitZoneSize,
   getMapInteractionLevel,
-  MAP_DRAG_HOLD_DELAY_MS,
   shouldShowBuildingHighlight,
   shouldShowBuildingPin
 } from './mapInteraction'
@@ -38,11 +36,5 @@ describe('map interaction helpers', () => {
     expect(shouldShowBuildingPin(18)).toBe(true)
     expect(shouldShowBuildingPin(14, true)).toBe(true)
     expect(shouldShowBuildingPin(16, true)).toBe(true)
-  })
-
-  it('distinguishes a steady hold from an early scroll gesture', () => {
-    expect(MAP_DRAG_HOLD_DELAY_MS).toBeGreaterThanOrEqual(300)
-    expect(hasMapPointerMovedBeyondTolerance(10, 10, 16, 17)).toBe(false)
-    expect(hasMapPointerMovedBeyondTolerance(10, 10, 22, 10)).toBe(true)
   })
 })

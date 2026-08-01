@@ -74,6 +74,23 @@ describe('mobile input policy', () => {
   })
 })
 
+describe('native safe-area policy', () => {
+  it('marks the native platform without changing the browser document', () => {
+    const source = frontendFile('src/main.ts')
+    expect(source).toContain('Capacitor.isNativePlatform()')
+    expect(source).toContain("'capacitor-native'")
+    expect(source).toContain('`capacitor-${Capacitor.getPlatform()}`')
+  })
+
+  it('reserves Android status-bar and course anchor spacing only in Capacitor', () => {
+    const source = frontendFile('src/styles/fresh.css')
+    expect(source).toMatch(/html\.capacitor-android \{[\s\S]*?--app-safe-area-top:\s*max\(env\(safe-area-inset-top, 0px\), 32px\);/)
+    expect(source).toMatch(/html\.capacitor-android \.home-content \{[\s\S]*?padding-top:\s*calc\(var\(--app-safe-area-top\) \+ 18px\);/)
+    expect(source).toMatch(/html\.capacitor-android \.courses-content \{[\s\S]*?padding-top:\s*24px;/)
+    expect(source).toMatch(/html\.capacitor-android #semester-settings \{[\s\S]*?scroll-margin-top:\s*calc\(var\(--app-safe-area-top\) \+ var\(--nav-height, 58px\) \+ 28px\);/)
+  })
+})
+
 describe('readability policy', () => {
   it.each([
     ['#635b6b', '#fffdf8'],

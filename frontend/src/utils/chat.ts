@@ -1,6 +1,6 @@
 import type { Building } from '@/api/buildings'
 import type { Course } from '@/types/course'
-import { filterBuildingsByKeyword } from '@/utils/buildings'
+import { filterBuildingsByKeyword, formatBuildingDisplayName } from '@/utils/buildings'
 
 export const RECENT_CHAT_STORAGE_KEY = 'campusmind-recent-chats'
 const MAX_RECENT_CHAT_COUNT = 6
@@ -120,5 +120,6 @@ export function rememberRecentChatEntry(storage: StorageLike, entry: RecentChatE
 }
 
 export function formatChatEntryLabel(entry: Pick<RecentChatEntry, 'buildingName' | 'roomName'>): string {
-  return entry.roomName ? `${entry.buildingName} · ${entry.roomName}` : entry.buildingName
+  const buildingName = formatBuildingDisplayName(entry.buildingName)
+  return entry.roomName ? `${buildingName} · ${entry.roomName}` : buildingName
 }

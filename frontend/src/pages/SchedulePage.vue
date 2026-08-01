@@ -404,7 +404,7 @@ onMounted(loadScheduleData)
           <h2>{{ suggestion.next_course.course_name }}</h2>
           <p>
             {{ suggestion.next_course.start_time }}—{{ suggestion.next_course.end_time }}
-            · {{ suggestion.target_building.name }} · {{ suggestion.next_course.room_name }}
+            · {{ locationTitle(suggestion.target_building) }} · {{ suggestion.next_course.room_name }}
           </p>
           <span v-if="suggestion.next_course.teacher">{{ suggestion.next_course.teacher }}</span>
           <span v-if="suggestion.next_course.weeks">{{ suggestion.next_course.weeks }} 周</span>
@@ -413,12 +413,12 @@ onMounted(loadScheduleData)
         <div class="route-summary">
           <article>
             <span>从</span>
-            <strong>{{ suggestion.from_location.name }}</strong>
+            <strong>{{ locationTitle(suggestion.from_location) }}</strong>
           </article>
           <i><TechIcon name="arrow" :size="18" /></i>
           <article>
             <span>到</span>
-            <strong>{{ suggestion.target_building.name }}</strong>
+            <strong>{{ locationTitle(suggestion.target_building) }}</strong>
           </article>
         </div>
 

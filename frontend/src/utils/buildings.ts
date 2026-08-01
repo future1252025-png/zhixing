@@ -6,6 +6,19 @@ export type SearchableBuilding = {
   walk_hint?: string | null
 }
 
+const CAMPUS_BUILDING_PREFIX = /^湖北大学\s*(?:(?:[（(]\s*武昌(?:主)?校区\s*[）)])|武昌(?:主)?校区)?\s*(?:[-—–·•:：/\\|]\s*)*/
+
+/**
+ * 地点原名用于搜索、匹配和路线；界面只展示校区前缀之后的具体建筑名。
+ */
+export function formatBuildingDisplayName(value: string): string {
+  const name = value.trim()
+  if (!name) return ''
+
+  const conciseName = name.replace(CAMPUS_BUILDING_PREFIX, '').trim()
+  return conciseName || name
+}
+
 function normalizeKeyword(value: string): string {
   return value.trim().toLowerCase()
 }

@@ -6,6 +6,7 @@ import { getBuildingDetail, type Building } from '@/api/buildings'
 import { extractBusinessError } from '@/api/errors'
 import { createBuildingMessage, getBuildingMessages, validateMessageContent, type BuildingMessage, type MessageLocationSource } from '@/api/messages'
 import TechIcon from '@/components/TechIcon.vue'
+import { formatBuildingDisplayName } from '@/utils/buildings'
 import { parseApiDateTime } from '@/utils/dateTime'
 import { haversineDistanceMeters } from '@/utils/geo'
 import { useKeyboardInset } from '@/utils/keyboardInset'
@@ -254,7 +255,7 @@ watch(composerLift, () => {
         <span class="message-leaves" aria-hidden="true"><i></i><i></i></span>
         <span class="channel-icon"><TechIcon name="chat" :size="21" /></span>
         <div class="heading-copy">
-          <small>{{ building?.name || '校园地点' }}</small>
+          <small>{{ building ? formatBuildingDisplayName(building.name) : '校园地点' }}</small>
           <strong>{{ roomTitle }}</strong>
           <span>这里的留言按时间慢慢排列</span>
         </div>

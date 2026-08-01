@@ -26,6 +26,7 @@ import {
   filterCoursesByWeek,
   findNextCourse
 } from '@/utils/course'
+import { formatBuildingDisplayName } from '@/utils/buildings'
 import { createScopedStorage } from '@/utils/scopedStorage'
 import {
   consumeLoginIntroFlag,
@@ -367,9 +368,9 @@ onUnmounted(() => {
           >
             <span class="place-mark"><i></i></span>
             <span>
-              <strong>{{ result.roomName || result.building.name }}</strong>
+              <strong>{{ result.roomName || formatBuildingDisplayName(result.building.name) }}</strong>
               <small>
-                {{ result.roomName ? `${result.building.name} · 教室频道` : `${result.building.type} · 地点频道` }}
+                {{ result.roomName ? `${formatBuildingDisplayName(result.building.name)} · 教室频道` : `${result.building.type} · 地点频道` }}
               </small>
             </span>
             <TechIcon name="arrow" :size="17" />
@@ -418,7 +419,7 @@ onUnmounted(() => {
           >
             <span class="place-index">{{ String(index + 1).padStart(2, '0') }}</span>
             <small>{{ building.type }}</small>
-            <strong>{{ building.name }}</strong>
+            <strong>{{ formatBuildingDisplayName(building.name) }}</strong>
             <span class="place-enter"><TechIcon name="chat" :size="14" /> 进频道聊聊 <TechIcon name="arrow" :size="15" /></span>
           </button>
         </div>
@@ -918,13 +919,10 @@ onUnmounted(() => {
 
 .search-results strong,
 .search-results small {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
-.search-results strong { font-size: 13px; }
-.search-results strong { font-size: 15px; }
+.search-results strong { font-size: 15px; line-height: 1.4; }
 .search-results small { color: var(--fresh-muted); font-size: 13px; }
 
 .place-mark {
@@ -1044,11 +1042,10 @@ onUnmounted(() => {
 }
 
 .place-grid strong {
-  overflow: hidden;
   margin-top: 3px;
   font-size: 16px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
 }
 
 .place-enter {

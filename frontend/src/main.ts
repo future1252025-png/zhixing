@@ -1,5 +1,6 @@
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'
+import { Capacitor } from '@capacitor/core'
 import { showFailToast } from 'vant'
 // 函数式调用组件（showToast/showConfirmDialog 等）不经模板解析，需手动引入样式
 import 'vant/es/toast/style/index'
@@ -18,6 +19,13 @@ import './styles/fresh.css'
 
 // 旧版本把课表浏览周当成全局真实周；新版本由后端学期状态统一裁决。
 localStorage.removeItem('campusmind-selected-week')
+
+if (Capacitor.isNativePlatform()) {
+  document.documentElement.classList.add(
+    'capacitor-native',
+    `capacitor-${Capacitor.getPlatform()}`
+  )
+}
 
 const app = createApp(App)
 const pinia = createPinia()

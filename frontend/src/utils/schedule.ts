@@ -5,6 +5,7 @@ import type {
   ScheduleStatus
 } from '@/types/schedule'
 import type { BusinessError } from '@/types/api'
+import { formatBuildingDisplayName } from '@/utils/buildings'
 
 export type StatusMeta = {
   label: string
@@ -171,26 +172,9 @@ export function getLocationDisplayInfo(
 ): LocationDisplayInfo {
   const name = location.name.trim()
   const type = location.type?.trim() || '校园地点'
-  const campusPrefix = name.includes('湖北大学') && name.includes('武昌校区')
-    ? '湖北大学武昌校区'
-    : ''
-  const title = name
-    .replace(/^湖北大学(?:\(|（)武昌校区(?:\)|）)/, '')
-    .replace(/^湖北大学武昌校区/, '')
-    .replace(/^湖北大学[-—·\s]*/, '')
-    .replace(/^[-—·\s]+/, '')
-    .trim()
-
-  if (!title || title === name) {
-    return {
-      title: name,
-      subtitle: type
-    }
-  }
-
   return {
-    title,
-    subtitle: campusPrefix ? `${campusPrefix} · ${type}` : type
+    title: formatBuildingDisplayName(name),
+    subtitle: type
   }
 }
 

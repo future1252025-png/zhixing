@@ -129,7 +129,7 @@ describe('schedule helpers', () => {
       type: '校园地点'
     })).toEqual({
       title: '生命科学学院',
-      subtitle: '湖北大学武昌校区 · 校园地点'
+      subtitle: '校园地点'
     })
 
     expect(getLocationDisplayInfo({

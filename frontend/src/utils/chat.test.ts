@@ -5,6 +5,7 @@ import type { Course } from '@/types/course'
 import {
   buildChatSearchResults,
   buildNextCourseChatTarget,
+  formatChatEntryLabel,
   readRecentChatEntries,
   rememberRecentChatEntry
 } from './chat'
@@ -68,6 +69,17 @@ function createMemoryStorage(initial: Record<string, string> = {}) {
 }
 
 describe('chat utilities', () => {
+  it('uses concise building names in recent chat labels', () => {
+    expect(formatChatEntryLabel({
+      buildingName: '湖北大学（武昌主校区）双创大楼A座',
+      roomName: null
+    })).toBe('双创大楼A座')
+    expect(formatChatEntryLabel({
+      buildingName: '湖北大学武昌校区图书馆',
+      roomName: 'A203'
+    })).toBe('图书馆 · A203')
+  })
+
   it('builds a next course chat target with room name', () => {
     expect(buildNextCourseChatTarget(course)).toEqual({
       buildingId: 1,

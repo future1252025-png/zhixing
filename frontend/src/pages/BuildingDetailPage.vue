@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { getBuildingDetail, type Building } from '@/api/buildings'
 import RealCampusMap from '@/components/RealCampusMap.vue'
 import TechIcon from '@/components/TechIcon.vue'
+import { formatBuildingDisplayName } from '@/utils/buildings'
 import { goBack } from '@/utils/navigation'
 
 const route = useRoute()
@@ -61,7 +62,7 @@ onMounted(loadBuilding)
           <span class="place-number">{{ String(building.id).padStart(2, '0') }}</span>
           <div class="place-copy">
             <span class="fresh-kicker">{{ building.type }}</span>
-            <h1>{{ building.name }}</h1>
+            <h1>{{ formatBuildingDisplayName(building.name) }}</h1>
             <p>{{ building.description }}</p>
           </div>
           <div class="place-walk">

@@ -261,11 +261,20 @@ test('mobile core journey keeps weeks, locations, sessions, text, and actions tr
   await screenshot(page, testInfo, 'home-current-week.png')
   await assertPageQuality(page)
 
+  const prefixedPlaceNames = await page.locator('.place-grid strong').allTextContents()
+  expect(prefixedPlaceNames.filter((name) => name.trim().startsWith('湖北大学'))).toEqual([])
+  const homeMap = page.locator('.map-section')
+  await homeMap.scrollIntoViewIfNeeded()
+  await homeMap.getByPlaceholder('搜索地点、学院、食堂、公寓').fill('国际教育学院')
+  await expect(homeMap.locator('.map-search-results')).toContainText('国际教育学院')
+  await expect(homeMap.locator('.map-search-results')).not.toContainText('湖北大学')
+  await screenshot(page, testInfo, 'home-map-concise-names.png')
+
   await page.getByRole('link', { name: /出发/ }).click()
   await page.waitForURL('**/schedule')
   await page.getByRole('button', { name: /看看什么时候出发/ }).click()
-  await expect(page.getByText(`湖北大学武昌校区国际教育学院 · ${fullManualRoom}`)).toBeVisible()
-  await page.getByText(`湖北大学武昌校区国际教育学院 · ${fullManualRoom}`).scrollIntoViewIfNeeded()
+  await expect(page.getByText(`国际教育学院 · ${fullManualRoom}`)).toBeVisible()
+  await page.getByText(`国际教育学院 · ${fullManualRoom}`).scrollIntoViewIfNeeded()
   await screenshot(page, testInfo, 'departure-advice.png')
   await assertPageQuality(page)
 

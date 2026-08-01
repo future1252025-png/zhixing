@@ -8,6 +8,7 @@ import {
 } from '@/api/messages'
 import TechIcon from '@/components/TechIcon.vue'
 import { useAuthStore } from '@/stores/auth'
+import { formatBuildingDisplayName } from '@/utils/buildings'
 import { rememberRecentChatEntry } from '@/utils/chat'
 import { goBack } from '@/utils/navigation'
 import { createScopedStorage } from '@/utils/scopedStorage'
@@ -118,7 +119,7 @@ onMounted(loadPage)
           <span class="channel-sun" aria-hidden="true"></span>
           <span class="talk-bubbles" aria-hidden="true"><i></i><i></i><i></i></span>
           <span class="fresh-kicker">{{ building?.type || '校园地点' }}</span>
-          <h1>{{ building?.name || '地点频道' }}</h1>
+          <h1>{{ building ? formatBuildingDisplayName(building.name) : '地点频道' }}</h1>
           <p>{{ roomCountText }} · 选择一个频道，看看此刻留在这里的话。</p>
           <div class="channel-count">
             <span>可进入频道</span>
