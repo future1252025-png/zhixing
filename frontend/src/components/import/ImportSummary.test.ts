@@ -11,6 +11,7 @@ describe('ImportSummary', () => {
         total: 5,
         resolved: 3,
         unresolved: 2,
+        pending: 0,
         conflicts: 1,
         ready: false
       }
@@ -31,11 +32,29 @@ describe('ImportSummary', () => {
         total: 2,
         resolved: 2,
         unresolved: 0,
+        pending: 0,
         conflicts: 0,
         ready: true
       }
     })
 
     expect(wrapper.text()).toContain('核心排课信息完整，可以整批导入')
+  })
+
+  it('describes importable rows with missing details as pending completion', () => {
+    const wrapper = mount(ImportSummary, {
+      props: {
+        filename: 'schedule.htm',
+        total: 2,
+        resolved: 2,
+        unresolved: 0,
+        pending: 1,
+        conflicts: 0,
+        ready: true
+      }
+    })
+
+    expect(wrapper.text()).toContain('可以整批导入')
+    expect(wrapper.text()).toContain('1 门课程之后可继续补全')
   })
 })

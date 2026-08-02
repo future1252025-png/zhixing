@@ -37,7 +37,7 @@ function isLoginIntroSnapshot(value: unknown): value is LoginIntroSnapshot {
 }
 
 export function buildLoginIntroSnapshot(course: Course | null): LoginIntroSnapshot | null {
-  if (!course) {
+  if (!course || !course.start_time) {
     return null
   }
   return {

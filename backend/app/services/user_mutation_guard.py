@@ -8,7 +8,7 @@ from sqlalchemy import update
 from sqlalchemy.orm import Session, SessionTransaction
 
 from app.core.errors import BusinessError
-from app.models import SemesterSetting
+from app.models import SemesterSetting, User
 
 
 @dataclass(frozen=True)
@@ -29,7 +29,15 @@ def acquire_user_mutation_guard(session: Session, user_id: int) -> UserMutationG
         .values(updated_at=SemesterSetting.updated_at)
     )
     if result.rowcount != 1:
-        raise BusinessError(409, "semester_unconfigured", "Semester is not configured")
+        # A user can import a timetable before configuring the semester. Keep a
+        # stable row-level lock for that case without inventing a semester date.
+        result = session.execute(
+            update(User)
+            .where(User.id == user_id)
+            .values(username=User.username)
+        )
+        if result.rowcount != 1:
+            raise BusinessError(404, "user_not_found", "User not found")
     transaction = _current_transaction(session)
     if transaction is None or not transaction.is_active:
         raise RuntimeError("user mutation guard requires an active transaction")

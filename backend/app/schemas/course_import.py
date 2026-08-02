@@ -66,6 +66,17 @@ class ImportCommitManifest(BaseModel):
     # Optional compatibility path for older app builds. New clients omit this;
     # legacy values only override internal map routing fields, never source text.
     resolutions: list[ImportResolution] = Field(default_factory=list)
+    excluded_row_refs: list[str] = Field(default_factory=list, max_length=500)
+
+    @field_validator("excluded_row_refs")
+    @classmethod
+    def normalize_excluded_row_refs(cls, values: list[str]) -> list[str]:
+        normalized = [value.strip() for value in values]
+        if any(not value or len(value) > 80 for value in normalized):
+            raise ValueError("excluded row refs must contain 1 to 80 characters")
+        if len(set(normalized)) != len(normalized):
+            raise ValueError("excluded row refs must be unique")
+        return normalized
 
 
 class ImportCommitResponse(BaseModel):

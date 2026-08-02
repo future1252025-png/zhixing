@@ -132,4 +132,20 @@ describe('courses api', () => {
     expect(JSON.parse(String(form.get('manifest')))).toEqual({ sha256: 'b'.repeat(64) })
     expect(result).toEqual({ created_count: 1, course_ids: [17] })
   })
+
+  it('sends explicitly excluded preview rows in the verified manifest', async () => {
+    const file = new File(['original'], 'schedule.xlsx')
+    vi.mocked(request.post).mockResolvedValue({
+      data: { created_count: 1, course_ids: [17] }
+    })
+
+    await commitCourseImport(file, 'c'.repeat(64), ['row-14'])
+
+    const [, body] = vi.mocked(request.post).mock.calls[0]!
+    const form = body as FormData
+    expect(JSON.parse(String(form.get('manifest')))).toEqual({
+      sha256: 'c'.repeat(64),
+      excluded_row_refs: ['row-14']
+    })
+  })
 })

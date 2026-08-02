@@ -4,6 +4,7 @@ defineProps<{
   total: number
   resolved: number
   unresolved: number
+  pending: number
   conflicts: number
   ready: boolean
 }>()
@@ -24,7 +25,8 @@ defineProps<{
       <span :class="{ warning: unresolved }"><small>解析异常</small><b>{{ unresolved }}</b></span>
       <span :class="{ danger: conflicts }"><small>冲突</small><b>{{ conflicts }}</b></span>
     </div>
-    <p v-if="ready"><i aria-hidden="true">✓</i> 核心排课信息完整，可以整批导入</p>
+    <p v-if="ready && pending"><i aria-hidden="true">i</i> 可以整批导入；{{ pending }} 门课程之后可继续补全</p>
+    <p v-else-if="ready"><i aria-hidden="true">✓</i> 核心排课信息完整，可以整批导入</p>
     <p v-else><i aria-hidden="true">!</i> 部分课程的时间等核心信息无法识别</p>
   </section>
 </template>

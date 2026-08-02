@@ -24,7 +24,7 @@ from app.db.database import Base, create_sqlite_engine, get_session, init_db
 from app.db.seed import seed_demo_data
 from app.main import app
 from app.models import Building, Course, SemesterSetting, User
-from app.schemas.course import CourseCreate, CourseRead, CourseUpdate
+from app.schemas.course import CourseCreate, CourseImportCreate, CourseRead, CourseUpdate
 from app.services.course_service import add_course, list_courses, update_course
 from app.api.semester import persist_semester_setting_with_retry
 from app.services.user_mutation_guard import (
@@ -205,6 +205,19 @@ def test_course_schema_requires_and_normalizes_weeks() -> None:
         CourseCreate.model_validate(course_payload(1, weeks="   "))
     with pytest.raises(ValueError):
         CourseCreate.model_validate({key: value for key, value in payload.items() if key != "weeks"})
+
+
+def test_import_schema_accepts_a_fully_missing_schedule_but_not_a_partial_one() -> None:
+    payload = course_payload(1)
+    payload["start_time"] = None
+    payload["end_time"] = None
+
+    course = CourseImportCreate.model_validate(payload)
+
+    assert course.start_time is None
+    assert course.end_time is None
+    with pytest.raises(ValueError):
+        CourseImportCreate.model_validate({**payload, "start_time": "08:00"})
 
 
 def test_course_update_rejects_explicit_null_or_blank_weeks_and_normalizes_provided_value() -> None:

@@ -228,10 +228,10 @@ describe('CourseImportPage', () => {
     expect(mocks.captureHubuCourseTable).toHaveBeenCalledTimes(1)
     expect(mocks.captureToHtmlFile).toHaveBeenCalledWith(capture)
     expect(mocks.previewCourseImport).toHaveBeenCalledWith(capturedFile)
-    expect(mocks.commitCourseImport).toHaveBeenCalledWith(capturedFile, 'a'.repeat(64))
+    expect(mocks.commitCourseImport).toHaveBeenCalledWith(capturedFile, 'a'.repeat(64), [])
     expect(wrapper.text()).toContain('已从湖北大学教务系统安全采集')
     expect(wrapper.get('.capture-source').attributes('href')).toBe(capture.sourceUrl)
-    expect(wrapper.text()).toContain('2 门课程已完整导入')
+    expect(wrapper.text()).toContain('2 门课程已覆盖导入')
   })
 
   it('submits the unchanged original file without per-row location resolutions', async () => {
@@ -247,10 +247,10 @@ describe('CourseImportPage', () => {
 
     expect(mocks.commitCourseImport).toHaveBeenCalledTimes(1)
     expect(coursesStore.loaded).toBe(false)
-    expect(mocks.commitCourseImport).toHaveBeenCalledWith(file, 'a'.repeat(64))
+    expect(mocks.commitCourseImport).toHaveBeenCalledWith(file, 'a'.repeat(64), [])
     expect(mocks.createCourse).not.toHaveBeenCalled()
     expect(mocks.push).not.toHaveBeenCalled()
-    expect(wrapper.text()).toContain('2 门课程已完整导入')
+    expect(wrapper.text()).toContain('2 门课程已覆盖导入')
 
     await wrapper.get('[data-testid="view-courses"]').trigger('click')
     expect(mocks.push).toHaveBeenCalledWith('/courses')
@@ -291,7 +291,7 @@ describe('CourseImportPage', () => {
     expect(HTMLElement.prototype.scrollIntoView).toHaveBeenCalled()
   })
 
-  it('still blocks import when a core schedule field cannot be parsed', async () => {
+  it('keeps a course importable when its schedule still needs completion', async () => {
     mocks.previewCourseImport.mockResolvedValue({
       ...preview,
       candidates: [
@@ -306,8 +306,100 @@ describe('CourseImportPage', () => {
     const wrapper = await mountPage()
     await chooseAndPreview(wrapper)
 
-    expect(wrapper.get('[data-testid="commit-import"]').attributes('disabled')).toBeDefined()
-    expect(wrapper.text()).toContain('无法识别上课时间')
-    expect(wrapper.text()).toContain('还有 1 门课程的排课信息无法识别')
+    expect(wrapper.get('[data-testid="commit-import"]').attributes('disabled')).toBeUndefined()
+    expect(wrapper.text()).toContain('待补全课程')
+    expect(wrapper.text()).toContain('1 门课程之后可继续补全')
+
+    await wrapper.get('[data-testid="commit-import"]').trigger('click')
+    await flushPromises()
+
+    expect(mocks.commitCourseImport).toHaveBeenCalledTimes(1)
+  })
+
+  it('automatically excludes a blocking row and imports the remaining courses', async () => {
+    mocks.previewCourseImport.mockResolvedValue({
+      ...preview,
+      candidates: [
+        preview.candidates[0]!,
+        {
+          ...preview.candidates[1]!,
+          weeks: null,
+          errors: [
+            { code: 'weeks_unrecognized', field: 'weeks', message: '无法识别上课周次' }
+          ]
+        }
+      ],
+      can_commit: false
+    })
+    mocks.commitCourseImport.mockResolvedValue({ created_count: 1, course_ids: [31] })
+    const wrapper = await mountPage()
+    const file = await chooseAndPreview(wrapper)
+
+    expect(wrapper.get('[data-row-ref="row-2"]').classes()).toContain('is-excluded')
+    expect(wrapper.text()).toContain('这门课程已从本次导入中排除')
+    expect(wrapper.text()).toContain('已排除 1 门，本次导入 1 门')
+    expect(wrapper.get('[data-testid="commit-import"]').attributes('disabled')).toBeUndefined()
+
+    await wrapper.get('[data-testid="commit-import"]').trigger('click')
+    await flushPromises()
+
+    expect(mocks.commitCourseImport).toHaveBeenCalledWith(
+      file,
+      'a'.repeat(64),
+      ['row-2']
+    )
+    expect(wrapper.text()).toContain('1 门课程已覆盖导入')
+  })
+
+  it('auto-skips invalid and empty-schedule rows returned by the native browser', async () => {
+    mocks.nativeHubuImportAvailable.mockReturnValue(true)
+    const capture = {
+      cancelled: false,
+      filename: '湖北大学课表.html',
+      html: '<table></table>',
+      sourceUrl: 'https://jwxt.hubu.edu.cn/jsxsd/xskb/xskb_list.do'
+    }
+    const capturedFile = new File([capture.html], capture.filename, { type: 'text/html' })
+    mocks.captureHubuCourseTable.mockResolvedValue(capture)
+    mocks.captureToHtmlFile.mockReturnValue(capturedFile)
+    mocks.previewCourseImport.mockResolvedValue({
+      ...preview,
+      candidates: [
+        preview.candidates[0]!,
+        {
+          ...preview.candidates[1]!,
+          source: source({
+            raw_course_name: '课程设计',
+            raw_time_or_section: '',
+            raw_location: ''
+          }),
+          course_name: '课程设计',
+          start_time: null,
+          end_time: null,
+          weeks: null,
+          suggested_building_id: null,
+          suggested_building_name: null,
+          suggested_room_name: null,
+          errors: [
+            { code: 'weeks_unrecognized', field: 'weeks', message: '无法识别上课周次' },
+            { code: 'time_unrecognized', field: 'time', message: '无法识别上课时间' },
+            { code: 'room_missing', field: 'room_name', message: '缺少上课地点' }
+          ]
+        }
+      ],
+      can_commit: false
+    })
+    mocks.commitCourseImport.mockResolvedValue({ created_count: 1, course_ids: [41] })
+
+    const wrapper = await mountPage()
+    await wrapper.get('[data-testid="hubu-native-import"]').trigger('click')
+    await flushPromises()
+
+    expect(mocks.commitCourseImport).toHaveBeenCalledWith(
+      capturedFile,
+      'a'.repeat(64),
+      ['row-2']
+    )
+    expect(wrapper.text()).toContain('1 门课程已覆盖导入')
   })
 })

@@ -32,6 +32,7 @@ from app.services.week_rule import WeekExpressionError, normalize_weeks
 
 CourseSourceKind = Literal["manual", "import"]
 CourseWritePayload = CourseCreate | CourseImportCreate
+UNCONFIGURED_IMPORT_MAX_WEEKS = 30
 
 
 def building_exists(session: Session, building_id: int) -> bool:
@@ -71,15 +72,21 @@ def add_course(
     else:
         require_user_mutation_guard(session, user_id, guard)
     setting = get_setting(session, user_id)
-    if setting is None:
+    if setting is None and source_kind == "manual":
         raise BusinessError(409, "semester_unconfigured", "Semester is not configured")
+    max_week = (
+        setting.total_weeks
+        if setting is not None
+        else UNCONFIGURED_IMPORT_MAX_WEEKS
+    )
     values = payload.model_dump()
     values["weeks"] = _validate_course_values(
         session,
         user_id,
         values,
-        setting.total_weeks,
+        max_week,
         require_location=source_kind == "manual",
+        allow_incomplete_schedule=source_kind == "import",
     )
     course = Course(user_id=user_id, source_kind=source_kind, **values)
     session.add(course)
@@ -98,18 +105,22 @@ def validate_course_batch(
     entries: Sequence[tuple[str, CourseWritePayload]],
     guard: UserMutationGuard,
     require_location: bool = True,
+    replace_existing: bool = False,
 ) -> list[tuple[str, CourseWritePayload]]:
     """Validate a complete batch before its first course row is inserted."""
 
     require_user_mutation_guard(session, user_id, guard)
     setting = get_setting(session, user_id)
-    if setting is None:
-        raise BusinessError(409, "semester_unconfigured", "Semester is not configured")
+    max_week = (
+        setting.total_weeks
+        if setting is not None
+        else UNCONFIGURED_IMPORT_MAX_WEEKS
+    )
 
-    existing_values = _existing_course_values(
+    existing_values = [] if replace_existing else _existing_course_values(
         session,
         user_id,
-        setting.total_weeks,
+        max_week,
         excluded_course_id=None,
         allow_other_invalid=False,
     )
@@ -123,14 +134,19 @@ def validate_course_batch(
         normalized_weeks, candidate = _validated_course_value(
             session,
             values,
-            setting.total_weeks,
+            max_week,
             candidate_id=synthetic_id,
             require_location=require_location,
+            allow_incomplete_schedule=isinstance(payload, CourseImportCreate),
         )
-        conflicts = detect_conflicts(
-            candidate,
-            comparison_values,
-            max_week=setting.total_weeks,
+        conflicts = (
+            detect_conflicts(
+                candidate,
+                comparison_values,
+                max_week=max_week,
+            )
+            if candidate is not None
+            else []
         )
         if conflicts:
             details: list[dict[str, object]] = []
@@ -158,8 +174,9 @@ def validate_course_batch(
 
         normalized_payload = payload.model_copy(update={"weeks": normalized_weeks})
         validated.append((row_ref, normalized_payload))
-        batch_row_refs[synthetic_id] = row_ref
-        comparison_values.append(candidate)
+        if candidate is not None:
+            batch_row_refs[synthetic_id] = row_ref
+            comparison_values.append(candidate)
 
     return validated
 
@@ -201,6 +218,7 @@ def update_course(
         setting.total_weeks,
         excluded_course_id=course.id,
         allow_other_invalid=repairing_legacy_course,
+        allow_incomplete_schedule=course.source_kind == "import",
     )
     for field, value in values.items():
         setattr(course, field, value)
@@ -236,6 +254,7 @@ def _validate_course_values(
     excluded_course_id: int | None = None,
     allow_other_invalid: bool = False,
     require_location: bool = True,
+    allow_incomplete_schedule: bool = False,
 ) -> str:
     normalized_weeks, candidate = _validated_course_value(
         session,
@@ -243,11 +262,22 @@ def _validate_course_values(
         max_week,
         candidate_id=excluded_course_id,
         require_location=require_location,
+        allow_incomplete_schedule=allow_incomplete_schedule,
     )
-    conflicts = detect_conflicts(
-        candidate,
-        _existing_course_values(session, user_id, max_week, excluded_course_id, allow_other_invalid),
-        max_week=max_week,
+    conflicts = (
+        detect_conflicts(
+            candidate,
+            _existing_course_values(
+                session,
+                user_id,
+                max_week,
+                excluded_course_id,
+                allow_other_invalid,
+            ),
+            max_week=max_week,
+        )
+        if candidate is not None
+        else []
     )
     if conflicts:
         raise _conflict_error(conflicts)
@@ -261,7 +291,8 @@ def _validated_course_value(
     *,
     candidate_id: int | None,
     require_location: bool = True,
-) -> tuple[str, CourseValue]:
+    allow_incomplete_schedule: bool = False,
+) -> tuple[str, CourseValue | None]:
     if require_location:
         if not building_exists(session, _required_int(values, "building_id")):
             raise BusinessError(404, "building_not_found", "Building not found", fields=["building_id"])
@@ -269,15 +300,20 @@ def _validated_course_value(
         if location_requires_review(room_name):
             raise BusinessError(422, "invalid_room_name", "Room name must be a confirmed location", fields=["room_name"])
     try:
+        normalized_weeks = normalize_weeks(_required_str(values, "weeks"), max_week=max_week)
+    except WeekExpressionError as exc:
+        raise BusinessError(422, "invalid_course_weeks", str(exc), fields=["weeks"], details={"max_week": max_week}) from exc
+
+    raw_start_time = values.get("start_time")
+    raw_end_time = values.get("end_time")
+    if allow_incomplete_schedule and raw_start_time is None and raw_end_time is None:
+        return normalized_weeks, None
+    try:
         start_time = parse_course_time(_required_str(values, "start_time"))
         end_time = parse_course_time(_required_str(values, "end_time"))
         validate_time_range(start_time, end_time)
     except ValueError as exc:
         raise BusinessError(422, "invalid_course_time", str(exc), fields=["start_time", "end_time"]) from exc
-    try:
-        normalized_weeks = normalize_weeks(_required_str(values, "weeks"), max_week=max_week)
-    except WeekExpressionError as exc:
-        raise BusinessError(422, "invalid_course_weeks", str(exc), fields=["weeks"], details={"max_week": max_week}) from exc
     candidate = CourseValue(
         id=candidate_id,
         course_name=_required_str(values, "course_name"),
@@ -305,13 +341,20 @@ def _existing_course_values(
     for course in courses:
         if course.id == excluded_course_id:
             continue
+        if course.start_time is None and course.end_time is None:
+            continue
         issues: list[dict[str, str]] = []
-        try:
-            start_time = parse_course_time(course.start_time)
-            end_time = parse_course_time(course.end_time)
-            validate_time_range(start_time, end_time)
-        except ValueError:
+        if course.start_time is None or course.end_time is None:
             issues.append({"field": "time", "code": "invalid_time_range"})
+            start_time = None
+            end_time = None
+        else:
+            try:
+                start_time = parse_course_time(course.start_time)
+                end_time = parse_course_time(course.end_time)
+                validate_time_range(start_time, end_time)
+            except ValueError:
+                issues.append({"field": "time", "code": "invalid_time_range"})
         try:
             weeks = normalize_weeks(course.weeks, max_week=max_week)
         except WeekExpressionError:
@@ -339,6 +382,14 @@ def _existing_course_values(
 
 
 def _course_has_integrity_issues(course: Course, max_week: int) -> bool:
+    if course.start_time is None and course.end_time is None:
+        try:
+            normalize_weeks(course.weeks, max_week=max_week)
+        except WeekExpressionError:
+            return True
+        return False
+    if course.start_time is None or course.end_time is None:
+        return True
     try:
         validate_time_range(parse_course_time(course.start_time), parse_course_time(course.end_time))
         normalize_weeks(course.weeks, max_week=max_week)

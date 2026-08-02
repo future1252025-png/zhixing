@@ -5,6 +5,7 @@ import {
   buildEmptyCourseForm,
   buildCourseCreateQuery,
   buildCourseColorMap,
+  courseToForm,
   courseUsesStandardSlotTime,
   formatCourseLocation,
   formatTimetableCourseLocation,
@@ -241,6 +242,18 @@ describe('course helpers', () => {
     expect(courseUsesStandardSlotTime(exceptionalCourse, exceptionalSlot!)).toBe(false)
   })
 
+  it('keeps an imported course without a time editable instead of forcing it into a slot', () => {
+    const pendingCourse: Course = {
+      ...baseCourse,
+      source_kind: 'import',
+      start_time: null,
+      end_time: null
+    }
+
+    expect(getCourseDisplaySlot(pendingCourse)).toBeNull()
+    expect(courseToForm(pendingCourse)).toMatchObject({ start_time: '', end_time: '' })
+  })
+
   it('keeps full locations while removing timetable-only campus and building repetition', () => {
     const course = {
       ...baseCourse,
@@ -328,5 +341,18 @@ describe('course helpers', () => {
     )
 
     expect(result?.id).toBe(4)
+  })
+
+  it('ignores pending-time imports when looking for the next departure', () => {
+    const now = new Date('2026-06-15T10:00:00')
+    const result = findNextCourse(
+      [
+        { ...baseCourse, id: 2, start_time: null, end_time: null, source_kind: 'import' },
+        { ...baseCourse, id: 3, start_time: '14:00', end_time: '15:40' }
+      ],
+      now
+    )
+
+    expect(result?.id).toBe(3)
   })
 })

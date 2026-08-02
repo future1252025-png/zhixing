@@ -48,11 +48,15 @@ export async function previewCourseImport(
 
 export async function commitCourseImport(
   file: File,
-  sha256: string
+  sha256: string,
+  excludedRowRefs: string[] = []
 ): Promise<ImportCommitResponse> {
   const formData = new FormData()
   formData.append('file', file)
-  formData.append('manifest', JSON.stringify({ sha256 }))
+  formData.append('manifest', JSON.stringify({
+    sha256,
+    ...(excludedRowRefs.length ? { excluded_row_refs: excludedRowRefs } : {})
+  }))
   const response = await request.post<ImportCommitResponse>(
     '/api/courses/import',
     formData,

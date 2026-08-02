@@ -494,6 +494,27 @@ async function handleSubmit() {
   width: 43px;
 }
 
+@media (max-width: 520px) {
+  .auth-form :deep(.van-field__value) {
+    display: block;
+    min-width: 0;
+  }
+
+  .auth-form :deep(.van-field__body) {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .auth-form :deep(.van-field__label) {
+    width: 40px;
+  }
+
+  .auth-form :deep(.van-field__error-message) {
+    margin-top: 4px;
+    line-height: 1.4;
+  }
+}
+
 .privacy-note {
   display: flex;
   align-items: center;

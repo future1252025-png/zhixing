@@ -198,6 +198,11 @@ def find_next_course(
     )
     candidates: list[NextCourseCandidate] = []
     for course in courses:
+        # An imported course may intentionally wait for its schedule time.
+        # It remains visible in the timetable's pending section but cannot
+        # participate in departure calculations yet.
+        if course.start_time is None or course.end_time is None:
+            continue
         target_date = week_start + timedelta(days=course.weekday - 1)
         if target_date < current.date() or target_date > week_end:
             continue

@@ -284,6 +284,47 @@ def test_find_next_course_filters_out_courses_not_active_this_week(
     assert result is None
 
 
+def test_find_next_course_skips_imported_course_waiting_for_a_time(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    _, SessionLocal = client_and_session
+    with SessionLocal() as session:
+        user = create_service_user(session, "pending_time")
+        _, building = first_two_buildings(session)
+        session.add(
+            Course(
+                user_id=user.id,
+                course_name="待补全时间课程",
+                weekday=1,
+                start_time=None,
+                end_time=None,
+                building_id=building.id,
+                room_name="A101",
+                weeks="2",
+                source_kind="import",
+            )
+        )
+        upcoming = add_course(
+            session,
+            user,
+            building,
+            course_name="下一节完整课程",
+            weekday=1,
+            start_time="10:00",
+            end_time="11:40",
+            weeks="2",
+        )
+
+        result = find_next_course(
+            session,
+            user.id,
+            now=datetime(2026, 9, 7, 8, 0, tzinfo=SHANGHAI_TZ),
+        )
+
+    assert result is not None
+    assert result.course.id == upcoming.id
+
+
 def test_find_next_course_does_not_cross_from_sunday_into_next_week(
     client_and_session: tuple[TestClient, sessionmaker],
 ) -> None:

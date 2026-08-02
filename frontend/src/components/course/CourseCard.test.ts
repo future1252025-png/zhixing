@@ -66,6 +66,16 @@ describe('CourseCard', () => {
     expect(wrapper.find('[data-testid="repair-location"]').exists()).toBe(false)
   })
 
+  it('labels an imported course whose time still needs completion', () => {
+    const wrapper = mount(CourseCard, {
+      props: {
+        course: { ...course, start_time: null, end_time: null }
+      }
+    })
+
+    expect(wrapper.text()).toContain('时间待补充')
+  })
+
   it('wraps long locations instead of clipping them with an ellipsis', () => {
     const source = readFileSync(resolve(process.cwd(), 'src/components/course/CourseCard.vue'), 'utf8')
 

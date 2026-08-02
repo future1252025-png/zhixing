@@ -69,12 +69,15 @@ SECTION_RE = re.compile(
 )
 BRACKET_TOKEN_RE = re.compile(r"(?:\[[^\]]+\]|【[^】]+】)")
 RAW_WEEKS_RE = re.compile(
-    r"(?P<weeks>\d+(?:\s*[-,，]\s*\d+)*(?:\s*[（(]周[)）])?)"
+    r"(?P<weeks>\d+(?:\s*[-,，]\s*\d+)*"
+    r"(?:\s*(?:[（(]\s*(?:周|[单双]\s*周?)\s*[)）]|[单双]\s*周))?)"
 )
 DASH_RE = re.compile(r"^-{3,}$")
 CONNECTOR_CHARS = " -—–·()（）"
 MAX_XLSX_EXPANDED_BYTES = 50 * 1024 * 1024
-LOCATION_ISSUE_CODES = frozenset({"building_unrecognized", "room_missing"})
+NON_BLOCKING_IMPORT_ISSUE_CODES = frozenset(
+    {"building_unrecognized", "room_missing", "time_unrecognized"}
+)
 UNMAPPED_ROOM_FALLBACK = "待确认教室"
 
 
@@ -378,13 +381,13 @@ def _rows_to_raw_courses(rows: Sequence[Sequence[str]]) -> list[RawCourseRow]:
 
 
 def normalize_weeks(raw_weeks: str) -> str:
-    return (
-        raw_weeks.replace("(周)", "")
-        .replace("（周）", "")
-        .replace("，", ",")
-        .replace(" ", "")
-        .strip()
+    normalized = raw_weeks.translate(
+        str.maketrans({"（": "(", "）": ")", "，": ","})
     )
+    normalized = re.sub(r"\s+", "", normalized)
+    normalized = re.sub(r"\(([单双])周\)", r"(\1)", normalized)
+    normalized = re.sub(r"([单双])周$", r"(\1)", normalized)
+    return normalized.replace("(周)", "").strip()
 
 
 def _parse_time(raw_time_or_section: str) -> tuple[time | None, time | None]:
@@ -561,7 +564,7 @@ def build_course_import_preview(
         candidates=[_candidate_response(candidate) for candidate in candidates],
         can_commit=bool(candidates)
         and all(
-            all(issue.code in LOCATION_ISSUE_CODES for issue in candidate.errors)
+            all(issue.code in NON_BLOCKING_IMPORT_ISSUE_CODES for issue in candidate.errors)
             for candidate in candidates
         ),
     )
@@ -609,6 +612,46 @@ def _match_optional_resolutions(
     return {resolution.row_ref: resolution for resolution in resolutions}
 
 
+def _select_import_candidates(
+    candidates: Sequence[ImportCandidate],
+    excluded_row_refs: Sequence[str],
+) -> list[ImportCandidate]:
+    known_row_refs = {candidate.source.row_ref for candidate in candidates}
+    excluded = set(excluded_row_refs)
+    unknown = sorted(excluded - known_row_refs)
+    if unknown:
+        raise BusinessError(
+            409,
+            "import_exclusion_mismatch",
+            "排除的课程与当前文件不一致，请重新预览",
+            fields=["excluded_row_refs"],
+            details={"unknown_row_refs": unknown},
+        )
+
+    explicitly_selected = [
+        candidate
+        for candidate in candidates
+        if candidate.source.row_ref not in excluded
+    ]
+    selected = [
+        candidate
+        for candidate in explicitly_selected
+        if not (
+            candidate.start_time is None
+            and candidate.end_time is None
+            and not candidate.source.raw_location.strip()
+        )
+    ]
+    if not selected:
+        raise BusinessError(
+            422,
+            "import_empty_selection",
+            "当前课表没有可导入的有效课程",
+            fields=["excluded_row_refs"],
+        )
+    return selected
+
+
 def _resolve_import_candidates(
     session: Session,
     candidates: Sequence[ImportCandidate],
@@ -627,7 +670,7 @@ def _resolve_import_candidates(
                 "message": issue.message,
             }
             for issue in candidate.errors
-            if issue.code not in LOCATION_ISSUE_CODES
+            if issue.code not in NON_BLOCKING_IMPORT_ISSUE_CODES
         ]
         if resolution is not None:
             building = session.get(Building, resolution.building_id)
@@ -651,8 +694,6 @@ def _resolve_import_candidates(
         required_values = {
             "course_name": candidate.course_name,
             "weekday": candidate.weekday,
-            "start_time": candidate.start_time,
-            "end_time": candidate.end_time,
             "weeks": candidate.weeks,
         }
         missing_fields = [field for field, value in required_values.items() if value is None]
@@ -687,8 +728,16 @@ def _resolve_import_candidates(
                 course = CourseImportCreate(
                     course_name=candidate.course_name,
                     weekday=candidate.weekday,
-                    start_time=candidate.start_time.strftime("%H:%M"),
-                    end_time=candidate.end_time.strftime("%H:%M"),
+                    start_time=(
+                        candidate.start_time.strftime("%H:%M")
+                        if candidate.start_time
+                        else None
+                    ),
+                    end_time=(
+                        candidate.end_time.strftime("%H:%M")
+                        if candidate.end_time
+                        else None
+                    ),
                     building_id=building_id,
                     room_name=mapped_room,
                     teacher=candidate.teacher,
@@ -727,31 +776,6 @@ def _resolve_import_candidates(
     return resolved
 
 
-def _ensure_file_not_committed(
-    session: Session,
-    *,
-    user_id: int,
-    file_sha256: str,
-) -> None:
-    existing_source = session.scalar(
-        select(CourseImportSource.id)
-        .join(Course, Course.id == CourseImportSource.course_id)
-        .where(
-            Course.user_id == user_id,
-            CourseImportSource.file_sha256 == file_sha256,
-        )
-        .limit(1)
-    )
-    if existing_source is not None:
-        raise BusinessError(
-            409,
-            "import_already_committed",
-            "该课表文件已经导入，不能重复提交",
-            fields=["file"],
-            details={"sha256": file_sha256},
-        )
-
-
 def commit_course_import(
     session: Session,
     *,
@@ -777,10 +801,12 @@ def commit_course_import(
             fields=["file"],
         )
 
-    candidates = _parse_import_candidates(session, filename, content)
+    candidates = _select_import_candidates(
+        _parse_import_candidates(session, filename, content),
+        manifest.excluded_row_refs,
+    )
     resolution_map = _match_optional_resolutions(candidates, manifest.resolutions)
     guard = acquire_user_mutation_guard(session, user_id)
-    _ensure_file_not_committed(session, user_id=user_id, file_sha256=actual_sha)
     resolved = _resolve_import_candidates(session, candidates, resolution_map)
     validated_entries = validate_course_batch(
         session,
@@ -788,7 +814,18 @@ def commit_course_import(
         entries=[(item.source.row_ref, item.course) for item in resolved],
         guard=guard,
         require_location=False,
+        replace_existing=True,
     )
+
+    # A timetable import is a full snapshot, not an append. Validation happens
+    # before deletion, and the API commits the whole operation atomically, so a
+    # failed replacement leaves the previous timetable untouched.
+    existing_courses = list(
+        session.scalars(select(Course).where(Course.user_id == user_id)).all()
+    )
+    for existing_course in existing_courses:
+        session.delete(existing_course)
+    session.flush()
 
     created: list[Course] = []
     for item, (row_ref, payload) in zip(resolved, validated_entries, strict=True):

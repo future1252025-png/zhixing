@@ -21,6 +21,7 @@ import {
   formatTimetableCourseLocation,
   getCourseDisplaySlot,
   getCourseTimeSlots,
+  getWeekdayLabel,
   getQuickWeekOptions,
   getTeachingWeekOptions,
   WEEKDAYS
@@ -69,6 +70,11 @@ const courseActionOptions = [
   { name: '删除课程', color: '#b65f56' }
 ]
 const visibleCourses = computed(() => filterCoursesByWeek(courses.value, selectedWeek.value))
+const pendingScheduleCourses = computed(() =>
+  visibleCourses.value
+    .filter((course) => !course.start_time || !course.end_time)
+    .sort((left, right) => left.weekday - right.weekday || left.id - right.id)
+)
 const timetableCoursesByCell = computed(() => {
   const coursesByCell = new Map<string, Course[]>()
   for (const course of visibleCourses.value) {
@@ -78,15 +84,19 @@ const timetableCoursesByCell = computed(() => {
     const cellCourses = coursesByCell.get(key) ?? []
     cellCourses.push(course)
     cellCourses.sort((left, right) =>
-      left.start_time.localeCompare(right.start_time) || left.id - right.id
+      (left.start_time ?? '').localeCompare(right.start_time ?? '') || left.id - right.id
     )
     coursesByCell.set(key, cellCourses)
   }
   return coursesByCell
 })
-const activeCourseLocation = computed(() =>
-  activeCourse.value ? formatCourseLocation(activeCourse.value) : ''
-)
+const activeCourseDescription = computed(() => {
+  if (!activeCourse.value) return ''
+  return [
+    activeCourse.value.teacher ? `教师：${activeCourse.value.teacher}` : '',
+    formatCourseLocation(activeCourse.value)
+  ].filter(Boolean).join(' · ')
+})
 const quickWeekOptions = computed(() =>
   getQuickWeekOptions(
     selectedWeek.value,
@@ -533,11 +543,48 @@ onBeforeUnmount(() => {
         </div>
       </section>
 
-      <section
-        v-else
-        v-reveal="{ from: 'left', distance: 42 }"
-        class="timetable-shell fresh-card"
-      >
+      <template v-else>
+        <section
+          v-if="pendingScheduleCourses.length"
+          class="pending-courses fresh-card"
+          aria-labelledby="pending-courses-title"
+        >
+          <header>
+            <div>
+              <span>暂不占用课表时段</span>
+              <h2 id="pending-courses-title">待补全课程</h2>
+            </div>
+            <b>{{ pendingScheduleCourses.length }} 门</b>
+          </header>
+          <article
+            v-for="course in pendingScheduleCourses"
+            :key="course.id"
+            :class="{ 'is-deleting': deletingId === course.id }"
+          >
+            <div>
+              <small>{{ getWeekdayLabel(course.weekday) }} · 时间待补充</small>
+              <strong>{{ course.course_name }}</strong>
+              <span v-if="course.teacher" class="pending-teacher">教师：{{ course.teacher }}</span>
+              <span>{{ formatCourseLocation(course) }}</span>
+            </div>
+            <footer>
+              <button type="button" @click="openEditPage(course.id)">补全</button>
+              <button
+                type="button"
+                class="pending-delete"
+                :disabled="deletingId === course.id"
+                @click="confirmDelete(course)"
+              >
+                删除
+              </button>
+            </footer>
+          </article>
+        </section>
+
+        <section
+          v-reveal="{ from: 'left', distance: 42 }"
+          class="timetable-shell fresh-card"
+        >
         <header class="table-heading">
           <div><h2>第 {{ selectedWeek }} 周课表</h2><p>{{ selectedWeekDateRange }}</p></div>
           <span><i></i> {{ courseCountText }}</span>
@@ -629,11 +676,14 @@ onBeforeUnmount(() => {
                         <button
                           type="button"
                           class="course-content"
-                          :aria-label="`${weekday.label}${slot.label}，${course.course_name}，${formatCourseLocation(course)}，点击查看课程操作`"
+                          :aria-label="`${weekday.label}${slot.label}，${course.course_name}${course.teacher ? `，教师${course.teacher}` : ''}，${formatCourseLocation(course)}，点击查看课程操作`"
                           :disabled="deletingId === course.id"
                           @click="openCourseActions(course)"
                         >
                           <strong>{{ course.course_name }}</strong>
+                          <span v-if="course.teacher" class="compact-teacher">
+                            {{ course.teacher }}
+                          </span>
                           <span class="compact-location">
                             <span class="location-mark" aria-hidden="true">@</span>
                             <span>{{ formatTimetableCourseLocation(course) }}</span>
@@ -651,13 +701,14 @@ onBeforeUnmount(() => {
             </div>
           </Transition>
         </div>
-      </section>
+        </section>
+      </template>
 
       <van-action-sheet
         v-model:show="actionSheetVisible"
         class="course-action-sheet"
         :title="activeCourse?.course_name"
-        :description="activeCourseLocation"
+        :description="activeCourseDescription"
         :actions="courseActionOptions"
         cancel-text="取消"
         close-on-click-action
@@ -1049,6 +1100,89 @@ onBeforeUnmount(() => {
   gap: 6px;
 }
 
+.pending-courses {
+  display: grid;
+  gap: 12px;
+  padding: 18px;
+}
+
+.pending-courses > header,
+.pending-courses article,
+.pending-courses article footer {
+  display: flex;
+  align-items: center;
+}
+
+.pending-courses > header {
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.pending-courses > header span,
+.pending-courses article small,
+.pending-courses article span {
+  color: var(--fresh-muted);
+  font-size: 12px;
+}
+
+.pending-courses h2 {
+  margin: 3px 0 0;
+  color: var(--fresh-ink);
+  font-size: 20px;
+}
+
+.pending-courses > header b {
+  border-radius: var(--radius-pill);
+  background: var(--cm-amber-soft);
+  color: #775424;
+  font-size: 12px;
+  padding: 7px 10px;
+}
+
+.pending-courses article {
+  justify-content: space-between;
+  gap: 14px;
+  min-width: 0;
+  border: 1px solid var(--fresh-line);
+  border-radius: var(--radius-sm);
+  background: var(--fresh-paper-2);
+  padding: 12px;
+}
+
+.pending-courses article.is-deleting {
+  opacity: .6;
+}
+
+.pending-courses article > div {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.pending-courses article strong,
+.pending-courses article span {
+  overflow-wrap: anywhere;
+}
+
+.pending-courses article footer {
+  flex: 0 0 auto;
+  gap: 7px;
+}
+
+.pending-courses article button {
+  min-height: 42px;
+  border: 1px solid var(--fresh-line-strong);
+  border-radius: 12px;
+  background: var(--fresh-paper);
+  color: var(--fresh-green-dark);
+  font-weight: 700;
+  padding: 0 13px;
+}
+
+.pending-courses article .pending-delete {
+  color: #9a4e47;
+}
+
 .timetable-shell {
   --time-rail: clamp(44px, 7vw, 58px);
   --timetable-width: min(920px, calc(100vw - 12px));
@@ -1395,6 +1529,18 @@ onBeforeUnmount(() => {
   font-weight: 700;
   overflow-wrap: anywhere;
   text-wrap: balance;
+}
+
+.compact-teacher {
+  display: block;
+  width: 100%;
+  margin-top: 5px;
+  color: color-mix(in srgb, var(--course-accent) 30%, #34483b);
+  font-size: clamp(9px, 1.35vw, 11px);
+  font-weight: 650;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  text-align: center;
 }
 
 .compact-location {

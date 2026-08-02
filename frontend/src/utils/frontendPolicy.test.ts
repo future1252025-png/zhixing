@@ -82,12 +82,24 @@ describe('native safe-area policy', () => {
     expect(source).toContain('`capacitor-${Capacitor.getPlatform()}`')
   })
 
-  it('reserves Android status-bar and course anchor spacing only in Capacitor', () => {
+  it('reserves Android status-bar and consistent post-navigation spacing only in Capacitor', () => {
     const source = frontendFile('src/styles/fresh.css')
     expect(source).toMatch(/html\.capacitor-android \{[\s\S]*?--app-safe-area-top:\s*max\(env\(safe-area-inset-top, 0px\), 32px\);/)
     expect(source).toMatch(/html\.capacitor-android \.home-content \{[\s\S]*?padding-top:\s*calc\(var\(--app-safe-area-top\) \+ 18px\);/)
-    expect(source).toMatch(/html\.capacitor-android \.courses-content \{[\s\S]*?padding-top:\s*24px;/)
-    expect(source).toMatch(/html\.capacitor-android #semester-settings \{[\s\S]*?scroll-margin-top:\s*calc\(var\(--app-safe-area-top\) \+ var\(--nav-height, 58px\) \+ 28px\);/)
+    expect(source).toMatch(/html\.capacitor-android \.page > \.van-nav-bar \+ \.page-content,[\s\S]*?padding-top:\s*32px;/)
+    expect(source).toContain('html.capacitor-android .page > .van-nav-bar + .message-content,')
+    expect(source).toContain('html.capacitor-android .page > .van-nav-bar + .collector-layout {')
+    expect(source).toMatch(/html\.capacitor-android #semester-settings \{[\s\S]*?margin-top:\s*12px;/)
+    expect(source).toMatch(/html\.capacitor-android #semester-settings \{[\s\S]*?scroll-margin-top:\s*calc\(var\(--app-safe-area-top\) \+ var\(--nav-height, 58px\) \+ 44px\);/)
+  })
+
+  it('keeps mobile login validation below a full-width input body', () => {
+    const source = frontendFile('src/pages/LoginPage.vue')
+
+    expect(source).toMatch(/@media \(max-width:\s*520px\)/)
+    expect(source).toMatch(/\.auth-form :deep\(\.van-field__value\) \{[\s\S]*?display:\s*block;/)
+    expect(source).toMatch(/\.auth-form :deep\(\.van-field__body\) \{[\s\S]*?width:\s*100%;/)
+    expect(source).toMatch(/\.auth-form :deep\(\.van-field__error-message\) \{[\s\S]*?margin-top:\s*4px;/)
   })
 })
 
@@ -117,6 +129,13 @@ describe('readability policy', () => {
 
   it('keeps course time text at 12px or larger', () => {
     expect(frontendFile('src/pages/CoursesPage.vue')).toMatch(/\.time-cell time \{[\s\S]*?font-size:\s*12px;/)
+  })
+
+  it('keeps imported teacher information visible in every timetable surface', () => {
+    const source = frontendFile('src/pages/CoursesPage.vue')
+    expect(source).toContain('<span v-if="course.teacher" class="compact-teacher">')
+    expect(source).toContain('<span v-if="course.teacher" class="pending-teacher">教师：{{ course.teacher }}</span>')
+    expect(source).toContain('activeCourse.value.teacher ? `教师：${activeCourse.value.teacher}` :')
   })
 })
 

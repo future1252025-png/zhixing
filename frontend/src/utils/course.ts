@@ -325,8 +325,8 @@ export function courseToForm(course: Course): CourseForm {
   return {
     course_name: course.course_name,
     weekday: course.weekday,
-    start_time: course.start_time,
-    end_time: course.end_time,
+    start_time: course.start_time ?? '',
+    end_time: course.end_time ?? '',
     building_id: course.building_id ?? 0,
     room_name: course.room_name,
     teacher: course.teacher ?? '',
@@ -347,8 +347,8 @@ export function formToPayload(form: CourseForm): CoursePayload {
   }
 }
 
-function parseTimeValue(value: string): number | null {
-  if (!/^\d{2}:\d{2}$/.test(value)) {
+function parseTimeValue(value: string | null | undefined): number | null {
+  if (!value || !/^\d{2}:\d{2}$/.test(value)) {
     return null
   }
   const [hourText, minuteText] = value.split(':')
@@ -521,7 +521,7 @@ export function groupCoursesByWeekday(
         if (left.start_time === right.start_time) {
           return left.id - right.id
         }
-        return left.start_time.localeCompare(right.start_time)
+        return (left.start_time ?? '').localeCompare(right.start_time ?? '')
       })
   }))
 

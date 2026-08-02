@@ -31,11 +31,16 @@ type ImportPageState =
   | 'failed'
 
 const LOCATION_ERROR_CODES = new Set(['building_unrecognized', 'room_missing'])
+const NON_BLOCKING_ERROR_CODES = new Set([
+  ...LOCATION_ERROR_CODES,
+  'time_unrecognized'
+])
 
 const router = useRouter()
 const coursesStore = useCoursesStore()
 const selectedFile = ref<File | null>(null)
 const preview = ref<ImportPreviewResponse | null>(null)
+const excludedRowRefs = ref<string[]>([])
 const serverIssues = ref<Record<string, ImportIssue[]>>({})
 const highlightedRowRefs = ref<string[]>([])
 const state = ref<ImportPageState>('idle')
@@ -48,12 +53,22 @@ const nativeHubuImportAvailable = supportsNativeHubuCourseImport()
 const { pageStyle, onFieldFocus } = useKeyboardAwarePage({ basePaddingPx: 34 })
 
 const candidates = computed(() => preview.value?.candidates ?? [])
-const resolvedCount = computed(() =>
-  candidates.value.filter((candidate) => isCandidateImportable(candidate)).length
+const activeCandidates = computed(() =>
+  candidates.value.filter((candidate) => !excludedRowRefs.value.includes(candidate.row_ref))
 )
-const unresolvedCount = computed(() => candidates.value.length - resolvedCount.value)
+const excludedCount = computed(() => candidates.value.length - activeCandidates.value.length)
+const resolvedCount = computed(() =>
+  activeCandidates.value.filter((candidate) => isCandidateImportable(candidate)).length
+)
+const unresolvedCount = computed(() => activeCandidates.value.length - resolvedCount.value)
+const pendingCompletionCount = computed(() =>
+  activeCandidates.value.filter((candidate) =>
+    candidate.errors.some((issue) => NON_BLOCKING_ERROR_CODES.has(issue.code))
+  ).length
+)
 const conflictCount = computed(() =>
-  Object.values(serverIssues.value).filter((issues) =>
+  Object.entries(serverIssues.value).filter(([rowRef, issues]) =>
+    !excludedRowRefs.value.includes(rowRef) &&
     issues.some((issue) => issue.code === 'course_conflict')
   ).length
 )
@@ -61,7 +76,7 @@ const canCommit = computed(() =>
   Boolean(
     selectedFile.value &&
       preview.value &&
-      candidates.value.length > 0 &&
+      activeCandidates.value.length > 0 &&
       unresolvedCount.value === 0
   )
 )
@@ -73,18 +88,29 @@ function hasParsedCourse(candidate: ImportCandidate): boolean {
   return Boolean(
     candidate.course_name &&
       candidate.weekday &&
-      candidate.start_time &&
-      candidate.end_time &&
       candidate.weeks
   )
 }
 
 function hasBlockingSourceIssue(candidate: ImportCandidate): boolean {
-  return candidate.errors.some((issue) => !LOCATION_ERROR_CODES.has(issue.code))
+  return candidate.errors.some((issue) => !NON_BLOCKING_ERROR_CODES.has(issue.code))
 }
 
 function isCandidateImportable(candidate: ImportCandidate): boolean {
   return hasParsedCourse(candidate) && !hasBlockingSourceIssue(candidate)
+}
+
+function shouldSkipCandidateAutomatically(candidate: ImportCandidate): boolean {
+  const hasTime = Boolean(candidate.start_time && candidate.end_time)
+  const hasLocation = Boolean(candidate.source.raw_location.trim())
+  return !isCandidateImportable(candidate) || (!hasTime && !hasLocation)
+}
+
+function prepareAutomaticImportSelection() {
+  excludedRowRefs.value = candidates.value
+    .filter((candidate) => shouldSkipCandidateAutomatically(candidate))
+    .map((candidate) => candidate.row_ref)
+  syncPreviewState()
 }
 
 function syncPreviewState() {
@@ -95,6 +121,7 @@ function syncPreviewState() {
 
 function resetPreview() {
   preview.value = null
+  excludedRowRefs.value = []
   serverIssues.value = {}
   highlightedRowRefs.value = []
   errorMessage.value = ''
@@ -125,7 +152,12 @@ async function previewFile() {
       state.value = 'failed'
       return
     }
-    syncPreviewState()
+    prepareAutomaticImportSelection()
+    if (activeCandidates.value.length === 0) {
+      errorMessage.value = '当前课表没有可导入的有效课程。'
+      state.value = 'failed'
+      return
+    }
   } catch (error) {
     errorMessage.value = extractBusinessError(error).message
     state.value = 'failed'
@@ -160,6 +192,11 @@ async function startHubuImport() {
     captureSourceUrl.value = capture.sourceUrl ?? ''
     await previewFile()
     if (canCommit.value) await commitImport()
+    else if (preview.value && activeCandidates.value.length === 0) {
+      errorMessage.value = '当前课表没有可导入的有效课程。'
+      state.value = 'failed'
+      showFailToast(errorMessage.value)
+    }
   } catch (error) {
     const message = nativeImportErrorMessage(error)
     errorMessage.value = message
@@ -248,9 +285,35 @@ async function focusFirstProblem(rowRefs: string[]) {
 
 function candidateBlockingIssues(candidate: ImportCandidate): ImportIssue[] {
   return [
-    ...candidate.errors.filter((issue) => !LOCATION_ERROR_CODES.has(issue.code)),
+    ...candidate.errors.filter((issue) => !NON_BLOCKING_ERROR_CODES.has(issue.code)),
     ...(serverIssues.value[candidate.row_ref] ?? [])
   ]
+}
+
+function candidateIsExcluded(candidate: ImportCandidate): boolean {
+  return excludedRowRefs.value.includes(candidate.row_ref)
+}
+
+function toggleCandidateExclusion(candidate: ImportCandidate) {
+  const excluded = new Set(excludedRowRefs.value)
+  if (excluded.has(candidate.row_ref)) {
+    excluded.delete(candidate.row_ref)
+  } else {
+    excluded.add(candidate.row_ref)
+    const nextServerIssues = { ...serverIssues.value }
+    delete nextServerIssues[candidate.row_ref]
+    serverIssues.value = nextServerIssues
+    highlightedRowRefs.value = highlightedRowRefs.value.filter(
+      (rowRef) => rowRef !== candidate.row_ref
+    )
+    errorMessage.value = ''
+  }
+  excludedRowRefs.value = [...excluded]
+  syncPreviewState()
+}
+
+function candidateHasScheduleNote(candidate: ImportCandidate): boolean {
+  return candidate.errors.some((issue) => issue.code === 'time_unrecognized')
 }
 
 function candidateHasLocationNote(candidate: ImportCandidate): boolean {
@@ -271,7 +334,11 @@ async function commitImport() {
   errorMessage.value = ''
   state.value = 'committing'
   try {
-    const result = await commitCourseImport(selectedFile.value, preview.value.file.sha256)
+    const result = await commitCourseImport(
+      selectedFile.value,
+      preview.value.file.sha256,
+      excludedRowRefs.value
+    )
     createdCount.value = result.created_count
     coursesStore.invalidate()
     state.value = 'success'
@@ -320,7 +387,7 @@ async function commitImport() {
         <ol class="hubu-import-steps">
           <li><i>1</i><span><strong>进入官方页面</strong><small>学号和密码只在湖北大学页面输入</small></span></li>
           <li><i>2</i><span><strong>打开学期理论课表</strong><small>先选好学年学期，确认课表已经完整显示</small></span></li>
-          <li><i>3</i><span><strong>点击“导入课表”</strong><small>智行只读取你主动确认的课表表格</small></span></li>
+          <li><i>3</i><span><strong>点击“导入课表”</strong><small>返回后自动覆盖当前课表，无需逐门确认</small></span></li>
         </ol>
 
         <button
@@ -396,8 +463,8 @@ async function commitImport() {
 
       <section v-if="state === 'success'" class="success-sheet" aria-live="polite">
         <span aria-hidden="true">✓</span>
-        <h2>{{ createdCount }} 门课程已完整导入</h2>
-        <p>课程与地点原文均已保存；需要路线时，再补全尚未匹配的地图地点。</p>
+        <h2>{{ createdCount }} 门课程已覆盖导入</h2>
+        <p>原课表已由本次课表替换；无有效时间且无地点的条目已自动跳过。</p>
         <button type="button" data-testid="view-courses" @click="router.push('/courses')">
           查看我的课表
         </button>
@@ -407,9 +474,10 @@ async function commitImport() {
         <ImportSummary
           v-reveal="{ from: 'left', distance: 30 }"
           :filename="preview.file.filename"
-          :total="candidates.length"
+          :total="activeCandidates.length"
           :resolved="resolvedCount"
           :unresolved="unresolvedCount"
+          :pending="pendingCompletionCount"
           :conflicts="conflictCount"
           :ready="canCommit"
         />
@@ -421,7 +489,10 @@ async function commitImport() {
             <span>03</span>
             <div>
               <h2>导入内容预览</h2>
-              <p>课程与地点按原文保存；只有核心排课信息无法识别时才会阻止导入。</p>
+              <p>
+                课程、地点和已有时间按原文保存；无法导入的单门课程可以先排除。
+                <b v-if="excludedCount">当前已排除 {{ excludedCount }} 门。</b>
+              </p>
             </div>
           </div>
           <article
@@ -430,8 +501,9 @@ async function commitImport() {
             :id="`import-${candidate.row_ref}`"
             class="candidate-preview"
             :class="{
-              'has-error': candidateBlockingIssues(candidate).length,
-              'is-highlighted': highlightedRowRefs.includes(candidate.row_ref)
+              'has-error': !candidateIsExcluded(candidate) && candidateBlockingIssues(candidate).length,
+              'is-highlighted': highlightedRowRefs.includes(candidate.row_ref),
+              'is-excluded': candidateIsExcluded(candidate)
             }"
             :data-row-ref="candidate.row_ref"
             v-reveal="{
@@ -446,7 +518,21 @@ async function commitImport() {
                 <strong>{{ candidate.source.raw_course_name || candidate.course_name || '未识别课程' }}</strong>
                 <small>{{ candidateSchedule(candidate) }}</small>
               </div>
+              <button
+                type="button"
+                class="candidate-exclusion"
+                :class="{ restore: candidateIsExcluded(candidate) }"
+                :aria-pressed="candidateIsExcluded(candidate)"
+                :disabled="state === 'committing'"
+                :data-testid="`toggle-exclusion-${candidate.row_ref}`"
+                @click="toggleCandidateExclusion(candidate)"
+              >
+                {{ candidateIsExcluded(candidate) ? '恢复这门' : '不导入这门' }}
+              </button>
             </header>
+            <p v-if="candidateIsExcluded(candidate)" class="excluded-note">
+              这门课程已从本次导入中排除，不会影响其余课程。
+            </p>
             <dl>
               <div>
                 <dt>教师</dt>
@@ -461,6 +547,10 @@ async function commitImport() {
               <span aria-hidden="true">i</span>
               地点会照原文导入，不影响课表查看；发起路线时若仍未匹配地图，再提示补全。
             </p>
+            <p v-if="candidateHasScheduleNote(candidate)" class="location-note schedule-note">
+              <span aria-hidden="true">i</span>
+              上课时间暂未识别，仍会导入到“待补全课程”；之后可以手动补时间或直接删除。
+            </p>
             <ul v-if="candidateBlockingIssues(candidate).length" class="candidate-issues">
               <li v-for="issue in candidateBlockingIssues(candidate)" :key="`${issue.code}-${issue.field}-${issue.message}`">
                 {{ issue.message }}
@@ -471,9 +561,12 @@ async function commitImport() {
 
         <footer class="commit-sheet">
           <div>
-            <strong v-if="canCommit">全部课程都可按原文导入</strong>
+            <strong v-if="canCommit && excludedCount">
+              已排除 {{ excludedCount }} 门，本次导入 {{ activeCandidates.length }} 门
+            </strong>
+            <strong v-else-if="canCommit">全部课程都可按原文导入</strong>
             <strong v-else>还有 {{ unresolvedCount }} 门课程的排课信息无法识别</strong>
-            <p>地点缺少地图映射不会阻止导入；提交时仍会校验课程时间与冲突。</p>
+            <p>提交后会替换当前课表；地点或时间缺失不会阻止整批导入。</p>
           </div>
           <button
             type="button"
@@ -482,7 +575,7 @@ async function commitImport() {
             @click="commitImport"
           >
             <i v-if="state === 'committing'" aria-hidden="true"></i>
-            <span>{{ state === 'committing' ? '正在整批校验并导入' : `一次导入 ${candidates.length} 门课程` }}</span>
+            <span>{{ state === 'committing' ? '正在校验并替换课表' : `覆盖导入 ${activeCandidates.length} 门课程` }}</span>
           </button>
         </footer>
       </template>
@@ -708,6 +801,7 @@ async function commitImport() {
 .list-heading h2 { margin: 0; color: var(--fresh-ink); font-size: 18px; }
 .upload-sheet header p,
 .list-heading p { margin: 3px 0 0; color: var(--fresh-muted); font-size: 12px; }
+.list-heading p b { color: #86552f; }
 
 .file-picker { display: grid; grid-template-columns: auto minmax(0,1fr) auto; min-height: 88px; align-items: center; gap: 12px; border: 1px dashed var(--fresh-line-strong); border-radius: 19px; background: var(--fresh-bg); cursor: pointer; padding: 13px; transition: background 360ms ease, border-color 360ms ease, transform 360ms ease; }
 .file-picker.selected { border-style: solid; border-color: #a9c3a5; background: var(--fresh-mint); }
@@ -759,6 +853,12 @@ async function commitImport() {
   border-color: #ba6f5d;
   box-shadow: 0 0 0 3px rgba(186, 111, 93, .14), 0 14px 32px rgba(86, 55, 48, .11);
 }
+.candidate-preview.is-excluded {
+  border-style: dashed;
+  border-color: #b9c5b6;
+  background: #f2f4ed;
+  box-shadow: none;
+}
 .candidate-preview > header {
   display: flex;
   min-width: 0;
@@ -792,6 +892,33 @@ async function commitImport() {
   color: var(--fresh-muted);
   font-size: 12px;
   line-height: 1.5;
+}
+.candidate-exclusion {
+  min-height: 42px;
+  flex: 0 0 auto;
+  border: 1px solid #d5a89d;
+  border-radius: 13px;
+  background: #fff7f4;
+  color: #884a40;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 800;
+  padding: 0 12px;
+}
+.candidate-exclusion.restore {
+  border-color: var(--fresh-line-strong);
+  background: var(--fresh-paper);
+  color: var(--fresh-green-dark);
+}
+.excluded-note {
+  margin: 0;
+  border-radius: 13px;
+  background: #e4eadf;
+  color: #49614d;
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 1.55;
+  padding: 10px 12px;
 }
 .candidate-preview dl {
   display: grid;
@@ -891,6 +1018,8 @@ async function commitImport() {
   .hubu-import-steps { grid-template-columns: 1fr; }
   .hubu-import-steps li { grid-template-columns: auto minmax(0,1fr); }
   .candidate-preview dl { grid-template-columns: 1fr; }
+  .candidate-preview > header { flex-wrap: wrap; }
+  .candidate-exclusion { margin-left: 49px; }
 }
 
 @media (max-width: 390px) {

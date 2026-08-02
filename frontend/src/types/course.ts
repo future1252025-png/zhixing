@@ -10,8 +10,8 @@ export type Course = {
   id: number
   course_name: string
   weekday: number
-  start_time: string
-  end_time: string
+  start_time: string | null
+  end_time: string | null
   building_id: number | null
   building: CourseBuilding | null
   room_name: string

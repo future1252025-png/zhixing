@@ -17,8 +17,8 @@ class Course(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     course_name: Mapped[str] = mapped_column(String(100), index=True)
     weekday: Mapped[int] = mapped_column(Integer, index=True)
-    start_time: Mapped[str] = mapped_column(String(5))
-    end_time: Mapped[str] = mapped_column(String(5))
+    start_time: Mapped[str | None] = mapped_column(String(5), nullable=True)
+    end_time: Mapped[str | None] = mapped_column(String(5), nullable=True)
     building_id: Mapped[int | None] = mapped_column(
         ForeignKey("buildings.id"),
         index=True,

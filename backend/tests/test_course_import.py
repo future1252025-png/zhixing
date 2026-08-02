@@ -25,7 +25,11 @@ def make_test_database_url(path: Path) -> str:
     return f"sqlite:///{path.as_posix()}"
 
 
-def auth_headers(client: TestClient) -> dict[str, str]:
+def auth_headers(
+    client: TestClient,
+    *,
+    configure_semester: bool = True,
+) -> dict[str, str]:
     client.post(
         "/api/auth/register",
         json={
@@ -41,6 +45,8 @@ def auth_headers(client: TestClient) -> dict[str, str]:
     )
     assert login.status_code == 200
     headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+    if not configure_semester:
+        return headers
     semester = client.put(
         "/api/semester",
         json={"start_date": "2026-02-23", "total_weeks": 20},
@@ -123,6 +129,55 @@ def test_parse_course_cell_extracts_multiple_week_patterns() -> None:
     assert blocks[0].start_time == "08:00"
     assert blocks[0].raw_location == "实训大楼423-425数据中国实验室1"
     assert blocks[1].weeks == "2,4,6,8,10,12,14,16"
+
+
+@pytest.mark.parametrize("week_text", ["1-16(单周)", "1-16（单周）", "1-16单周"])
+def test_parse_course_cell_preserves_single_week_parity(week_text: str) -> None:
+    blocks = parse_course_cell(
+        f"""
+        算法设计与分析
+        舒华
+        {week_text}[01-02节]
+        教4-202
+        """,
+        weekday=3,
+        fallback_start_time="08:00",
+        fallback_end_time="09:40",
+    )
+
+    assert len(blocks) == 1
+    assert blocks[0].weeks == "1-16(单)"
+
+
+def test_import_does_not_conflict_single_and_even_week_courses(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    client, SessionLocal = client_and_session
+    headers = auth_headers(client)
+    content = """
+    <table>
+      <tr><th>节次</th><th>星期三</th></tr>
+      <tr>
+        <td>第一二节<br>08:00-09:40</td>
+        <td>
+          算法设计与分析<br>舒华<br>1-16(单周)[01-02节]<br>教4-202<br>
+          --------------------<br>
+          算法设计与分析<br>舒华<br>2,4,6,8,10,12,14,16(周)[01-02节]<br>双创大楼801
+        </td>
+      </tr>
+    </table>
+    """.encode("utf-8")
+    digest, _, preview = preview_and_resolutions(client, headers, content)
+
+    assert [candidate["weeks"] for candidate in preview["candidates"]] == [
+        "1-16(单)",
+        "2,4,6,8,10,12,14,16",
+    ]
+    response = commit_import_request(client, headers, content, digest=digest)
+
+    assert response.status_code == 201
+    assert response.json()["created_count"] == 2
+    assert importer_counts(SessionLocal) == (2, 2)
 
 
 @pytest.fixture
@@ -403,7 +458,7 @@ def test_preview_reports_incomplete_and_unrecognized_rows(client: TestClient) ->
     assert [error["code"] for error in body["candidates"][4]["errors"]] == [
         "time_unrecognized"
     ]
-    assert body["can_commit"] is False
+    assert body["can_commit"] is True
 
 
 def test_preview_rejects_unknown_extension_with_business_error(client: TestClient) -> None:
@@ -479,11 +534,14 @@ def commit_import_request(
     *,
     digest: str,
     resolutions: list[dict[str, object]] | None = None,
+    excluded_row_refs: list[str] | None = None,
     filename: str = "valid.html",
 ):
     manifest_data: dict[str, object] = {"sha256": digest}
     if resolutions is not None:
         manifest_data["resolutions"] = resolutions
+    if excluded_row_refs is not None:
+        manifest_data["excluded_row_refs"] = excluded_row_refs
     manifest = json.dumps(manifest_data, ensure_ascii=False)
     return client.post(
         "/api/courses/import",
@@ -548,6 +606,123 @@ def test_import_does_not_require_location_resolutions(
     assert response.status_code == 201
     assert response.json()["created_count"] == 2
     assert importer_counts(SessionLocal) == (2, 2)
+
+
+def test_import_can_exclude_one_unrecognized_course_and_keep_the_rest(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    client, SessionLocal = client_and_session
+    headers = auth_headers(client, configure_semester=False)
+    content = """
+    <table>
+      <tr><th>节次</th><th>星期一</th><th>星期二</th></tr>
+      <tr>
+        <td>第一二节<br>08:00-09:40</td>
+        <td>可导入课程<br>李老师<br>1-16(周)[01-02节]<br>教4-205</td>
+        <td>待定课程<br>陈老师<br>教4-203</td>
+      </tr>
+    </table>
+    """.encode("utf-8")
+    digest, _, preview = preview_and_resolutions(client, headers, content)
+    assert preview["can_commit"] is False
+    assert any(
+        issue["code"] == "weeks_unrecognized"
+        for issue in preview["candidates"][1]["errors"]
+    )
+
+    response = commit_import_request(
+        client,
+        headers,
+        content,
+        digest=digest,
+        excluded_row_refs=[preview["candidates"][1]["row_ref"]],
+    )
+
+    assert response.status_code == 201
+    assert response.json()["created_count"] == 1
+    assert importer_counts(SessionLocal) == (1, 1)
+    semester = client.get("/api/semester", headers=headers)
+    assert semester.status_code == 200
+    assert semester.json()["status"] == "unconfigured"
+    with SessionLocal() as session:
+        courses = list(
+            session.scalars(
+                select(Course)
+                .join(User, User.id == Course.user_id)
+                .where(User.username == "importer")
+            )
+        )
+        assert [course.course_name for course in courses] == ["可导入课程"]
+
+
+def test_import_automatically_skips_course_without_time_and_location(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    client, SessionLocal = client_and_session
+    headers = auth_headers(client, configure_semester=False)
+    content = """
+    <table>
+      <tr><th>节次</th><th>星期一</th></tr>
+      <tr>
+        <td>第一二节<br>08:00-09:40</td>
+        <td>可导入课程<br>李老师<br>1-16(周)[01-02节]<br>教4-205</td>
+      </tr>
+      <tr>
+        <td>时间待定</td>
+        <td>无排课课程<br>曾老师<br>1-16(周)</td>
+      </tr>
+    </table>
+    """.encode("utf-8")
+    digest, _, preview = preview_and_resolutions(client, headers, content)
+    assert len(preview["candidates"]) == 2
+    skipped = preview["candidates"][1]
+    assert skipped["start_time"] is None
+    assert skipped["source"]["raw_location"] == ""
+
+    response = commit_import_request(
+        client,
+        headers,
+        content,
+        digest=digest,
+    )
+
+    assert response.status_code == 201
+    assert response.json()["created_count"] == 1
+    assert importer_counts(SessionLocal) == (1, 1)
+    listed = client.get("/api/courses", headers=headers)
+    assert [course["course_name"] for course in listed.json()] == ["可导入课程"]
+
+
+def test_import_rejects_unknown_or_empty_exclusion_selection(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    client, SessionLocal = client_and_session
+    headers = auth_headers(client)
+    content = valid_import_content()
+    digest, _, preview = preview_and_resolutions(client, headers, content)
+
+    unknown = commit_import_request(
+        client,
+        headers,
+        content,
+        digest=digest,
+        excluded_row_refs=["row-999"],
+    )
+    assert unknown.status_code == 409
+    assert unknown.json()["code"] == "import_exclusion_mismatch"
+
+    exclude_all = commit_import_request(
+        client,
+        headers,
+        content,
+        digest=digest,
+        excluded_row_refs=[
+            candidate["row_ref"] for candidate in preview["candidates"]
+        ],
+    )
+    assert exclude_all.status_code == 422
+    assert exclude_all.json()["code"] == "import_empty_selection"
+    assert importer_counts(SessionLocal) == (0, 0)
 
 
 @pytest.mark.parametrize("mismatch", ["missing", "duplicate", "extra"])
@@ -626,6 +801,21 @@ def test_import_internal_conflict_rolls_back_every_course(
     headers = auth_headers(client)
     content = conflicting_import_content()
     digest, resolutions, _ = preview_and_resolutions(client, headers, content)
+    existing = client.post(
+        "/api/courses",
+        json={
+            "course_name": "原课表课程",
+            "weekday": 3,
+            "start_time": "14:00",
+            "end_time": "15:40",
+            "building_id": resolutions[0]["building_id"],
+            "room_name": "301",
+            "teacher": "老师",
+            "weeks": "1-16",
+        },
+        headers=headers,
+    )
+    assert existing.status_code == 201
 
     response = commit_import_request(
         client,
@@ -640,10 +830,12 @@ def test_import_internal_conflict_rolls_back_every_course(
     assert response.json()["code"] == "course_conflict"
     assert response.json()["details"]["conflicts"][0]["row_ref"] == "row-2"
     assert response.json()["details"]["conflicts"][0]["conflicting_row_ref"] == "row-1"
-    assert importer_counts(SessionLocal) == (0, 0)
+    assert importer_counts(SessionLocal) == (1, 0)
+    listed = client.get("/api/courses", headers=headers)
+    assert [course["course_name"] for course in listed.json()] == ["原课表课程"]
 
 
-def test_import_existing_conflict_writes_nothing(
+def test_import_replaces_existing_timetable_instead_of_conflicting_with_it(
     client_and_session: tuple[TestClient, sessionmaker],
 ) -> None:
     client, SessionLocal = client_and_session
@@ -674,12 +866,17 @@ def test_import_existing_conflict_writes_nothing(
         resolutions=resolutions,
     )
 
-    assert response.status_code == 409
-    assert response.json()["code"] == "course_conflict"
-    assert importer_counts(SessionLocal) == (1, 0)
+    assert response.status_code == 201
+    assert response.json()["created_count"] == 2
+    assert importer_counts(SessionLocal) == (2, 2)
+    listed = client.get("/api/courses", headers=headers)
+    assert {course["course_name"] for course in listed.json()} == {
+        "大学英语",
+        "机器学习",
+    }
 
 
-def test_import_success_persists_every_raw_source_and_is_idempotent(
+def test_import_success_persists_sources_and_same_file_can_replace_again(
     client_and_session: tuple[TestClient, sessionmaker],
 ) -> None:
     client, SessionLocal = client_and_session
@@ -734,8 +931,8 @@ def test_import_success_persists_every_raw_source_and_is_idempotent(
         digest=digest,
         resolutions=resolutions,
     )
-    assert repeated.status_code == 409
-    assert repeated.json()["code"] == "import_already_committed"
+    assert repeated.status_code == 201
+    assert repeated.json()["created_count"] == 2
     assert importer_counts(SessionLocal) == (2, 2)
 
 
@@ -836,7 +1033,7 @@ def test_import_honors_legacy_map_resolution_without_changing_source_text(
         )
 
 
-def test_import_rejects_non_location_parse_error(
+def test_import_keeps_course_when_time_cannot_be_parsed(
     client_and_session: tuple[TestClient, sessionmaker],
 ) -> None:
     client, SessionLocal = client_and_session
@@ -857,12 +1054,20 @@ def test_import_rejects_non_location_parse_error(
         resolutions=resolutions,
     )
 
-    assert response.status_code == 422
-    assert response.json()["code"] == "import_unresolved"
-    assert response.json()["details"]["rows"][0]["issues"][0]["code"] == (
-        "time_unrecognized"
-    )
-    assert importer_counts(SessionLocal) == (0, 0)
+    assert response.status_code == 201
+    assert response.json()["created_count"] == 1
+    assert importer_counts(SessionLocal) == (1, 1)
+    with SessionLocal() as session:
+        course = session.scalar(
+            select(Course)
+            .join(User, User.id == Course.user_id)
+            .where(User.username == "importer", Course.course_name == "创新实践")
+        )
+        assert course is not None
+        assert course.start_time is None
+        assert course.end_time is None
+        assert course.source_kind == "import"
+        assert course.import_source is not None
 
 
 def test_import_endpoint_requires_login(client: TestClient) -> None:

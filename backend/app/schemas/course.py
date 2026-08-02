@@ -81,13 +81,17 @@ class CourseBase(BaseModel):
 
     @field_validator("start_time", "end_time")
     @classmethod
-    def validate_time_fields(cls, value: str) -> str:
-        parse_course_time(value)
+    def validate_time_fields(cls, value: str | None) -> str | None:
+        if value is not None:
+            parse_course_time(value)
         return value
 
     @model_validator(mode="after")
     def validate_time_range(self) -> "CourseBase":
-        ensure_end_after_start(self.start_time, self.end_time)
+        if (self.start_time is None) != (self.end_time is None):
+            raise ValueError("start_time and end_time must both be set or both be empty")
+        if self.start_time is not None and self.end_time is not None:
+            ensure_end_after_start(self.start_time, self.end_time)
         return self
 
 
@@ -98,6 +102,8 @@ class CourseCreate(CourseBase):
 class CourseImportCreate(CourseBase):
     """Internal write model for imports whose map building is not known yet."""
 
+    start_time: str | None = None
+    end_time: str | None = None
     building_id: int | None = Field(default=None, gt=0)
 
 
@@ -171,8 +177,8 @@ class CourseRead(BaseModel):
     id: int
     course_name: str
     weekday: int
-    start_time: str
-    end_time: str
+    start_time: str | None
+    end_time: str | None
     building_id: int | None
     room_name: str
     teacher: str | None = None

@@ -26,6 +26,11 @@ const fullLocation = computed(() => formatCourseLocation(props.course))
 const sourceLabel = computed(() =>
   props.course.source_kind === 'import' ? '导入课程' : '手动添加'
 )
+const scheduleLabel = computed(() =>
+  props.course.start_time && props.course.end_time
+    ? `${props.course.start_time}—${props.course.end_time}`
+    : '时间待补充'
+)
 </script>
 
 <template>
@@ -44,10 +49,10 @@ const sourceLabel = computed(() =>
     >
       <span class="course-card__heading">
         <span>
-          <small>{{ getWeekdayLabel(course.weekday) }} · {{ course.start_time }}</small>
+          <small>{{ getWeekdayLabel(course.weekday) }} · {{ scheduleLabel }}</small>
           <strong>{{ course.course_name }}</strong>
         </span>
-        <time>{{ course.start_time }}—{{ course.end_time }}</time>
+        <time>{{ scheduleLabel }}</time>
       </span>
 
       <span
