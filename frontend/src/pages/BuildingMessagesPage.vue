@@ -8,6 +8,10 @@ import { createBuildingMessage, getBuildingMessages, validateMessageContent, typ
 import TechIcon from '@/components/TechIcon.vue'
 import { formatBuildingDisplayName } from '@/utils/buildings'
 import { parseApiDateTime } from '@/utils/dateTime'
+import {
+  getDeviceGeolocationErrorMessage,
+  requestDeviceCurrentPosition
+} from '@/utils/deviceGeolocation'
 import { haversineDistanceMeters } from '@/utils/geo'
 import { useKeyboardInset } from '@/utils/keyboardInset'
 import { MESSAGE_PAGE_SIZE, hasMoreMessagePages, mergeOlderMessages } from '@/utils/messagePagination'
@@ -47,7 +51,7 @@ const composerDisabled = computed(() =>
   !currentLocation.value || !isLocationInsideBuildingRange.value
 )
 const composerPrompt = computed(() => {
-  if (!currentLocation.value) return '请先点击“定位”或“使用建筑位置”，确认你在该建筑附近后才能留言'
+  if (!currentLocation.value) return '请先点击“定位我”，确认你在该建筑附近后才能留言'
   if (!isLocationInsideBuildingRange.value) {
     return `当前位置距该建筑约 ${formatDistance(distanceToBuildingMeters.value)}，超过 ${MAX_MESSAGE_DISTANCE_METERS} 米，不能在这里留言`
   }
@@ -55,11 +59,10 @@ const composerPrompt = computed(() => {
 })
 const locationText = computed(() => {
   if (!currentLocation.value) return '发布前需要确认位置'
-  const source = currentLocation.value.location_source === 'browser' ? '浏览器定位' : '建筑位置'
   const distance = distanceToBuildingMeters.value === null
     ? ''
     : ` · 距建筑约 ${formatDistance(distanceToBuildingMeters.value)}`
-  return `${source} · ${currentLocation.value.label}${distance}`
+  return `定位 · ${currentLocation.value.label}${distance}`
 })
 
 const { keyboardInset } = useKeyboardInset()
@@ -196,25 +199,28 @@ async function loadPage() {
     if (requestSeq === messagesRequestSeq) loading.value = false
   }
 }
-function useBuildingLocation() {
-  if (!building.value) return showFailToast('建筑信息尚未加载')
-  currentLocation.value = { latitude: building.value.latitude, longitude: building.value.longitude, location_source: 'manual', label: building.value.name }
-  showSuccessToast('已使用当前建筑位置')
-}
-function requestBrowserLocation() {
-  if (!navigator.geolocation) return showFailToast('当前浏览器不支持定位，请使用建筑位置')
+async function requestCurrentLocation() {
   locating.value = true
-  navigator.geolocation.getCurrentPosition(
-    (position) => { currentLocation.value = { latitude: position.coords.latitude, longitude: position.coords.longitude, location_source: 'browser', label: '当前位置' }; locating.value = false; showSuccessToast('定位成功') },
-    () => { locating.value = false; showFailToast('定位失败，请改用建筑位置') },
-    { enableHighAccuracy: true, maximumAge: 60_000, timeout: 8_000 }
-  )
+  try {
+    const position = await requestDeviceCurrentPosition()
+    currentLocation.value = {
+      latitude: position.latitude,
+      longitude: position.longitude,
+      location_source: position.source,
+      label: position.source === 'native' ? '手机当前位置' : '当前位置'
+    }
+    showSuccessToast('定位成功')
+  } catch (error) {
+    showFailToast(getDeviceGeolocationErrorMessage(error))
+  } finally {
+    locating.value = false
+  }
 }
 async function submitMessage() {
   if (composerDisabled.value) return showFailToast(composerPrompt.value)
   const validationError = validateMessageContent(draft.value)
   if (validationError) return showFailToast(validationError)
-  if (!currentLocation.value) return showFailToast('请先定位或使用当前建筑位置')
+  if (!currentLocation.value) return showFailToast('请先获取当前位置')
   sending.value = true
   try {
     await createBuildingMessage(buildingId.value, { content: draft.value, room_name: selectedRoomName.value, latitude: currentLocation.value.latitude, longitude: currentLocation.value.longitude, location_source: currentLocation.value.location_source })
@@ -292,13 +298,9 @@ watch(composerLift, () => {
           </span>
         </div>
         <div class="location-actions">
-          <button type="button" :disabled="locating" @click="requestBrowserLocation">
+          <button type="button" :disabled="locating" @click="requestCurrentLocation">
             <TechIcon name="aim" :size="16" />
             {{ locating ? '定位中' : '定位我' }}
-          </button>
-          <button type="button" @click="useBuildingLocation">
-            <TechIcon name="home" :size="16" />
-            使用建筑位置
           </button>
         </div>
       </section>
@@ -600,18 +602,11 @@ watch(composerLift, () => {
   font-weight: 700;
 }
 
-/* Primary: browser locate */
-.location-actions button:first-child {
+/* Location must come from the current device; a building coordinate is not proof of presence. */
+.location-actions button {
   border-color: var(--fresh-green);
   background: var(--fresh-green);
   color: #fff;
-}
-
-/* Secondary: use building location */
-.location-actions button:last-child {
-  border-color: #a9c1ad;
-  background: #fff;
-  color: var(--fresh-green-dark);
 }
 
 .location-actions button:disabled {

@@ -90,7 +90,7 @@ describe('location store', () => {
       name: '当前位置',
       latitude: 30.581,
       longitude: 114.329,
-      description: '来自高德定位'
+      description: '定位得到的当前位置'
     })
   })
 
@@ -121,7 +121,7 @@ describe('location store', () => {
       name: '校园中心',
       building_id: null
     })
-    expect(store.browserError).toContain('浏览器定位失败')
+    expect(store.browserError).toContain('定位权限被拒绝')
   })
 
   it('does not request AMap location again when browser geolocation times out', async () => {
@@ -150,7 +150,7 @@ describe('location store', () => {
       latitude: expect.any(Number),
       longitude: expect.any(Number)
     })
-    expect(store.browserError).toContain('浏览器定位超时')
+    expect(store.browserError).toContain('定位超时')
   })
 
   it('uses campus center when all geolocation providers fail', async () => {

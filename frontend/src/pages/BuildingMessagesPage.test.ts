@@ -16,7 +16,9 @@ const mocks = vi.hoisted(() => ({
   createBuildingMessage: vi.fn(),
   validateMessageContent: vi.fn(),
   showFailToast: vi.fn(),
-  showSuccessToast: vi.fn()
+  showSuccessToast: vi.fn(),
+  requestDeviceCurrentPosition: vi.fn(),
+  getDeviceGeolocationErrorMessage: vi.fn()
 }))
 
 vi.mock('vue-router', async () => {
@@ -46,6 +48,11 @@ vi.mock('@/utils/keyboardInset', async () => {
 vi.mock('vant', () => ({
   showFailToast: mocks.showFailToast,
   showSuccessToast: mocks.showSuccessToast
+}))
+
+vi.mock('@/utils/deviceGeolocation', () => ({
+  requestDeviceCurrentPosition: mocks.requestDeviceCurrentPosition,
+  getDeviceGeolocationErrorMessage: mocks.getDeviceGeolocationErrorMessage
 }))
 
 const building = {
@@ -110,6 +117,13 @@ describe('BuildingMessagesPage', () => {
     delete mocks.route.query.room_name
     mocks.getBuildingDetail.mockResolvedValue(building)
     mocks.getBuildingMessages.mockResolvedValue([message(3)])
+    mocks.requestDeviceCurrentPosition.mockResolvedValue({
+      latitude: building.latitude,
+      longitude: building.longitude,
+      accuracy: 12,
+      source: 'native'
+    })
+    mocks.getDeviceGeolocationErrorMessage.mockReturnValue('定位失败，请稍后重试')
   })
 
   it('discards a stale first page when the room changes during loading', async () => {
@@ -176,6 +190,39 @@ describe('BuildingMessagesPage', () => {
     expect(wrapper.get('.van-empty').text()).toContain(
       '当前位置距离该建筑过远，不能在这里留言'
     )
+    wrapper.unmount()
+  })
+
+  it('uses native device coordinates when locating in a channel', async () => {
+    const wrapper = await mountPage()
+
+    await wrapper.get('.location-actions button').trigger('click')
+    await flushPromises()
+
+    expect(mocks.requestDeviceCurrentPosition).toHaveBeenCalledOnce()
+    expect(wrapper.get('.location-card').classes()).toContain('verified')
+    expect(wrapper.text()).toContain('定位 · 手机当前位置')
+    expect(wrapper.text()).not.toContain('GPS')
+    expect(wrapper.text()).not.toContain('浏览器定位')
+    expect(mocks.showSuccessToast).toHaveBeenCalledWith('定位成功')
+    wrapper.unmount()
+  })
+
+  it('shows the native location failure reason without accepting a fake building position', async () => {
+    mocks.requestDeviceCurrentPosition.mockRejectedValueOnce(
+      Object.assign(new Error('disabled'), { code: 'OS-PLUG-GLOC-0007' })
+    )
+    mocks.getDeviceGeolocationErrorMessage.mockReturnValueOnce('定位服务未开启，请打开定位开关后重试')
+    const wrapper = await mountPage()
+
+    await wrapper.get('.location-actions button').trigger('click')
+    await flushPromises()
+
+    expect(mocks.showFailToast).toHaveBeenCalledWith(
+      '定位服务未开启，请打开定位开关后重试'
+    )
+    expect(wrapper.get('.location-card').classes()).not.toContain('verified')
+    expect(wrapper.text()).not.toContain('使用建筑位置')
     wrapper.unmount()
   })
 })

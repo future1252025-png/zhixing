@@ -48,7 +48,7 @@ const semesterLabel = computed(() => {
   if (semester.status === 'after_term') return '已结束'
   return `第 ${semester.current_week} 周`
 })
-// 起点选中态只在选中校园建筑时有值；浏览器定位/校园中心的 building_id 为 null
+// 起点选中态只在选中校园建筑时有值；当前位置/校园中心的 building_id 为 null
 const startBuildingId = computed(() => locationStore.selectedLocation?.building_id ?? null)
 const destinationBuildingId = computed(() => selectedDestination.value?.id ?? null)
 const statusMeta = computed(() =>
@@ -158,7 +158,7 @@ async function useBrowserLocation() {
       ? '定位超时，已使用校园中心，可搜索调整'
       : '已使用当前位置')
   } catch {
-    showFailToast(locationStore.browserError || '浏览器定位失败，请手动选择当前位置')
+    showFailToast(locationStore.browserError || '定位失败，请手动选择当前位置')
   }
 }
 
@@ -305,13 +305,13 @@ onMounted(loadScheduleData)
                 <div>
                   <small>起点已选择</small>
                   <strong>
-                    {{ locationTitle({
+                    {{ locationStore.selectedLocation.source === 'browser'
+                      ? '当前位置'
+                      : locationTitle({
                       name: locationStore.selectedLocation.name,
-                      type: locationStore.selectedLocation.source === 'browser'
-                        ? '浏览器定位'
-                        : locationStore.selectedLocation.source === 'fallback'
-                          ? '校园中心'
-                          : '校园地点'
+                      type: locationStore.selectedLocation.source === 'fallback'
+                        ? '校园中心'
+                        : '校园地点'
                     }) }}
                   </strong>
                   <p>{{ locationStore.selectedLocation.description || '从这里出发' }}</p>

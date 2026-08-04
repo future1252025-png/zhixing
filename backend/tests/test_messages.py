@@ -349,6 +349,27 @@ def test_create_message_requires_location(
     assert response.status_code == 422
 
 
+def test_create_message_accepts_native_device_location(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    client, _ = client_and_session
+    building = get_first_building(client)
+
+    response = client.post(
+        f"/api/buildings/{building['id']}/messages",
+        json={
+            "content": "来自手机定位",
+            "latitude": building["latitude"],
+            "longitude": building["longitude"],
+            "location_source": "native",
+        },
+        headers=auth_headers(client),
+    )
+
+    assert response.status_code == 201
+    assert response.json()["location_source"] == "native"
+
+
 def test_create_message_too_far_from_building_fails(
     client_and_session: tuple[TestClient, sessionmaker],
 ) -> None:

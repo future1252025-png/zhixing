@@ -9,11 +9,11 @@ export type BuildingMessage = {
   created_at: string
   latitude: number | null
   longitude: number | null
-  location_source: 'browser' | 'manual' | null
+  location_source: 'native' | 'browser' | 'manual' | null
   distance_to_building_meters: number | null
 }
 
-export type MessageLocationSource = 'browser' | 'manual'
+export type MessageLocationSource = 'native' | 'browser' | 'manual'
 
 export type CreateBuildingMessagePayload = {
   content: string

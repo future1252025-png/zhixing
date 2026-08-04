@@ -3,29 +3,17 @@ import { defineStore } from 'pinia'
 import type { Building, LocationPreset } from '@/api/buildings'
 import type { ScheduleSuggestionPayload } from '@/types/schedule'
 import { requestAMapCurrentPosition } from '@/utils/amap'
+import {
+  getDeviceGeolocationErrorMessage,
+  hasDeviceGeolocationProvider,
+  requestDeviceCurrentPosition
+} from '@/utils/deviceGeolocation'
 
 export type SelectedLocationSource = 'preset' | 'building' | 'browser' | 'fallback'
 
 const CAMPUS_CENTER_LOCATION = {
   latitude: 30.579833,
   longitude: 114.328253
-}
-
-function getBrowserGeolocationErrorMessage(error: unknown): string {
-  const geoError = error as Partial<GeolocationPositionError> | undefined
-  if (geoError?.code === 1) {
-    return '浏览器定位失败：请允许定位权限，或手动搜索选择起点'
-  }
-  if (geoError?.code === 2) {
-    return '浏览器定位失败：暂时无法获取当前位置，请手动搜索选择起点'
-  }
-  if (geoError?.code === 3) {
-    return '浏览器定位超时：已停止继续请求定位，请手动搜索选择起点'
-  }
-  if (error instanceof Error && error.message) {
-    return `浏览器定位失败：${error.message}`
-  }
-  return '浏览器定位失败：请手动搜索选择起点'
 }
 
 export type SelectedLocation = {
@@ -86,7 +74,7 @@ export const useLocationStore = defineStore('location', {
       }
       this.browserError = ''
     },
-    setBrowserLocation(latitude: number, longitude: number, description = '来自浏览器定位') {
+    setBrowserLocation(latitude: number, longitude: number, description = '定位得到的当前位置') {
       this.selectedLocation = {
         source: 'browser',
         name: '当前位置',
@@ -114,23 +102,17 @@ export const useLocationStore = defineStore('location', {
       this.browserLoading = true
       this.browserError = ''
       try {
-        if (navigator.geolocation) {
+        if (hasDeviceGeolocationProvider()) {
           try {
-            const position = await new Promise<GeolocationPosition>((resolve, reject) => {
-              navigator.geolocation.getCurrentPosition(resolve, reject, {
-                enableHighAccuracy: false,
-                timeout: 6000,
-                maximumAge: 300000
-              })
-            })
+            const position = await requestDeviceCurrentPosition()
             this.setBrowserLocation(
-              position.coords.latitude,
-              position.coords.longitude,
-              '来自浏览器定位'
+              position.latitude,
+              position.longitude,
+              '定位得到的当前位置'
             )
             return this.selectedLocation as SelectedLocation
           } catch (error) {
-            this.setCampusCenterFallback(getBrowserGeolocationErrorMessage(error))
+            this.setCampusCenterFallback(getDeviceGeolocationErrorMessage(error))
             return this.selectedLocation as SelectedLocation
           }
         }
@@ -139,15 +121,11 @@ export const useLocationStore = defineStore('location', {
         this.setBrowserLocation(
           amapPosition.latitude,
           amapPosition.longitude,
-          amapPosition.description
+          '定位得到的当前位置'
         )
         return this.selectedLocation as SelectedLocation
       } catch (error) {
-        let reason = ''
-        if (error instanceof Error && error.message) {
-          reason = error.message
-        }
-        this.setCampusCenterFallback(reason)
+        this.setCampusCenterFallback('暂时无法获取当前位置，请手动搜索选择起点')
         return this.selectedLocation as SelectedLocation
       } finally {
         this.browserLoading = false

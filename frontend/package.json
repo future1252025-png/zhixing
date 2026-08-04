@@ -26,6 +26,7 @@
     "@amap/amap-jsapi-loader": "^1.0.1",
     "@capacitor/android": "^8.4.2",
     "@capacitor/core": "^8.4.2",
+    "@capacitor/geolocation": "^8.2.0",
     "axios": "^1.18.1",
     "lxgw-wenkai-screen-webfont": "^1.7.0",
     "pinia": "^3.0.0",

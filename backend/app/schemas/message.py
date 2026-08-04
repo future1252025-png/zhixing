@@ -12,7 +12,7 @@ class MessageCreate(BaseModel):
     room_name: str | None = Field(default=None, max_length=120)
     latitude: float = Field(ge=-90, le=90)
     longitude: float = Field(ge=-180, le=180)
-    location_source: Literal["browser", "manual"] = "browser"
+    location_source: Literal["native", "browser", "manual"] = "browser"
 
     @field_validator("content")
     @classmethod
