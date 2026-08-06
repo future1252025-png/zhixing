@@ -25,3 +25,7 @@ Object.defineProperty(window, 'scrollTo', {
   value: vi.fn(),
   configurable: true
 })
+Object.defineProperty(window, 'scrollBy', {
+  value: vi.fn(),
+  configurable: true
+})

@@ -44,6 +44,28 @@ dependencies {
 
 apply from: 'capacitor.build.gradle'
 
+// Gradle's Windows test worker can lose classes when its runtime classpath
+// contains non-ASCII project segments. APK compilation is unaffected, but the
+// worker then reports ClassNotFoundException for an already compiled test.
+// Mirror the compiled test and app classes to the system temp directory so the
+// standard Gradle test task remains usable without moving the repository.
+tasks.withType(Test).configureEach {
+    def safeTestClasses = file("${System.getProperty('java.io.tmpdir')}/campusmind-gradle-tests/${project.name}/${name}")
+    doFirst {
+        def variant = name.substring('test'.length(), name.length() - 'UnitTest'.length())
+        def variantPath = variant.substring(0, 1).toLowerCase() + variant.substring(1)
+        delete safeTestClasses
+        copy {
+            from testClassesDirs
+            from file("${buildDir}/intermediates/javac/${variantPath}/compile${variant}JavaWithJavac/classes")
+            from file("${buildDir}/tmp/kotlin-classes/${variantPath}")
+            into safeTestClasses
+        }
+        testClassesDirs = files(safeTestClasses)
+        classpath = files(safeTestClasses) + classpath
+    }
+}
+
 try {
     def servicesJSON = file('google-services.json')
     if (servicesJSON.text) {

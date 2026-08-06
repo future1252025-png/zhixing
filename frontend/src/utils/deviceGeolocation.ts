@@ -42,7 +42,9 @@ async function requestNativePosition(): Promise<DevicePosition> {
   const position = await Geolocation.getCurrentPosition({
     enableHighAccuracy: true,
     enableLocationFallback: true,
-    maximumAge: 30_000,
+    // “定位我”是用户主动触发的确认动作，必须读取当前位置，不能复用
+    // 上一次进入频道或出发页时留下的缓存坐标。
+    maximumAge: 0,
     timeout: 15_000
   })
   return {
@@ -74,7 +76,7 @@ function requestBrowserPosition(): Promise<DevicePosition> {
       reject,
       {
         enableHighAccuracy: true,
-        maximumAge: 60_000,
+        maximumAge: 0,
         timeout: 10_000
       }
     )

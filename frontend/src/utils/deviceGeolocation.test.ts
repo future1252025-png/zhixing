@@ -66,7 +66,8 @@ describe('device geolocation', () => {
     })
     expect(mocks.getCurrentPosition).toHaveBeenCalledWith(expect.objectContaining({
       enableHighAccuracy: true,
-      enableLocationFallback: true
+      enableLocationFallback: true,
+      maximumAge: 0
     }))
   })
 
@@ -111,6 +112,11 @@ describe('device geolocation', () => {
       accuracy: 16,
       source: 'browser'
     })
+    expect(getCurrentPosition).toHaveBeenCalledWith(
+      expect.any(Function),
+      expect.any(Function),
+      expect.objectContaining({ maximumAge: 0 })
+    )
   })
 
   it('explains when Android location services are disabled', () => {

@@ -165,18 +165,30 @@ test('mobile core journey keeps weeks, locations, sessions, text, and actions tr
   await screenshot(page, testInfo, 'import-direct-preview.png')
   await expect(page.getByTestId('commit-import')).toBeEnabled()
   await page.getByTestId('commit-import').click()
-  await expect(page.getByText('1 门课程已完整导入')).toBeVisible()
+  await expect(page.getByText('1 门课程已覆盖导入')).toBeVisible()
   await page.getByTestId('view-courses').click()
   await page.waitForURL('**/courses')
 
   const manualCourseCard = page.locator('.timetable-course').filter({ hasText: '交互设计基础' })
   const importedCourseCard = page.locator('.timetable-course').filter({ hasText: '自然语言处理' })
-  await expect(manualCourseCard).toHaveCount(1)
+  await expect(manualCourseCard).toHaveCount(0)
   await expect(importedCourseCard).toHaveCount(1)
-  await expect(manualCourseCard.getByText(`国际教育学院 · ${fullManualRoom}`)).toBeVisible()
   await expect(importedCourseCard.getByText('教4', { exact: true })).toBeVisible()
-  await expect(manualCourseCard.locator('time')).toHaveText('09:00—10:40')
   await expect(importedCourseCard.locator('time')).toHaveCount(0)
+
+  // 整批导入按产品规则覆盖原课表。覆盖行为确认后，再添加一门手工课，
+  // 继续验证课程布局、首页摘要和出发建议这条完整用户链路。
+  await page.goto('/courses/new')
+  await fillCourseForm(page, '交互设计基础')
+  const recreateResponse = page.waitForResponse((response) =>
+    response.url().endsWith('/api/courses') && response.request().method() === 'POST'
+  )
+  await page.getByRole('button', { name: '添加到我的课表' }).click()
+  expect((await recreateResponse).status()).toBe(201)
+  await page.waitForURL('**/courses')
+  await expect(manualCourseCard).toHaveCount(1)
+  await expect(manualCourseCard.getByText(`国际教育学院 · ${fullManualRoom}`)).toBeVisible()
+  await expect(manualCourseCard.locator('time')).toHaveText('09:00—10:40')
   await expect(page.locator('.course-place-index')).toHaveCount(0)
   await settleMotion(page)
   await expect(page.locator('.week-head .weekday-head')).toHaveCount(7)
@@ -226,7 +238,7 @@ test('mobile core journey keeps weeks, locations, sessions, text, and actions tr
   await assertPageQuality(page)
 
   await importedCourseCard.locator('.course-content').click()
-  await expect(page.locator('.van-action-sheet__description')).toHaveText('教4')
+  await expect(page.locator('.van-action-sheet__description')).toHaveText('教师：周老师 · 教4')
   await page.getByRole('button', { name: /查看地点/ }).click()
   await page.waitForURL('**/buildings/**')
   await page.goBack()
