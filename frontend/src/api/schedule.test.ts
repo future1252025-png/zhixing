@@ -19,7 +19,9 @@ const suggestion: ScheduleSuggestion = {
     end_time: '15:40',
     room_name: '302',
     teacher: 'Teacher Zhang',
-    weeks: '1-16'
+    weeks: '1-16',
+    teaching_week: 2,
+    start_at: '2026-09-09T14:00:00+08:00'
   },
   from_location: {
     name: 'Library',

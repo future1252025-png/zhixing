@@ -18,7 +18,11 @@ def test_health_returns_ok() -> None:
 def test_cors_allows_local_frontend_origin() -> None:
     client = TestClient(app)
 
-    for origin in ("http://127.0.0.1:5173", "http://127.0.0.1:5179"):
+    for origin in (
+        "https://localhost",
+        "http://127.0.0.1:5173",
+        "http://127.0.0.1:5179",
+    ):
         response = client.options(
             "/api/auth/register",
             headers={

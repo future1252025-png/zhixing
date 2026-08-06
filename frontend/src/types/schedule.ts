@@ -1,4 +1,4 @@
-export type ScheduleSuggestionPayload =
+export type ScheduleSuggestionPayload = (
   | {
       current_building_id: number
       latitude?: never
@@ -9,8 +9,27 @@ export type ScheduleSuggestionPayload =
       latitude: number
       longitude: number
     }
+)
 
 export type ScheduleStatus = 'normal' | 'tight' | 'likely_late'
+
+export type SchedulePageErrorCode =
+  | 'semester_unconfigured'
+  | 'semester_not_active'
+  | 'no_upcoming_course'
+  | 'course_location_incomplete'
+  | 'schedule_conflict'
+  | 'course_data_invalid'
+  | 'unexpected_error'
+
+export type SchedulePageError = {
+  code: SchedulePageErrorCode
+  title: string
+  message: string
+  semesterStatus: 'before_term' | 'after_term' | null
+  courseId: number | null
+  courseName: string | null
+}
 
 export type NextCourseInfo = {
   id: number
@@ -20,7 +39,9 @@ export type NextCourseInfo = {
   end_time: string
   room_name: string
   teacher: string | null
-  weeks: string | null
+  weeks: string
+  teaching_week: number
+  start_at: string
 }
 
 export type ScheduleLocationInfo = {

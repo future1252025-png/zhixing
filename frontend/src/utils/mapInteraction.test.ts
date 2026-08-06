@@ -3,13 +3,14 @@ import { describe, expect, it } from 'vitest'
 import {
   getBuildingHitZoneSize,
   getMapInteractionLevel,
-  shouldShowBuildingHighlight
+  shouldShowBuildingHighlight,
+  shouldShowBuildingPin
 } from './mapInteraction'
 
 describe('map interaction helpers', () => {
   it('uses smaller building hit zones when zoomed out and larger zones when zoomed in', () => {
-    expect(getBuildingHitZoneSize(14)).toBe(10)
-    expect(getBuildingHitZoneSize(16)).toBe(22)
+    expect(getBuildingHitZoneSize(14)).toBe(32)
+    expect(getBuildingHitZoneSize(16)).toBe(32)
     expect(getBuildingHitZoneSize(18)).toBe(38)
   })
 
@@ -27,5 +28,13 @@ describe('map interaction helpers', () => {
   it('only shows visible building highlight for selected points', () => {
     expect(shouldShowBuildingHighlight(false)).toBe(false)
     expect(shouldShowBuildingHighlight(true)).toBe(true)
+  })
+
+  it('hides ordinary building pins until building-level zoom, keeps the selected pin', () => {
+    expect(shouldShowBuildingPin(14)).toBe(false)
+    expect(shouldShowBuildingPin(16)).toBe(false)
+    expect(shouldShowBuildingPin(18)).toBe(true)
+    expect(shouldShowBuildingPin(14, true)).toBe(true)
+    expect(shouldShowBuildingPin(16, true)).toBe(true)
   })
 })

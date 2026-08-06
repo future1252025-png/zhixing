@@ -1,7 +1,7 @@
 import type { Course } from '@/types/course'
-import { filterCoursesByWeek, findNextCourse, readSelectedWeek } from './course'
+import type { SemesterState } from '@/types/semester'
+import { filterCoursesByWeek, findNextCourse } from './course'
 
-export const APP_LAUNCH_INTRO_STORAGE_KEY = 'campusmind-launch-intro-seen-v1'
 export const LOGIN_INTRO_STORAGE_KEY = 'campusmind-login-intro-pending'
 export const LOGIN_INTRO_SNAPSHOT_STORAGE_KEY = 'campusmind-login-intro-snapshot'
 
@@ -18,14 +18,8 @@ type StorageLike = {
   removeItem(key: string): void
 }
 
-type WeekStorageLike = {
-  getItem(key: string): string | null
-  setItem(key: string, value: string): void
-}
-
 type PrepareLoginIntroOptions = {
   introStorage?: StorageLike
-  weekStorage?: WeekStorageLike
   now?: Date
 }
 
@@ -42,23 +36,15 @@ function isLoginIntroSnapshot(value: unknown): value is LoginIntroSnapshot {
   )
 }
 
-export function shouldPlayAppLaunchIntro(storage: StorageLike = localStorage): boolean {
-  if (storage.getItem(APP_LAUNCH_INTRO_STORAGE_KEY) === '1') {
-    return false
-  }
-  storage.setItem(APP_LAUNCH_INTRO_STORAGE_KEY, '1')
-  return true
-}
-
 export function buildLoginIntroSnapshot(course: Course | null): LoginIntroSnapshot | null {
-  if (!course) {
+  if (!course || !course.start_time) {
     return null
   }
   return {
     courseName: course.course_name,
     startTime: course.start_time,
-    buildingName: course.building.name,
-    roomName: course.room_name
+    buildingName: course.source_location?.trim() || course.building?.name || '地点待补充',
+    roomName: course.source_location?.trim() ? '' : course.room_name
   }
 }
 
@@ -101,16 +87,20 @@ export function consumeLoginIntroSnapshot(
 
 export async function prepareLoginIntro(
   loadCourses: () => Promise<Course[]>,
+  loadSemester: () => Promise<SemesterState>,
   options: PrepareLoginIntroOptions = {}
 ): Promise<void> {
   const introStorage = options.introStorage ?? sessionStorage
-  const weekStorage = options.weekStorage ?? localStorage
 
   try {
-    const selectedWeek = readSelectedWeek(weekStorage)
+    const semester = await loadSemester()
+    if (semester.status !== 'active' || semester.current_week === null) {
+      markLoginIntroPending(introStorage)
+      return
+    }
     const courses = await loadCourses()
     const nextCourse = findNextCourse(
-      filterCoursesByWeek(courses, selectedWeek),
+      filterCoursesByWeek(courses, semester.current_week),
       options.now ?? new Date()
     )
     markLoginIntroPending(introStorage, buildLoginIntroSnapshot(nextCourse))

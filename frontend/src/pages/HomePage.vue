@@ -1,12 +1,17 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { showFailToast } from 'vant'
 import { useRouter } from 'vue-router'
-import { animate, stagger } from 'animejs'
 
-import { getBuildings, type Building } from '@/api/buildings'
-import { getCourses } from '@/api/courses'
+import type { Building } from '@/api/buildings'
 import RealCampusMap from '@/components/RealCampusMap.vue'
 import TechIcon from '@/components/TechIcon.vue'
+import CourseCard from '@/components/course/CourseCard.vue'
+import SemesterGate from '@/components/course/SemesterGate.vue'
+import { useAuthStore } from '@/stores/auth'
+import { useBuildingsStore } from '@/stores/buildings'
+import { useCoursesStore } from '@/stores/courses'
+import { useSemesterStore } from '@/stores/semester'
 import type { Course } from '@/types/course'
 import {
   buildChatSearchResults,
@@ -19,27 +24,46 @@ import {
 } from '@/utils/chat'
 import {
   filterCoursesByWeek,
-  findNextCourse,
-  getWeekdayLabel,
-  readSelectedWeek
+  findNextCourse
 } from '@/utils/course'
+import { formatBuildingDisplayName } from '@/utils/buildings'
+import { createScopedStorage } from '@/utils/scopedStorage'
+import {
+  consumeLoginIntroFlag,
+  consumeLoginIntroSnapshot,
+  type LoginIntroSnapshot
+} from '@/utils/loginIntro'
 
 const router = useRouter()
+const authStore = useAuthStore()
+const buildingsStore = useBuildingsStore()
+const coursesStore = useCoursesStore()
+const semesterStore = useSemesterStore()
 const buildings = ref<Building[]>([])
 const courses = ref<Course[]>([])
 const loading = ref(true)
 const errorMessage = ref('')
 const chatQuery = ref('')
 const recentChats = ref<RecentChatEntry[]>([])
-const homeRoot = ref<HTMLElement | null>(null)
-const selectedWeek = typeof window === 'undefined' ? 1 : readSelectedWeek(window.localStorage)
+const loginWelcomeVisible = ref(false)
+const loginWelcomeSnapshot = ref<LoginIntroSnapshot | null>(null)
+let loginWelcomeTimer: number | null = null
 const todayLabel = new Intl.DateTimeFormat('zh-CN', {
   month: 'long',
   day: 'numeric',
   weekday: 'short'
 }).format(new Date())
 
-const activeCourses = computed(() => filterCoursesByWeek(courses.value, selectedWeek))
+const currentWeek = computed(() =>
+  semesterStore.semester?.status === 'active'
+    ? semesterStore.semester.current_week
+    : null
+)
+const activeCourses = computed(() =>
+  currentWeek.value === null
+    ? []
+    : filterCoursesByWeek(courses.value, currentWeek.value)
+)
 const nextCourse = computed(() => findNextCourse(activeCourses.value))
 const nextCourseChat = computed(() =>
   nextCourse.value ? buildNextCourseChatTarget(nextCourse.value) : null
@@ -65,18 +89,29 @@ const popularChatBuildings = computed(() => {
 const showSearchResults = computed(() => chatQuery.value.trim().length > 0)
 
 function refreshRecentChats() {
-  if (typeof window === 'undefined') {
+  const userId = authStore.currentUser?.id
+  if (typeof window === 'undefined' || !userId) {
     recentChats.value = []
     return
   }
-  recentChats.value = readRecentChatEntries(window.localStorage)
+  recentChats.value = readRecentChatEntries(createScopedStorage(userId))
 }
 
 async function loadHomeData() {
   loading.value = true
   errorMessage.value = ''
+  const userId = authStore.currentUser?.id
+  if (!userId) {
+    errorMessage.value = '登录信息尚未加载完成，请重新进入首页'
+    loading.value = false
+    return
+  }
   try {
-    const [buildingResult, courseResult] = await Promise.all([getBuildings(), getCourses()])
+    const [buildingResult, courseResult] = await Promise.all([
+      buildingsStore.ensureLoaded(),
+      coursesStore.ensureLoaded(),
+      semesterStore.load(userId)
+    ])
     buildings.value = buildingResult
     courses.value = courseResult
     refreshRecentChats()
@@ -87,31 +122,40 @@ async function loadHomeData() {
   }
 }
 
-function playHomeIntro() {
-  if (typeof window === 'undefined' || !homeRoot.value) return
-  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
-  const items = homeRoot.value.querySelectorAll('.home-motion-item')
-  if (!items.length) return
-  animate(items, {
-    opacity: [0, 1],
-    translateY: [18, 0],
-    rotate: [-0.7, 0],
-    duration: 680,
-    delay: stagger(76),
-    ease: 'outCubic'
-  })
+async function initializeHome() {
+  const hasLoginIntro = consumeLoginIntroFlag()
+  loginWelcomeSnapshot.value = consumeLoginIntroSnapshot()
+  if (hasLoginIntro) {
+    loginWelcomeVisible.value = true
+    loginWelcomeTimer = window.setTimeout(() => {
+      loginWelcomeVisible.value = false
+      loginWelcomeTimer = null
+    }, 3600)
+  }
+  await loadHomeData()
 }
 
-async function initializeHome() {
-  const loadingTask = loadHomeData()
-  await nextTick()
-  playHomeIntro()
-  await loadingTask
+function dismissLoginWelcome() {
+  if (loginWelcomeTimer !== null) {
+    window.clearTimeout(loginWelcomeTimer)
+    loginWelcomeTimer = null
+  }
+  loginWelcomeVisible.value = false
+}
+
+// 欢迎卡不只是提示：有课程快照时点按直达当天课表
+function handleWelcomeTap() {
+  const hasSnapshot = loginWelcomeSnapshot.value !== null
+  dismissLoginWelcome()
+  if (hasSnapshot) {
+    router.push('/courses')
+  }
 }
 
 function rememberChat(building: Pick<Building, 'id' | 'name'>, roomName: string | null = null) {
-  if (typeof window === 'undefined') return
-  recentChats.value = rememberRecentChatEntry(window.localStorage, {
+  const userId = authStore.currentUser?.id
+  if (typeof window === 'undefined' || !userId) return
+  recentChats.value = rememberRecentChatEntry(createScopedStorage(userId), {
     buildingId: building.id,
     buildingName: building.name,
     roomName
@@ -136,7 +180,16 @@ function openNextCourseChat() {
     router.push('/courses/import')
     return
   }
+  if (!target.buildingId || !target.buildingName) {
+    showFailToast('这个上课地点还未匹配校园地图，请先补全地点后再打开')
+    if (nextCourse.value) openCourseEdit(nextCourse.value.id)
+    return
+  }
   openBuildingChat({ id: target.buildingId, name: target.buildingName }, target.roomName)
+}
+
+function openCourseEdit(courseId: number) {
+  router.push(`/courses/${courseId}/edit`)
 }
 
 function openSearchResult(result: ChatSearchResult) {
@@ -145,6 +198,16 @@ function openSearchResult(result: ChatSearchResult) {
 
 function openRecentChat(entry: RecentChatEntry) {
   openBuildingChat({ id: entry.buildingId, name: entry.buildingName }, entry.roomName)
+}
+
+function openQuickChannels() {
+  const latest = recentChats.value[0]
+  if (latest) {
+    openRecentChat(latest)
+    return
+  }
+  // 还没聊过：带用户到常去处板块，那里每张卡都是频道入口
+  document.querySelector('.places-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 
 function openBuilding(buildingId: number) {
@@ -157,11 +220,14 @@ function openBuilding(buildingId: number) {
 }
 
 onMounted(initializeHome)
+onUnmounted(() => {
+  if (loginWelcomeTimer !== null) window.clearTimeout(loginWelcomeTimer)
+})
 </script>
 
 <template>
   <section class="page home-page">
-    <div ref="homeRoot" class="page-content home-content">
+    <div class="page-content home-content">
       <header class="home-top home-motion-item">
         <div class="home-brand">
           <span><i></i><i></i></span>
@@ -173,53 +239,91 @@ onMounted(initializeHome)
         <time>{{ todayLabel }}</time>
       </header>
 
-      <section class="today-card home-motion-item">
-        <span class="sun-spot" aria-hidden="true"></span>
-        <span class="leaf-cluster leaf-cluster-a" aria-hidden="true"><i></i><i></i><i></i></span>
-        <span class="leaf-cluster leaf-cluster-b" aria-hidden="true"><i></i><i></i></span>
-
-        <div class="today-copy">
-          <span class="fresh-kicker">今天的下一站</span>
-          <template v-if="nextCourse && nextCourseChat">
-            <p>{{ getWeekdayLabel(nextCourse.weekday) }} · {{ nextCourse.start_time }}</p>
-            <h1>{{ nextCourse.course_name }}</h1>
-            <div class="today-location">
-              <span class="location-pin" aria-hidden="true">
-                <van-icon name="location-o" />
-              </span>
-              <span>
-                <small>上课地点</small>
-                <strong>{{ nextCourse.building.name }}</strong>
-                <em>教室 {{ nextCourse.room_name }}</em>
-              </span>
+      <Transition name="login-welcome">
+        <div v-if="loginWelcomeVisible" class="login-welcome-shell">
+          <aside
+            class="login-welcome"
+            aria-live="polite"
+            role="button"
+            tabindex="0"
+            @click="handleWelcomeTap"
+            @keydown.enter="handleWelcomeTap"
+          >
+            <span class="login-welcome__path" aria-hidden="true"><i></i></span>
+            <div>
+              <small>登录成功 · 校园路线已接上</small>
+              <strong>{{ loginWelcomeSnapshot?.courseName || '欢迎回来，慢慢开始今天' }}</strong>
+              <p v-if="loginWelcomeSnapshot">
+                {{ loginWelcomeSnapshot.startTime }} · {{ [loginWelcomeSnapshot.buildingName, loginWelcomeSnapshot.roomName].filter(Boolean).join(' · ') }} · 点我看课表
+              </p>
+              <p v-else>课表、地点和出发建议已经准备好了。</p>
             </div>
-          </template>
-          <template v-else>
-            <p>第 {{ selectedWeek }} 周</p>
-            <h1>今天还没有安排</h1>
-            <strong>给自己留一点自由时间</strong>
-            <small>导入课表后，下一节课会出现在这里。</small>
-          </template>
+          </aside>
         </div>
+      </Transition>
 
-        <div class="walking-line" aria-hidden="true">
-          <svg viewBox="0 0 330 80">
-            <path d="M5 59C70 10 97 72 159 41S247 16 325 43" pathLength="1" />
-          </svg>
-          <i></i><i></i>
-        </div>
+      <div v-if="loading" class="home-semester-loading fresh-card" aria-live="polite">
+        <span><i></i><i></i><i></i></span>
+        <p>正在对齐真实教学周...</p>
+      </div>
 
-        <button type="button" class="today-action" @click="openNextCourseChat">
-          <span>{{ nextCourseChat ? '进入地点频道' : '导入我的课表' }}</span>
-          <TechIcon name="arrow" :size="19" />
-        </button>
-      </section>
+      <van-empty v-else-if="errorMessage || !semesterStore.semester" image="error" :description="errorMessage || '学期状态暂时不可用'">
+        <van-button type="primary" size="small" @click="loadHomeData">重新加载</van-button>
+      </van-empty>
+
+      <SemesterGate
+        v-else
+        :status="semesterStore.semester.status"
+        :current-week="currentWeek"
+      >
+        <section class="today-card home-motion-item">
+          <span class="sun-spot" aria-hidden="true"></span>
+          <span class="leaf-cluster leaf-cluster-a" aria-hidden="true"><i></i><i></i><i></i></span>
+          <span class="leaf-cluster leaf-cluster-b" aria-hidden="true"><i></i><i></i></span>
+
+          <div class="today-copy">
+            <span class="fresh-kicker">今天的下一站</span>
+            <p>真实第 {{ currentWeek }} 周</p>
+            <template v-if="nextCourse && nextCourseChat">
+              <CourseCard
+                class="home-next-course"
+                :course="nextCourse"
+                compact
+                @select="openNextCourseChat"
+                @edit="openCourseEdit"
+              />
+            </template>
+            <template v-else>
+              <h1>今天还没有安排</h1>
+              <strong>给自己留一点自由时间</strong>
+              <small>本周有新课程时，下一节课会出现在这里。</small>
+            </template>
+          </div>
+
+          <div class="walking-line" aria-hidden="true">
+            <svg viewBox="0 0 330 80">
+              <path d="M5 59C70 10 97 72 159 41S247 16 325 43" pathLength="1" />
+            </svg>
+            <i></i><i></i>
+          </div>
+
+          <button type="button" class="today-action" @click="openNextCourseChat">
+            <span>{{ nextCourseChat ? '进入地点频道' : '导入我的课表' }}</span>
+            <TechIcon name="arrow" :size="19" />
+          </button>
+        </section>
+      </SemesterGate>
 
       <nav
         v-reveal="{ from: 'right', distance: 34, stagger: 70 }"
         class="quick-notes"
         aria-label="快捷操作"
       >
+        <button type="button" class="note note-lilac" @click="openQuickChannels">
+          <span><TechIcon name="chat" :size="21" /></span>
+          <strong>地点频道</strong>
+          <small>{{ recentChats.length ? '回到上次聊过的' : '挑个地点聊聊' }}</small>
+        </button>
         <button type="button" class="note note-green" @click="router.push('/courses/import')">
           <span><TechIcon name="upload" :size="21" /></span>
           <strong>导入课表</strong>
@@ -244,7 +348,7 @@ onMounted(initializeHome)
         <div class="fresh-section-heading">
           <div>
             <h2>想去哪里看看？</h2>
-            <p>搜索教学楼、图书馆或具体教室</p>
+            <p>搜地点或教室，直接进对应频道</p>
           </div>
           <span class="search-flower" aria-hidden="true"><i></i><i></i><i></i></span>
         </div>
@@ -264,9 +368,9 @@ onMounted(initializeHome)
           >
             <span class="place-mark"><i></i></span>
             <span>
-              <strong>{{ result.roomName || result.building.name }}</strong>
+              <strong>{{ result.roomName || formatBuildingDisplayName(result.building.name) }}</strong>
               <small>
-                {{ result.roomName ? `${result.building.name} · 教室频道` : `${result.building.type} · 地点频道` }}
+                {{ result.roomName ? `${formatBuildingDisplayName(result.building.name)} · 教室频道` : `${result.building.type} · 地点频道` }}
               </small>
             </span>
             <TechIcon name="arrow" :size="17" />
@@ -290,7 +394,7 @@ onMounted(initializeHome)
             type="button"
             @click="openRecentChat(entry)"
           >
-            <span><van-icon name="location-o" /></span>
+            <span><TechIcon name="location" :size="16" /></span>
             <strong>{{ formatChatEntryLabel(entry) }}</strong>
           </button>
         </div>
@@ -301,7 +405,7 @@ onMounted(initializeHome)
         class="places-section"
       >
         <div class="fresh-section-heading">
-          <div><h2>校园里的常去处</h2><p>从熟悉的地方开始逛逛</p></div>
+          <div><h2>校园里的常去处</h2><p>点一下，进这个地点的频道聊聊</p></div>
           <span>{{ buildings.length }} 个地点</span>
         </div>
 
@@ -315,8 +419,8 @@ onMounted(initializeHome)
           >
             <span class="place-index">{{ String(index + 1).padStart(2, '0') }}</span>
             <small>{{ building.type }}</small>
-            <strong>{{ building.name }}</strong>
-            <span class="place-enter">看看这里 <TechIcon name="arrow" :size="15" /></span>
+            <strong>{{ formatBuildingDisplayName(building.name) }}</strong>
+            <span class="place-enter"><TechIcon name="chat" :size="14" /> 进频道聊聊 <TechIcon name="arrow" :size="15" /></span>
           </button>
         </div>
       </section>
@@ -332,7 +436,7 @@ onMounted(initializeHome)
             title=""
             subtitle=""
             height="430px"
-            selected-action-text="打开地点"
+            selected-action-text="进频道"
             @building-click="openBuilding"
           />
           <div v-if="loading" class="home-loading">
@@ -360,6 +464,27 @@ onMounted(initializeHome)
   display: grid;
   gap: 19px;
   padding-top: 16px;
+}
+
+/* 进场动效统一为纯 CSS（原 animejs 时间线）：插入即播，数据到达后不再二次闪现 */
+.home-motion-item {
+  animation: home-arrive 680ms var(--fresh-spring) both;
+}
+
+.today-card.home-motion-item {
+  animation-delay: 76ms;
+}
+
+@keyframes home-arrive {
+  from {
+    opacity: 0;
+    transform: translateY(18px) rotate(-0.7deg);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 
 .home-top {
@@ -390,7 +515,7 @@ onMounted(initializeHome)
   width: 10px;
   height: 17px;
   border-radius: 100% 0 100% 0;
-  background: #eaf2e6;
+  background: var(--fresh-mint);
 }
 
 .home-brand > span i:first-child { top: 4px; left: 6px; }
@@ -408,11 +533,11 @@ onMounted(initializeHome)
 .home-brand small,
 .home-top time {
   color: var(--fresh-muted);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .home-top time {
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: rgba(255, 253, 248, 0.74);
   padding: 7px 10px;
 }
@@ -424,7 +549,7 @@ onMounted(initializeHome)
   border-radius: 34px 34px 26px 34px;
   background:
     linear-gradient(145deg, rgba(255, 255, 255, 0.42), transparent 42%),
-    #dfead8;
+    var(--fresh-mint);
   padding: 26px 23px 22px;
   box-shadow: 0 22px 55px rgba(66, 96, 65, 0.13);
 }
@@ -447,6 +572,91 @@ onMounted(initializeHome)
   max-width: 370px;
 }
 
+.login-welcome {
+  position: relative;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 12px;
+  overflow: hidden;
+  border: 1px solid var(--fresh-line);
+  border-radius: 21px 21px 17px 21px;
+  background: var(--fresh-mint);
+  box-shadow: 0 12px 30px rgba(55, 81, 57, .09);
+  color: var(--fresh-ink);
+  padding: 14px 15px;
+}
+
+.login-welcome__path {
+  position: relative;
+  display: block;
+  width: 42px;
+  height: 42px;
+  border: 2px dashed var(--fresh-leaf);
+  border-radius: 50%;
+}
+
+.login-welcome__path::before,
+.login-welcome__path::after {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--fresh-green);
+  content: '';
+}
+.login-welcome__path::before { top: -4px; left: 15px; }
+.login-welcome__path::after { right: -4px; bottom: 12px; background: var(--cm-chat-dark); }
+.login-welcome__path i {
+  position: absolute;
+  top: 13px;
+  left: 13px;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 0 0 4px rgba(79, 125, 88, .13);
+  animation: welcome-pulse 1.15s ease-in-out infinite alternate;
+}
+.login-welcome > div { position: relative; z-index: 1; display: grid; min-width: 0; gap: 3px; }
+.login-welcome small { color: var(--fresh-green-dark); font-size: 12px; font-weight: 700; }
+.login-welcome strong { color: var(--fresh-ink); font-size: 15px; line-height: 1.45; overflow-wrap: anywhere; }
+.login-welcome p { margin: 0; color: var(--fresh-text); font-size: 12px; line-height: 1.55; overflow-wrap: anywhere; }
+
+/* 收起时用 grid-template-rows 1fr→0fr 平滑塌高度，首页内容不再猛跳 */
+.login-welcome-shell {
+  display: grid;
+  grid-template-rows: 1fr;
+}
+
+.login-welcome-shell .login-welcome {
+  min-height: 0;
+  cursor: pointer;
+}
+
+.login-welcome-enter-active,
+.login-welcome-leave-active {
+  transition:
+    opacity 420ms ease,
+    transform 480ms var(--fresh-spring),
+    grid-template-rows 460ms var(--fresh-spring);
+}
+.login-welcome-enter-from { opacity: 0; transform: translateX(32px) rotate(.5deg); }
+.login-welcome-leave-to {
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transform: translateX(-14px);
+}
+
+@keyframes welcome-pulse {
+  to { transform: scale(1.18); }
+}
+
+.home-next-course {
+  width: min(100%, 350px);
+  margin-top: 14px;
+  box-shadow: 0 12px 28px rgba(57, 84, 58, .11);
+}
+
 .today-copy p {
   margin: 16px 0 0;
   color: var(--fresh-text);
@@ -457,9 +667,9 @@ onMounted(initializeHome)
   max-width: 330px;
   margin: 7px 0 0;
   color: var(--fresh-ink);
-  font-family: "STKaiti", "KaiTi", "PingFang SC", sans-serif;
+  font-family: var(--font-serif);
   font-size: clamp(30px, 8vw, 43px);
-  font-weight: 760;
+  font-weight: 700;
   line-height: 1.12;
   letter-spacing: -0.045em;
 }
@@ -472,7 +682,7 @@ onMounted(initializeHome)
   gap: 10px;
   margin-top: 16px;
   border: 1px solid rgba(79, 125, 88, 0.13);
-  border-radius: 17px;
+  border-radius: var(--fresh-radius-sm);
   background: rgba(255, 253, 248, 0.66);
   padding: 10px 12px;
 }
@@ -483,7 +693,7 @@ onMounted(initializeHome)
   height: 36px;
   place-items: center;
   border-radius: 13px;
-  background: #fffdf8;
+  background: var(--fresh-paper);
   color: var(--fresh-green-dark);
   font-size: 18px;
   box-shadow: 0 5px 13px rgba(57, 84, 58, 0.08);
@@ -497,19 +707,20 @@ onMounted(initializeHome)
 
 .today-location small {
   color: var(--fresh-muted);
-  font-size: 9px;
+  font-size: 12px;
+  font-weight: 600;
 }
 
 .today-location strong {
   color: var(--fresh-green-dark);
-  font-size: 13px;
+  font-size: 16px;
   line-height: 1.35;
   overflow-wrap: anywhere;
 }
 
 .today-location em {
   color: var(--fresh-text);
-  font-size: 11px;
+  font-size: 13px;
   font-style: normal;
   font-weight: 700;
 }
@@ -573,7 +784,7 @@ onMounted(initializeHome)
   position: absolute;
   width: 9px;
   height: 9px;
-  border: 3px solid #dfead8;
+  border: 3px solid var(--fresh-mint);
   border-radius: 50%;
   background: var(--fresh-green);
 }
@@ -592,19 +803,19 @@ onMounted(initializeHome)
   align-items: center;
   justify-content: space-between;
   border: 0;
-  border-radius: 17px;
+  border-radius: var(--fresh-radius-sm);
   background: var(--fresh-green-dark);
   color: #fff;
   cursor: pointer;
   font-size: 13px;
-  font-weight: 720;
+  font-weight: 700;
   padding: 0 17px;
   box-shadow: 0 12px 24px rgba(49, 91, 59, 0.2);
 }
 
 .quick-notes {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 9px;
 }
 
@@ -625,6 +836,7 @@ onMounted(initializeHome)
 
 .note:nth-child(2) { transform: rotate(1.1deg); }
 .note:nth-child(3) { transform: rotate(-0.8deg); }
+.note:nth-child(4) { transform: rotate(0.9deg); }
 
 .note > span {
   display: grid;
@@ -641,14 +853,16 @@ onMounted(initializeHome)
 }
 
 .note small {
-  color: rgba(38, 54, 42, 0.62);
-  font-size: 9px;
+  color: var(--fresh-text);
+  font-size: 12px;
   line-height: 1.45;
 }
 
-.note-green { background: #e5eee0; }
-.note-blue { background: #e1edef; }
-.note-yellow { background: #f8edd1; }
+.note-green { background: var(--fresh-mint); }
+.note-blue { background: var(--fresh-sky); }
+.note-yellow { background: var(--cm-amber-soft); }
+.note-lilac { background: var(--fresh-lilac); }
+.note-lilac small { color: #314438; }
 
 .search-sheet,
 .map-sheet {
@@ -689,8 +903,8 @@ onMounted(initializeHome)
   align-items: center;
   min-height: 60px;
   border: 1px solid var(--fresh-line);
-  border-radius: 17px;
-  background: #fafbf6;
+  border-radius: var(--fresh-radius-sm);
+  background: var(--fresh-paper-2);
   color: var(--fresh-ink);
   cursor: pointer;
   padding: 9px 11px;
@@ -705,13 +919,11 @@ onMounted(initializeHome)
 
 .search-results strong,
 .search-results small {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
-.search-results strong { font-size: 13px; }
-.search-results small { color: var(--fresh-muted); font-size: 10px; }
+.search-results strong { font-size: 15px; line-height: 1.4; }
+.search-results small { color: var(--fresh-muted); font-size: 13px; }
 
 .place-mark {
   position: relative;
@@ -753,7 +965,7 @@ onMounted(initializeHome)
   gap: 8px;
   min-height: 47px;
   border: 1px solid var(--fresh-line);
-  border-radius: 18px;
+  border-radius: var(--radius-md);
   background: var(--fresh-paper);
   color: var(--fresh-text);
   cursor: pointer;
@@ -767,14 +979,14 @@ onMounted(initializeHome)
   place-items: center;
   border-radius: 50%;
   background: var(--fresh-sky);
-  color: #56808a;
+  color: var(--cm-chat-dark);
 }
 
-.recent-row strong { font-size: 11px; }
+.recent-row strong { font-size: 13px; font-weight: 700; }
 
 .places-section .fresh-section-heading > span {
   color: var(--fresh-muted);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .place-grid {
@@ -807,33 +1019,33 @@ onMounted(initializeHome)
   border: 18px solid rgba(255, 255, 255, 0.35);
   border-radius: 50%;
   content: "";
+  pointer-events: none;
 }
 
-.place-tone-0 { background: #e3eddd; }
-.place-tone-1 { background: #e1edef; }
-.place-tone-2 { background: #f7ead0; }
+.place-tone-0 { background: var(--fresh-mint); }
+.place-tone-1 { background: var(--fresh-sky); }
+.place-tone-2 { background: var(--cm-amber-soft); }
 .place-tone-3 { background: #eee5ec; }
 
 .place-index {
   position: absolute;
   top: 13px;
   left: 14px;
-  color: rgba(38, 54, 42, 0.42);
+  color: var(--fresh-text);
   font-family: ui-monospace, monospace;
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .place-grid small {
-  color: rgba(38, 54, 42, 0.58);
-  font-size: 9px;
+  color: var(--fresh-text);
+  font-size: 12px;
 }
 
 .place-grid strong {
-  overflow: hidden;
   margin-top: 3px;
   font-size: 16px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
 }
 
 .place-enter {
@@ -842,7 +1054,7 @@ onMounted(initializeHome)
   gap: 5px;
   margin-top: 11px;
   color: var(--fresh-green-dark);
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
 }
 
@@ -850,34 +1062,42 @@ onMounted(initializeHome)
   overflow: hidden;
 }
 
-.home-loading {
+.home-loading,
+.home-semester-loading {
   display: grid;
-  min-height: 330px;
   place-content: center;
   justify-items: center;
   gap: 13px;
   color: var(--fresh-muted);
-  font-size: 11px;
+  font-size: 12px;
 }
 
-.home-loading > span {
+.home-loading { min-height: 330px; }
+.home-semester-loading { min-height: 210px; }
+
+.home-loading > span,
+.home-semester-loading > span {
   display: flex;
   gap: 5px;
   align-items: flex-end;
   height: 28px;
 }
 
-.home-loading i {
+.home-loading i,
+.home-semester-loading i {
   width: 5px;
   height: 12px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--fresh-leaf);
   animation: loading-grow 1s ease-in-out infinite alternate;
 }
 
-.home-loading i:nth-child(2) { height: 22px; animation-delay: 160ms; }
-.home-loading i:nth-child(3) { height: 16px; animation-delay: 320ms; }
-.home-loading p { margin: 0; }
+.home-loading i:nth-child(2),
+.home-semester-loading i:nth-child(2) { height: 22px; animation-delay: 160ms; }
+.home-loading i:nth-child(3),
+.home-semester-loading i:nth-child(3) { height: 16px; animation-delay: 320ms; }
+.home-loading p,
+.home-semester-loading p { margin: 0; }
 
 @keyframes trail-grow {
   to { stroke-dashoffset: 0; }
@@ -895,13 +1115,15 @@ onMounted(initializeHome)
   .today-card { min-height: 345px; padding-right: 18px; padding-left: 18px; }
   .quick-notes { gap: 6px; }
   .note { min-height: 128px; padding: 12px 9px; }
-  .note small { font-size: 8px; }
+  .note small { font-size: 12px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .sun-spot,
   .walking-line path,
-  .home-loading i {
+  .home-loading i,
+  .home-semester-loading i,
+  .login-welcome__path i {
     animation: none;
   }
 

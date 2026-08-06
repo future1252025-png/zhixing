@@ -4,11 +4,15 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch 
 import type { Building } from '@/api/buildings'
 import type { CampusMapPoint } from '@/types/map'
 import { isAMapConfigured, loadAMapPlugin, loadAMapSdk } from '@/utils/amap'
+import { formatBuildingDisplayName } from '@/utils/buildings'
 import { wgs84ToGcj02 } from '@/utils/geo'
 import {
   getBuildingHitZoneSize,
+  getBuildingPinSize,
   getMapInteractionLevel,
-  shouldShowBuildingHighlight
+  shouldShowBuildingHighlight,
+  shouldShowBuildingPin,
+  type MapInteractionLevel
 } from '@/utils/mapInteraction'
 import { filterMapBuildings } from '@/utils/mapSearch'
 
@@ -52,6 +56,13 @@ const errorMessage = shallowRef('')
 const searchQuery = ref('')
 const selectedSearchBuildingId = ref<number | null>(null)
 const currentZoom = ref(props.zoom)
+let disposed = false
+let initializationGeneration = 0
+let zoomEndHandler: (() => void) | null = null
+let mapAccessibilityObserver: MutationObserver | null = null
+let lastRenderedInteractionLevel: MapInteractionLevel | null = null
+let lastRenderedZoom: number | null = null
+let moveEndHandler: (() => void) | null = null
 
 const hasConfig = computed(() => isAMapConfigured())
 const markerBuildings = computed(() =>
@@ -88,34 +99,75 @@ function getMapCenter(): [number, number] {
   return [114.3235, 30.5828]
 }
 
-function buildingHitZoneContent(active = false): string {
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (character) => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character] ?? character
+  ))
+}
+
+function buildingHitZoneContent(name: string, active = false): string {
   const size = getBuildingHitZoneSize(currentZoom.value, active)
-  const showHighlight = shouldShowBuildingHighlight(active)
+  const pinWidth = getBuildingPinSize(active)
+  const pinHeight = Math.round((pinWidth * 31) / 24)
+  const fill = active ? '#e2493b' : '#3d73e0'
+  const ringSize = 20
+  // 经典水滴 pin，配色随底图惯例（蓝=可点地点，红=选中）而非应用 UI；
+  // 针尖用纯像素定位落在命中区几何中心（即坐标点），不依赖 transform，
+  // 外部样式/动画覆盖不会再把它从坐标点上挪走
   return `
-    <div style="
+    <div class="map-pin" style="
       position:relative;
       width:${size}px;
       height:${size}px;
-      border-radius:999px;
       background:transparent;
       cursor:pointer;
-      transform:translateZ(0);
     ">
       ${
-        showHighlight
+        shouldShowBuildingHighlight(active)
           ? `<span style="
               position:absolute;
-              inset:50%;
-              width:18px;
-              height:18px;
-              border:2px solid #0f7f78;
+              left:${(size - ringSize) / 2}px;
+              top:${(size - ringSize) / 2}px;
+              width:${ringSize}px;
+              height:${ringSize}px;
               border-radius:999px;
-              background:rgba(15,127,120,.16);
-              box-shadow:0 0 0 8px rgba(15,127,120,.14);
-              transform:translate(-50%,-50%);
+              background:rgba(226,73,59,.16);
+              box-shadow:0 0 0 6px rgba(226,73,59,.09);
             "></span>`
           : ''
       }
+      <svg viewBox="0 0 24 31" style="
+        position:absolute;
+        left:${(size - pinWidth) / 2}px;
+        bottom:${size / 2}px;
+        width:${pinWidth}px;
+        height:${pinHeight}px;
+        filter:drop-shadow(0 2px 2px rgba(30,40,34,.35));
+      ">
+        <path
+          d="M12 1C6.2 1 1.5 5.6 1.5 11.3c0 2.6.9 5 2.6 7.2L12 31l7.9-12.5c1.7-2.2 2.6-4.6 2.6-7.2C22.5 5.6 17.8 1 12 1z"
+          fill="${fill}" stroke="#fff" stroke-width="1.5"
+        />
+        <circle cx="12" cy="11.3" r="4.2" fill="#fff"/>
+      </svg>
+      <span class="map-pin-tip" style="
+        position:absolute;
+        left:50%;
+        bottom:${size / 2 + pinHeight + 7}px;
+        max-width:min(240px, 72vw);
+        padding:4px 9px;
+        border:1px solid rgba(0,0,0,.08);
+        border-radius:7px;
+        background:#fff;
+        box-shadow:0 2px 10px rgba(0,0,0,.2);
+        color:#333;
+        font-size:12px;
+        line-height:1.35;
+        overflow-wrap:anywhere;
+        text-align:center;
+        white-space:normal;
+        transform:translateX(-50%);
+      ">${escapeHtml(name)}</span>
     </div>
   `
 }
@@ -136,7 +188,7 @@ function routeMarkerContent(kind: 'from' | 'to'): string {
       background:${palette[kind]};
       box-shadow:0 6px 14px rgba(15,23,42,.24);
       color:#fff;
-      font-size:11px;
+      font-size: 12px;
       font-weight:800;
       line-height:1;
     "></div>
@@ -188,20 +240,37 @@ function renderMapContent(adjustView = false) {
 
   clearWalkingRoute()
   clearOverlays()
+  lastRenderedInteractionLevel = interactionLevel.value
+  lastRenderedZoom = currentZoom.value
   const nextOverlays: any[] = []
+
+  // 视野过滤：只为当前可见区域内的建筑建 pin。bounds 能力缺失时
+  // （如测试桩）退化为全部渲染。
+  const bounds = typeof map.value.getBounds === 'function' ? map.value.getBounds() : null
+  const isInView = bounds && typeof bounds.contains === 'function'
+    ? (lngLat: [number, number]) => bounds.contains(lngLat)
+    : () => true
 
   markerBuildings.value.forEach((building) => {
     const active = building.id === props.activeBuildingId ||
       building.id === selectedSearchBuildingId.value
+    if (!shouldShowBuildingPin(currentZoom.value, active)) {
+      return
+    }
+    const position = pointToLngLat(building)
+    if (!active && !isInView(position)) {
+      return
+    }
     const marker = new amap.value.Marker({
-      position: pointToLngLat(building),
-      content: buildingHitZoneContent(active),
+      position,
+      content: buildingHitZoneContent(formatBuildingDisplayName(building.name), active),
       anchor: 'center',
       zIndex: active ? 120 : 100
     })
     marker.on('click', () => {
+      // 点选只出确认卡，跳转交给卡上按钮——地图拖动时不再误触进页
       selectedSearchBuildingId.value = building.id
-      emit('buildingClick', building.id)
+      renderMapContent()
     })
     nextOverlays.push(marker)
   })
@@ -269,8 +338,40 @@ function openSelectedBuilding() {
   }
 }
 
-async function installMapControls() {
-  if (!map.value) {
+function initializationIsActive(generation: number): boolean {
+  return !disposed && generation === initializationGeneration
+}
+
+function labelGeneratedMapElements() {
+  const container = mapContainer.value
+  if (!container) return
+
+  container.querySelectorAll('iframe').forEach((frame) => {
+    if (!frame.title && !frame.getAttribute('aria-label')) {
+      frame.title = `${props.title || '校园地图'}交互辅助框架`
+    }
+  })
+  container.querySelectorAll('img').forEach((image) => {
+    if (!image.hasAttribute('alt')) {
+      image.alt = image.closest('.amap-logo') ? '高德地图' : ''
+    }
+  })
+}
+
+function observeGeneratedMapElements() {
+  mapAccessibilityObserver?.disconnect()
+  labelGeneratedMapElements()
+  if (!mapContainer.value) return
+
+  mapAccessibilityObserver = new MutationObserver(labelGeneratedMapElements)
+  mapAccessibilityObserver.observe(mapContainer.value, {
+    childList: true,
+    subtree: true
+  })
+}
+
+async function installMapControls(generation: number, targetMap: any) {
+  if (!initializationIsActive(generation) || map.value !== targetMap) {
     return
   }
 
@@ -279,11 +380,11 @@ async function installMapControls() {
       loadAMapPlugin('AMap.Scale'),
       loadAMapPlugin('AMap.ToolBar')
     ])
-    if (!map.value) {
+    if (!initializationIsActive(generation) || map.value !== targetMap) {
       return
     }
-    map.value.addControl(new scaleAMap.Scale())
-    map.value.addControl(new toolbarAMap.ToolBar({ position: 'RB' }))
+    targetMap.addControl(new scaleAMap.Scale())
+    targetMap.addControl(new toolbarAMap.ToolBar({ position: 'RB' }))
   } catch {
     // The base map remains usable when optional controls fail to load.
   }
@@ -294,31 +395,69 @@ async function initMap() {
     return
   }
 
+  const generation = ++initializationGeneration
   loading.value = true
   errorMessage.value = ''
   try {
-    amap.value = await loadAMapSdk()
+    let loadedAMap = await loadAMapSdk()
+    if (!initializationIsActive(generation)) {
+      return
+    }
     if (props.walkingRoute) {
-      amap.value = await loadAMapPlugin('AMap.Walking')
+      loadedAMap = await loadAMapPlugin('AMap.Walking')
+      if (!initializationIsActive(generation)) {
+        return
+      }
     }
     await nextTick()
-    map.value = new amap.value.Map(mapContainer.value, {
+    if (!initializationIsActive(generation) || !mapContainer.value) {
+      return
+    }
+    const targetMap = new loadedAMap.Map(mapContainer.value, {
       center: getMapCenter(),
       zoom: props.zoom,
       viewMode: '2D',
       resizeEnable: true,
+      dragEnable: true,
       mapStyle: 'amap://styles/normal'
     })
-    void installMapControls()
-    map.value.on('zoomend', () => {
-      currentZoom.value = map.value.getZoom()
-    })
-    currentZoom.value = map.value.getZoom()
+    if (!initializationIsActive(generation)) {
+      targetMap.destroy?.()
+      return
+    }
+    amap.value = loadedAMap
+    map.value = targetMap
+    observeGeneratedMapElements()
+    void installMapControls(generation, targetMap)
+    zoomEndHandler = () => {
+      if (map.value === targetMap) {
+        currentZoom.value = targetMap.getZoom()
+      }
+    }
+    targetMap.on('zoomend', zoomEndHandler)
+    // 建筑档位下 pin 只覆盖可见区域，平移结束后要按新视野重建
+    moveEndHandler = () => {
+      if (
+        map.value === targetMap &&
+        getMapInteractionLevel(targetMap.getZoom()) === 'building'
+      ) {
+        renderMapContent(false)
+      }
+    }
+    targetMap.on('moveend', moveEndHandler)
+    currentZoom.value = targetMap.getZoom()
     renderMapContent(true)
   } catch {
-    errorMessage.value = '地图加载失败，请检查高德 Key、域名白名单和网络连接'
+    if (initializationIsActive(generation)) {
+      // 用户只需要知道"暂时打不开"；Key/白名单是开发者的事，仅开发环境提示
+      errorMessage.value = import.meta.env.DEV
+        ? '地图加载失败，请检查高德 Key、域名白名单和网络连接'
+        : '地图暂时打不开，请稍后再试'
+    }
   } finally {
-    loading.value = false
+    if (initializationIsActive(generation)) {
+      loading.value = false
+    }
   }
 }
 
@@ -327,7 +466,6 @@ onMounted(initMap)
 watch(
   () => [
     props.buildings,
-    props.activeBuildingId,
     props.fromPoint,
     props.toPoint
   ],
@@ -335,12 +473,46 @@ watch(
   { deep: true }
 )
 
+// 仅高亮变化时重建标记即可，不重新拉动视角，避免地图跳动。
+watch(
+  () => props.activeBuildingId,
+  () => renderMapContent(false)
+)
+
+// zoom 档位决定 pin 显隐和命中区尺寸：档位跨越时重建标记（不动视角）；
+// 建筑档位内缩放会改变可见区域，也要按新视野重建，其余档位不做无谓重建。
+watch(currentZoom, (zoom) => {
+  const levelChanged = interactionLevel.value !== lastRenderedInteractionLevel
+  const viewChangedAtBuildingLevel =
+    interactionLevel.value === 'building' && zoom !== lastRenderedZoom
+  if (levelChanged || viewChangedAtBuildingLevel) {
+    renderMapContent(false)
+  }
+})
+
 onBeforeUnmount(() => {
+  disposed = true
+  initializationGeneration += 1
+  mapAccessibilityObserver?.disconnect()
+  mapAccessibilityObserver = null
   clearWalkingRoute()
   clearOverlays()
   if (map.value) {
+    if (zoomEndHandler) {
+      map.value.off?.('zoomend', zoomEndHandler)
+    }
+    if (moveEndHandler) {
+      map.value.off?.('moveend', moveEndHandler)
+    }
     map.value.destroy()
   }
+  zoomEndHandler = null
+  moveEndHandler = null
+  map.value = null
+  amap.value = null
+  routePlanner.value = null
+  overlays.value = []
+  mapContainer.value = null
 })
 </script>
 
@@ -388,7 +560,7 @@ onBeforeUnmount(() => {
           >
             <i aria-hidden="true" />
             <span>
-              <strong>{{ building.name }}</strong>
+              <strong>{{ formatBuildingDisplayName(building.name) }}</strong>
               <small>{{ building.type }}</small>
             </span>
           </button>
@@ -405,7 +577,12 @@ onBeforeUnmount(() => {
         :class="`level-${interactionLevel}`"
         :style="{ height }"
       >
-        <div ref="mapContainer" class="real-map-container" />
+        <div
+          ref="mapContainer"
+          class="real-map-container"
+          @contextmenu.prevent
+          @dragstart.prevent
+        />
 
         <div v-if="loading" class="map-state map-state--loading">
           <div class="state-radar" aria-hidden="true">
@@ -443,7 +620,7 @@ onBeforeUnmount(() => {
         <i class="selected-beacon" aria-hidden="true" />
         <div>
           <small>刚刚选中的地点</small>
-          <strong>{{ selectedBuilding.name }}</strong>
+          <strong>{{ formatBuildingDisplayName(selectedBuilding.name) }}</strong>
           <span>{{ selectedBuilding.type }}</span>
         </div>
         <button type="button" @click="openSelectedBuilding">
@@ -481,45 +658,12 @@ onBeforeUnmount(() => {
   padding: clamp(14px, 2.3vw, 22px);
 }
 
-.real-map-card::before,
-.real-map-card::after {
-  position: absolute;
-  z-index: -1;
-  content: '';
-  pointer-events: none;
-}
-
-.real-map-card::before {
-  inset: 0;
-  background-image:
-    linear-gradient(rgb(var(--map-cyan-rgb) / 3%) 1px, transparent 1px),
-    linear-gradient(90deg, rgb(var(--map-cyan-rgb) / 3%) 1px, transparent 1px);
-  background-size: 32px 32px;
-  mask-image: linear-gradient(to bottom, #000, transparent 80%);
-}
-
-.real-map-card::after {
-  top: -120%;
-  left: -40%;
-  width: 46%;
-  height: 300%;
-  background: linear-gradient(90deg, transparent, rgb(var(--map-cyan-rgb) / 7%), transparent);
-  filter: blur(8px);
-  transform: rotate(24deg);
-  animation: map-card-gleam 9s ease-in-out infinite;
-}
-
 .real-map-card--compact {
   border: 0;
   border-radius: 0;
   background: transparent;
   box-shadow: none;
   padding: 0;
-}
-
-.real-map-card--compact::before,
-.real-map-card--compact::after {
-  display: none;
 }
 
 .real-map-heading {
@@ -544,7 +688,7 @@ onBeforeUnmount(() => {
   margin-bottom: 7px;
   color: rgb(var(--map-cyan-rgb) / 76%);
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 700;
   letter-spacing: .18em;
   line-height: 1;
@@ -566,7 +710,7 @@ onBeforeUnmount(() => {
   margin: 0;
   color: #f5fdff;
   font-size: clamp(19px, 3vw, 24px);
-  font-weight: 730;
+  font-weight: 700;
   letter-spacing: -.03em;
   line-height: 1.18;
   text-shadow: 0 0 22px rgb(var(--map-cyan-rgb) / 12%);
@@ -582,7 +726,7 @@ onBeforeUnmount(() => {
   background: rgb(var(--map-cyan-rgb) / 8%);
   color: var(--map-cyan);
   font-family: "SFMono-Regular", Consolas, monospace;
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 800;
   letter-spacing: .08em;
   box-shadow: inset 0 0 10px rgb(var(--map-cyan-rgb) / 8%);
@@ -609,17 +753,6 @@ onBeforeUnmount(() => {
   padding: 8px 10px;
 }
 
-.map-badge::after {
-  position: absolute;
-  right: -1px;
-  bottom: -1px;
-  width: 17px;
-  height: 1px;
-  background: var(--map-cyan);
-  box-shadow: 0 0 8px var(--map-cyan);
-  content: '';
-}
-
 .map-badge > span:last-child {
   display: grid;
   gap: 2px;
@@ -633,14 +766,14 @@ onBeforeUnmount(() => {
 
 .map-badge small {
   color: rgb(190 214 230 / 45%);
-  font-size: 7px;
+  font-size: 12px;
   font-weight: 700;
   letter-spacing: .13em;
 }
 
 .map-badge strong {
   color: #e9fdff;
-  font-size: 11px;
+  font-size: 12px;
   letter-spacing: .09em;
 }
 
@@ -653,26 +786,6 @@ onBeforeUnmount(() => {
   border: 1px solid rgb(var(--map-cyan-rgb) / 25%);
   border-radius: 50%;
   animation: map-orbit 8s linear infinite;
-}
-
-.map-badge__orbit::before,
-.map-badge__orbit::after {
-  position: absolute;
-  border-radius: 50%;
-  content: '';
-}
-
-.map-badge__orbit::before {
-  inset: 5px;
-  border: 1px dashed rgb(var(--map-violet-rgb) / 55%);
-}
-
-.map-badge__orbit::after {
-  top: -2px;
-  width: 4px;
-  height: 4px;
-  background: var(--map-cyan);
-  box-shadow: 0 0 8px var(--map-cyan);
 }
 
 .map-badge__orbit i {
@@ -705,7 +818,7 @@ onBeforeUnmount(() => {
   margin: 0 9px 6px;
   color: rgb(196 226 238 / 48%);
   font-family: "SFMono-Regular", Consolas, monospace;
-  font-size: 8px;
+  font-size: 12px;
   font-weight: 700;
   letter-spacing: .13em;
   line-height: 1;
@@ -721,7 +834,7 @@ onBeforeUnmount(() => {
 .map-search :deep(.van-search) {
   padding: 0;
   background: transparent;
-  --van-search-input-height: 38px;
+  --van-search-input-height: 44px;
   --van-field-left-icon-color: rgb(var(--map-cyan-rgb) / 76%);
   --van-field-input-text-color: #effcff;
   --van-field-placeholder-text-color: rgb(196 218 231 / 48%);
@@ -744,18 +857,6 @@ onBeforeUnmount(() => {
     transform 240ms ease;
 }
 
-.map-search :deep(.van-search__content::after) {
-  position: absolute;
-  right: 11px;
-  bottom: 0;
-  width: 28px;
-  height: 1px;
-  background: var(--map-cyan);
-  box-shadow: 0 0 8px var(--map-cyan);
-  content: '';
-  opacity: .8;
-}
-
 .map-search :deep(.van-search__content:focus-within) {
   border-color: rgb(var(--map-cyan-rgb) / 58%);
   box-shadow:
@@ -767,13 +868,13 @@ onBeforeUnmount(() => {
 
 .map-search :deep(.van-field__control) {
   caret-color: var(--map-cyan);
-  font-size: 12px;
+  font-size: 16px;
   letter-spacing: .01em;
 }
 
 .map-search :deep(.van-icon-search) {
   filter: drop-shadow(0 0 5px rgb(var(--map-cyan-rgb) / 38%));
-  font-size: 17px;
+  font-size: 18px;
 }
 
 .map-search :deep(.van-icon-clear) {
@@ -793,8 +894,9 @@ onBeforeUnmount(() => {
 .map-search-results button {
   position: relative;
   display: flex;
-  min-width: 145px;
-  max-width: 180px;
+  min-width: 152px;
+  max-width: 200px;
+  min-height: 48px;
   align-items: center;
   gap: 9px;
   overflow: hidden;
@@ -814,18 +916,6 @@ onBeforeUnmount(() => {
     transform 220ms cubic-bezier(.2, .8, .2, 1);
 }
 
-.map-search-results button::after {
-  position: absolute;
-  inset: auto 0 0;
-  height: 1px;
-  background: linear-gradient(90deg, var(--map-cyan), transparent 75%);
-  content: '';
-  opacity: 0;
-  transform: scaleX(.35);
-  transform-origin: left;
-  transition: opacity 220ms ease, transform 220ms ease;
-}
-
 .map-search-results button > i {
   position: relative;
   flex: 0 0 auto;
@@ -836,26 +926,12 @@ onBeforeUnmount(() => {
   box-shadow: 0 0 0 3px rgb(var(--map-cyan-rgb) / 7%);
 }
 
-.map-search-results button > i::after {
-  position: absolute;
-  inset: 2px;
-  border-radius: inherit;
-  background: var(--map-cyan);
-  box-shadow: 0 0 7px var(--map-cyan);
-  content: '';
-}
-
 .map-search-results button.active {
   border-color: rgb(var(--map-cyan-rgb) / 58%);
   background: linear-gradient(105deg, rgb(var(--map-cyan-rgb) / 14%), rgb(var(--map-violet-rgb) / 12%));
   box-shadow:
     0 10px 28px rgb(0 3 12 / 42%),
     inset 0 0 18px rgb(var(--map-cyan-rgb) / 6%);
-}
-
-.map-search-results button.active::after {
-  opacity: 1;
-  transform: scaleX(1);
 }
 
 .map-search-results button > span {
@@ -865,17 +941,17 @@ onBeforeUnmount(() => {
 }
 
 .map-search-results strong {
-  overflow: hidden;
   font-size: 12px;
-  font-weight: 680;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  font-weight: 600;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .map-search-results small,
 .map-search-empty {
   color: rgb(196 218 231 / 55%);
-  font-size: 9px;
+  font-size: 12px;
 }
 
 .map-search-empty {
@@ -916,40 +992,11 @@ onBeforeUnmount(() => {
   animation: map-shell-in 850ms cubic-bezier(.16, 1, .3, 1) both;
 }
 
-.real-map-shell::before,
-.real-map-shell::after {
-  position: absolute;
-  z-index: 5;
-  content: '';
-  pointer-events: none;
-}
-
-.real-map-shell::before {
-  inset: 0;
-  border: 1px solid transparent;
-  border-radius: inherit;
-  background:
-    linear-gradient(135deg, rgb(var(--map-cyan-rgb) / 48%), transparent 18%, transparent 76%, rgb(var(--map-violet-rgb) / 38%))
-    border-box;
-  mask:
-    linear-gradient(#000 0 0) padding-box,
-    linear-gradient(#000 0 0);
-  mask-composite: exclude;
-}
-
-.real-map-shell::after {
-  top: 0;
-  left: 8%;
-  width: 30%;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, var(--map-cyan), transparent);
-  box-shadow: 0 0 12px var(--map-cyan);
-  animation: map-edge-signal 5.5s ease-in-out infinite;
-}
-
 .real-map-container {
   width: 100%;
   height: 100%;
+  -webkit-touch-callout: none;
+  user-select: none;
   background:
     radial-gradient(circle at 50% 45%, #132949, #07101e 65%),
     #07101e;
@@ -981,6 +1028,8 @@ onBeforeUnmount(() => {
     inset 0 0 14px rgb(var(--map-cyan-rgb) / 4%) !important;
   color: rgb(229 250 255 / 82%) !important;
   backdrop-filter: blur(12px);
+  transform: scale(1.18);
+  transform-origin: bottom right;
 }
 
 .real-map-container :deep(.amap-toolbar span),
@@ -988,175 +1037,34 @@ onBeforeUnmount(() => {
   filter: invert(1) sepia(.1) saturate(2) hue-rotate(135deg) brightness(1.25);
 }
 
+.real-map-container :deep(.amap-toolbar .amap-ctrl-zoom-in),
+.real-map-container :deep(.amap-toolbar .amap-ctrl-zoom-out),
+.real-map-container :deep(.amap-toolbar div) {
+  min-width: 34px !important;
+  min-height: 34px !important;
+  line-height: 34px !important;
+  font-size: 18px !important;
+}
+
 .real-map-container :deep(.amap-scale-text) {
   color: rgb(229 250 255 / 72%) !important;
   text-shadow: 0 1px 3px #000;
 }
 
-.real-map-container :deep(.amap-marker-content > div > span) {
-  border-color: var(--map-cyan) !important;
-  background: rgb(var(--map-cyan-rgb) / 18%) !important;
-  box-shadow:
-    0 0 0 7px rgb(var(--map-cyan-rgb) / 11%),
-    0 0 20px rgb(var(--map-cyan-rgb) / 65%) !important;
-  animation: map-marker-pulse 2.2s ease-in-out infinite;
-}
-
-.map-atmosphere {
-  position: absolute;
-  z-index: 2;
-  inset: 0;
-  overflow: hidden;
-  background:
-    radial-gradient(circle at 50% 42%, transparent 12%, rgb(1 8 22 / 16%) 74%),
-    linear-gradient(120deg, rgb(var(--map-cyan-rgb) / 4%), transparent 45%, rgb(var(--map-violet-rgb) / 5%));
-  box-shadow: inset 0 0 56px rgb(0 2 10 / 36%);
+/* pin 悬浮提示：只作用于自有 .map-pin 类，不触碰 amap 标记内部结构 */
+.real-map-container :deep(.map-pin-tip) {
+  opacity: 0;
+  transition: opacity 140ms ease;
   pointer-events: none;
 }
 
-.map-atmosphere::before,
-.map-atmosphere::after {
-  position: absolute;
-  content: '';
+.real-map-container :deep(.map-pin:hover .map-pin-tip) {
+  opacity: 1;
 }
 
-.map-atmosphere::before {
-  inset: 0;
-  background-image:
-    linear-gradient(rgb(var(--map-cyan-rgb) / 4%) 1px, transparent 1px),
-    linear-gradient(90deg, rgb(var(--map-cyan-rgb) / 4%) 1px, transparent 1px);
-  background-size: 44px 44px;
-  mask-image: radial-gradient(circle at 50% 50%, #000, transparent 76%);
-  opacity: .7;
-}
-
-.map-atmosphere::after {
-  left: 0;
-  width: 100%;
-  height: 64px;
-  background: linear-gradient(to bottom, transparent, rgb(var(--map-cyan-rgb) / 7%), transparent);
-  opacity: .7;
-  animation: map-scanline 6.5s linear infinite;
-}
-
-.map-crosshair {
-  position: absolute;
-  z-index: 4;
-  top: 50%;
-  left: 50%;
-  width: 34px;
-  height: 34px;
-  border: 1px solid rgb(var(--map-cyan-rgb) / 14%);
-  border-radius: 50%;
-  opacity: .55;
-  pointer-events: none;
-  transform: translate(-50%, -50%);
-}
-
-.map-crosshair::before,
-.map-crosshair::after {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  background: rgb(var(--map-cyan-rgb) / 28%);
-  content: '';
-  transform: translate(-50%, -50%);
-}
-
-.map-crosshair::before {
-  width: 48px;
-  height: 1px;
-}
-
-.map-crosshair::after {
-  width: 1px;
-  height: 48px;
-}
-
-.map-crosshair i {
-  position: absolute;
-  inset: 12px;
-  border: 1px solid rgb(var(--map-violet-rgb) / 28%);
-  border-radius: 50%;
-}
-
-.map-corners {
-  position: absolute;
-  z-index: 6;
-  inset: 8px;
-  pointer-events: none;
-}
-
-.map-corners i {
-  position: absolute;
-  width: 18px;
-  height: 18px;
-  border-color: rgb(var(--map-cyan-rgb) / 64%);
-  border-style: solid;
-  filter: drop-shadow(0 0 4px rgb(var(--map-cyan-rgb) / 45%));
-}
-
-.map-corners i:nth-child(1) {
-  top: 0;
-  left: 0;
-  border-width: 1px 0 0 1px;
-}
-
-.map-corners i:nth-child(2) {
-  top: 0;
-  right: 0;
-  border-width: 1px 1px 0 0;
-}
-
-.map-corners i:nth-child(3) {
-  right: 0;
-  bottom: 0;
-  border-width: 0 1px 1px 0;
-}
-
-.map-corners i:nth-child(4) {
-  bottom: 0;
-  left: 0;
-  border-width: 0 0 1px 1px;
-}
-
-.map-telemetry {
-  position: absolute;
-  z-index: 8;
-  top: 15px;
-  right: 14px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: rgb(220 244 250 / 68%);
-  font-family: "SFMono-Regular", Consolas, monospace;
-  font-size: 8px;
-  font-weight: 700;
-  letter-spacing: .1em;
-  line-height: 1;
-  pointer-events: none;
-}
-
-.map-telemetry span {
-  display: flex;
-  height: 25px;
-  align-items: center;
-  gap: 6px;
-  border: 1px solid rgb(var(--map-cyan-rgb) / 15%);
-  border-radius: 7px 2px 7px 2px;
-  background: rgb(5 14 30 / 72%);
-  box-shadow: 0 8px 20px rgb(0 3 12 / 28%);
-  padding: 0 8px;
-  backdrop-filter: blur(10px);
-}
-
-.map-telemetry i {
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--map-cyan);
-  box-shadow: 0 0 8px var(--map-cyan);
-  animation: map-live-pulse 1.8s ease-in-out infinite;
+/* 悬浮的标记浮到相邻标记之上，避免提示气泡被遮住 */
+.real-map-container :deep(.amap-marker:hover) {
+  z-index: 130 !important;
 }
 
 .map-selected-card {
@@ -1183,17 +1091,6 @@ onBeforeUnmount(() => {
   animation: map-selected-in 460ms cubic-bezier(.16, 1, .3, 1) both;
 }
 
-.map-selected-card::after {
-  position: absolute;
-  right: 0;
-  bottom: 0;
-  width: 36%;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, var(--map-violet));
-  box-shadow: 0 0 8px var(--map-violet);
-  content: '';
-}
-
 .selected-beacon {
   position: relative;
   flex: 0 0 auto;
@@ -1206,24 +1103,6 @@ onBeforeUnmount(() => {
     0 0 14px rgb(var(--map-cyan-rgb) / 55%);
 }
 
-.selected-beacon::before {
-  position: absolute;
-  inset: 3px;
-  border-radius: inherit;
-  background: #fff;
-  box-shadow: 0 0 7px var(--map-cyan);
-  content: '';
-}
-
-.selected-beacon::after {
-  position: absolute;
-  inset: -7px;
-  border: 1px solid rgb(var(--map-cyan-rgb) / 36%);
-  border-radius: inherit;
-  content: '';
-  animation: map-beacon 2s ease-out infinite;
-}
-
 .map-selected-card div {
   display: grid;
   flex: 1 1 auto;
@@ -1234,24 +1113,24 @@ onBeforeUnmount(() => {
 .map-selected-card small {
   color: rgb(var(--map-cyan-rgb) / 62%);
   font-family: "SFMono-Regular", Consolas, monospace;
-  font-size: 7px;
+  font-size: 12px;
   font-weight: 700;
   letter-spacing: .14em;
 }
 
 .map-selected-card strong {
-  overflow: hidden;
   color: #effcff;
-  font-size: 13px;
+  font-size: 16px;
   font-weight: 700;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .map-selected-card div > span {
   overflow: hidden;
   color: rgb(199 219 231 / 52%);
-  font-size: 9px;
+  font-size: 13px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1259,7 +1138,7 @@ onBeforeUnmount(() => {
 .map-selected-card button {
   flex: 0 0 auto;
   display: flex;
-  min-height: 31px;
+  min-height: 44px;
   align-items: center;
   gap: 8px;
   border: 1px solid rgb(var(--map-cyan-rgb) / 32%);
@@ -1267,9 +1146,9 @@ onBeforeUnmount(() => {
   background: linear-gradient(105deg, rgb(var(--map-cyan-rgb) / 14%), rgb(var(--map-violet-rgb) / 18%));
   color: #eaffff;
   cursor: pointer;
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 700;
-  padding: 0 10px;
+  padding: 0 14px;
   transition:
     border-color 220ms ease,
     box-shadow 220ms ease,
@@ -1296,7 +1175,7 @@ onBeforeUnmount(() => {
     radial-gradient(circle at 50% 45%, rgb(var(--map-cyan-rgb) / 9%), transparent 30%),
     rgb(3 9 22 / 90%);
   color: #eafcff;
-  font-size: 12px;
+  font-size: 14px;
   text-align: center;
   padding: 18px;
   backdrop-filter: blur(8px);
@@ -1312,21 +1191,21 @@ onBeforeUnmount(() => {
 .map-state__copy small {
   color: rgb(var(--map-cyan-rgb) / 68%);
   font-family: "SFMono-Regular", Consolas, monospace;
-  font-size: 8px;
+  font-size: 12px;
   font-weight: 700;
   letter-spacing: .15em;
 }
 
 .map-state__copy strong {
   color: #f0fdff;
-  font-size: 15px;
+  font-size: 17px;
   font-weight: 700;
   letter-spacing: .01em;
 }
 
 .map-state__copy span {
   color: rgb(199 221 232 / 58%);
-  font-size: 11px;
+  font-size: 14px;
   line-height: 1.5;
 }
 
@@ -1367,37 +1246,6 @@ onBeforeUnmount(() => {
   animation: map-orbit 1.8s linear infinite;
 }
 
-.state-radar i {
-  position: absolute;
-  border-radius: 50%;
-  background: var(--map-cyan);
-  box-shadow: 0 0 9px var(--map-cyan);
-  animation: map-radar-node 1.8s ease-in-out infinite;
-}
-
-.state-radar i:nth-child(1) {
-  top: 13px;
-  left: 27px;
-  width: 4px;
-  height: 4px;
-}
-
-.state-radar i:nth-child(2) {
-  top: 34px;
-  left: 16px;
-  width: 3px;
-  height: 3px;
-  animation-delay: -600ms;
-}
-
-.state-radar i:nth-child(3) {
-  top: 41px;
-  right: 14px;
-  width: 3px;
-  height: 3px;
-  animation-delay: -1.2s;
-}
-
 .map-state--error {
   background:
     radial-gradient(circle at 50% 45%, rgb(255 91 143 / 9%), transparent 31%),
@@ -1420,20 +1268,6 @@ onBeforeUnmount(() => {
   clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%);
   color: #ff7aa5;
   filter: drop-shadow(0 0 16px rgb(255 87 143 / 18%));
-}
-
-.state-alert::before,
-.state-alert::after {
-  position: absolute;
-  inset: 6px;
-  border: 1px dashed rgb(255 102 150 / 25%);
-  content: '';
-  clip-path: inherit;
-}
-
-.state-alert::after {
-  inset: -5px;
-  animation: map-error-pulse 2s ease-in-out infinite;
 }
 
 .state-alert i {
@@ -1467,17 +1301,6 @@ onBeforeUnmount(() => {
   padding-top: 22px;
 }
 
-.placeholder-grid {
-  position: absolute;
-  inset: 0;
-  background-image:
-    linear-gradient(rgb(var(--map-cyan-rgb) / 4%) 1px, transparent 1px),
-    linear-gradient(90deg, rgb(var(--map-cyan-rgb) / 4%) 1px, transparent 1px);
-  background-size: 32px 32px;
-  mask-image: radial-gradient(circle, #000, transparent 73%);
-  pointer-events: none;
-}
-
 .placeholder-core {
   position: relative;
   display: grid;
@@ -1490,42 +1313,6 @@ onBeforeUnmount(() => {
   box-shadow:
     0 0 30px rgb(var(--map-violet-rgb) / 10%),
     inset 0 0 20px rgb(var(--map-violet-rgb) / 6%);
-}
-
-.placeholder-core::before,
-.placeholder-core::after,
-.placeholder-core i {
-  position: absolute;
-  border-radius: 50%;
-  content: '';
-}
-
-.placeholder-core::before {
-  inset: 8px;
-  border: 1px dashed rgb(var(--map-cyan-rgb) / 28%);
-  animation: map-orbit 9s linear infinite;
-}
-
-.placeholder-core::after {
-  inset: 18px;
-  border: 1px solid rgb(255 106 155 / 35%);
-}
-
-.placeholder-core i:first-child {
-  top: -2px;
-  width: 5px;
-  height: 5px;
-  background: var(--map-violet);
-  box-shadow: 0 0 9px var(--map-violet);
-}
-
-.placeholder-core i:nth-child(2) {
-  right: 4px;
-  bottom: 8px;
-  width: 4px;
-  height: 4px;
-  background: var(--map-cyan);
-  box-shadow: 0 0 8px var(--map-cyan);
 }
 
 .placeholder-core span {
@@ -1541,7 +1328,7 @@ onBeforeUnmount(() => {
   position: relative;
   color: rgb(var(--map-violet-rgb) / 75%);
   font-family: "SFMono-Regular", Consolas, monospace;
-  font-size: 8px;
+  font-size: 12px;
   font-weight: 700;
   letter-spacing: .16em;
 }
@@ -1558,7 +1345,7 @@ onBeforeUnmount(() => {
   max-width: 560px;
   margin: 0;
   color: rgb(197 217 230 / 54%);
-  font-size: 10px;
+  font-size: 14px;
   line-height: 1.5;
 }
 
@@ -1579,11 +1366,6 @@ onBeforeUnmount(() => {
     transform: translateY(-2px);
   }
 
-  .map-search-results button:hover::after {
-    opacity: .8;
-    transform: scaleX(1);
-  }
-
   .map-selected-card button:hover {
     border-color: rgb(var(--map-cyan-rgb) / 70%);
     box-shadow:
@@ -1601,23 +1383,6 @@ onBeforeUnmount(() => {
 .map-selected-card button:focus-visible {
   outline: 2px solid var(--map-cyan);
   outline-offset: 2px;
-}
-
-@keyframes map-card-gleam {
-  0%,
-  72% {
-    left: -55%;
-    opacity: 0;
-  }
-
-  78% {
-    opacity: .85;
-  }
-
-  100% {
-    left: 125%;
-    opacity: 0;
-  }
 }
 
 @keyframes map-heading-in {
@@ -1689,96 +1454,12 @@ onBeforeUnmount(() => {
   }
 }
 
-@keyframes map-edge-signal {
-  0%,
-  100% {
-    left: 4%;
-    opacity: .2;
-  }
-
-  50% {
-    left: 66%;
-    opacity: 1;
-  }
-}
-
-@keyframes map-scanline {
-  from {
-    top: -25%;
-  }
-
-  to {
-    top: 110%;
-  }
-}
-
-@keyframes map-marker-pulse {
-  0%,
-  100% {
-    filter: brightness(.88);
-    transform: scale(.92);
-  }
-
-  50% {
-    filter: brightness(1.22);
-    transform: scale(1.08);
-  }
-}
-
-@keyframes map-beacon {
-  0% {
-    opacity: .8;
-    transform: scale(.55);
-  }
-
-  100% {
-    opacity: 0;
-    transform: scale(1.5);
-  }
-}
-
-@keyframes map-radar-node {
-  0%,
-  100% {
-    opacity: .25;
-    transform: scale(.65);
-  }
-
-  50% {
-    opacity: 1;
-    transform: scale(1.25);
-  }
-}
-
-@keyframes map-error-pulse {
-  0%,
-  100% {
-    opacity: .2;
-    transform: scale(.82);
-  }
-
-  50% {
-    opacity: .75;
-    transform: scale(1);
-  }
-}
-
 @media (max-width: 640px) {
   .map-search {
     right: 11px;
     left: 11px;
     width: auto;
     min-width: 0;
-  }
-
-  .map-telemetry {
-    top: auto;
-    right: 11px;
-    bottom: 11px;
-  }
-
-  .map-telemetry span:last-child {
-    display: none;
   }
 
   .map-selected-card {
@@ -1798,7 +1479,7 @@ onBeforeUnmount(() => {
     display: inline;
     overflow: hidden;
     max-width: 84px;
-    font-size: 10px;
+    font-size: 12px;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
@@ -1806,7 +1487,7 @@ onBeforeUnmount(() => {
 
 @media (max-width: 420px) {
   .real-map-card {
-    border-radius: 18px;
+    border-radius: var(--radius-md);
     padding: 13px;
   }
 
@@ -1854,20 +1535,9 @@ onBeforeUnmount(() => {
   border-radius: 28px;
   background:
     radial-gradient(circle at 92% 5%, rgba(240, 207, 132, .2), transparent 25%),
-    #fffdf7;
+    var(--fresh-paper);
   box-shadow: 0 19px 44px rgba(70, 91, 66, .1);
-  color: #34483a;
-}
-
-.real-map-card::before,
-.real-map-card::after,
-.map-badge::after,
-.real-map-shell::before,
-.real-map-shell::after,
-.map-search :deep(.van-search__content::after),
-.map-search-results button::after,
-.map-selected-card::after {
-  display: none;
+  color: var(--fresh-ink);
 }
 
 .real-map-card--compact {
@@ -1886,9 +1556,9 @@ onBeforeUnmount(() => {
 
 .heading-kicker {
   margin-bottom: 7px;
-  color: #779075;
+  color: var(--fresh-muted);
   font-family: inherit;
-  font-size: 10px;
+  font-size: 12px;
   letter-spacing: .04em;
 }
 
@@ -1896,29 +1566,29 @@ onBeforeUnmount(() => {
   width: 8px;
   height: 12px;
   border-radius: 90% 8% 90% 10%;
-  background: #80a778;
+  background: var(--fresh-leaf);
   box-shadow: none;
   animation: map-leaf-nod 2.8s ease-in-out infinite;
   transform: rotate(28deg);
 }
 
 .real-map-heading h2 {
-  color: #344a38;
+  color: var(--fresh-ink);
   font-size: clamp(20px, 3vw, 25px);
   text-shadow: none;
 }
 
 .real-map-heading p {
   margin: 5px 0 0;
-  color: #7e8a80;
+  color: var(--fresh-muted);
   font-size: 12px;
 }
 
 .map-badge {
   min-width: 108px;
-  border: 1px solid #dbe7d7;
+  border: 1px solid var(--fresh-line);
   border-radius: 15px;
-  background: #f1f6e9;
+  background: var(--fresh-bg);
   box-shadow: none;
   padding: 8px 10px;
 }
@@ -1926,20 +1596,15 @@ onBeforeUnmount(() => {
 .map-badge__orbit {
   border: 0;
   border-radius: 50% 50% 50% 38%;
-  background: #dcebd6;
+  background: var(--fresh-mint);
   animation: map-leaf-nod 3.2s ease-in-out infinite;
-}
-
-.map-badge__orbit::before,
-.map-badge__orbit::after {
-  display: none;
 }
 
 .map-badge__orbit i {
   width: 10px;
   height: 15px;
   border-radius: 90% 8% 90% 10%;
-  background: #759c70;
+  background: var(--fresh-leaf);
   box-shadow: none;
   transform: rotate(28deg);
 }
@@ -1947,14 +1612,14 @@ onBeforeUnmount(() => {
 .map-badge small {
   color: #8b968a;
   font-family: inherit;
-  font-size: 8px;
+  font-size: 12px;
   letter-spacing: .04em;
 }
 
 .map-badge strong {
-  color: #4c684e;
+  color: var(--fresh-green-dark);
   font-family: inherit;
-  font-size: 11px;
+  font-size: 12px;
   letter-spacing: 0;
 }
 
@@ -1968,22 +1633,22 @@ onBeforeUnmount(() => {
   width: fit-content;
   gap: 14px;
   margin: 0 4px 6px;
-  border-radius: 99px;
+  border-radius: var(--radius-pill);
   background: rgba(255, 253, 247, .9);
   box-shadow: 0 3px 10px rgba(64, 83, 61, .08);
-  color: #667b67;
+  color: var(--fresh-text);
   font-family: inherit;
-  font-size: 9px;
+  font-size: 12px;
   letter-spacing: 0;
   padding: 5px 9px;
   text-shadow: none;
 }
 
-.map-search__meta b { color: #5a7d57; }
+.map-search__meta b { color: var(--fresh-green); }
 
 .map-search :deep(.van-search) {
   --van-field-left-icon-color: #6d8e69;
-  --van-field-input-text-color: #304437;
+  --van-field-input-text-color: var(--fresh-ink);
   --van-field-placeholder-text-color: #929b92;
 }
 
@@ -1996,13 +1661,24 @@ onBeforeUnmount(() => {
 }
 
 .map-search :deep(.van-search__content:focus-within) {
-  border-color: #7ea178;
+  border-color: var(--fresh-leaf);
   box-shadow: 0 10px 27px rgba(57, 74, 55, .14), 0 0 0 3px rgba(111, 155, 105, .14);
   transform: translateY(-1px);
 }
 
-.map-search :deep(.van-field__control) { caret-color: #658d61; }
-.map-search :deep(.van-icon-search) { filter: none; }
+.map-search :deep(.van-field__control) {
+  caret-color: var(--fresh-green);
+  font-size: 16px;
+}
+
+.real-map-container :deep(img),
+.real-map-container :deep(canvas) {
+  -webkit-user-drag: none;
+  -webkit-touch-callout: none;
+  user-select: none;
+}
+
+.map-search :deep(.van-icon-search) { filter: none; font-size: 18px; }
 .map-search :deep(.van-icon-clear) { color: #849285; }
 
 .map-search-results {
@@ -2013,10 +1689,10 @@ onBeforeUnmount(() => {
 .map-search-results button {
   min-width: 145px;
   border: 1px solid rgba(86, 119, 82, .15);
-  border-radius: 14px;
+  border-radius: var(--radius-sm);
   background: rgba(255, 253, 248, .95);
   box-shadow: 0 7px 19px rgba(60, 77, 57, .12);
-  color: #34483a;
+  color: var(--fresh-ink);
   backdrop-filter: blur(13px);
 }
 
@@ -2025,19 +1701,18 @@ onBeforeUnmount(() => {
   height: 14px;
   border: 0;
   border-radius: 90% 8% 90% 10%;
-  background: #8bb084;
+  background: var(--fresh-leaf);
   box-shadow: none;
   transform: rotate(28deg);
 }
 
-.map-search-results button > i::after { display: none; }
 .map-search-results button.active {
-  border-color: #78a172;
-  background: #e9f2e3;
+  border-color: var(--fresh-leaf);
+  background: var(--fresh-mint);
   box-shadow: 0 8px 21px rgba(60, 89, 57, .14);
   transform: translateY(-2px);
 }
-.map-search-results small { color: #7f8a80; }
+.map-search-results small { color: var(--fresh-muted); }
 .map-search-empty {
   border: 1px solid #ead9b4;
   border-radius: 13px;
@@ -2046,18 +1721,18 @@ onBeforeUnmount(() => {
   color: #826f49;
   backdrop-filter: blur(12px);
 }
-.map-search-empty i { background: #d6a758; box-shadow: none; }
+.map-search-empty i { background: var(--fresh-sun); box-shadow: none; }
 
 .real-map-shell {
   border: 1px solid rgba(83, 118, 82, .17);
   border-radius: 24px;
-  background: #e6eee2;
+  background: var(--fresh-mint);
   box-shadow: 0 16px 35px rgba(59, 78, 57, .13);
   animation: map-shell-in 800ms cubic-bezier(.22, 1, .36, 1) both;
 }
 
 .real-map-container {
-  background: #e6eee2;
+  background: var(--fresh-mint);
 }
 
 .real-map-container :deep(.amap-layer canvas),
@@ -2084,6 +1759,8 @@ onBeforeUnmount(() => {
   box-shadow: 0 7px 18px rgba(59, 74, 57, .13) !important;
   color: #3e5042 !important;
   backdrop-filter: blur(12px);
+  transform: scale(1.18);
+  transform-origin: bottom right;
 }
 
 .real-map-container :deep(.amap-toolbar span),
@@ -2091,22 +1768,24 @@ onBeforeUnmount(() => {
   filter: sepia(.18) saturate(.65) hue-rotate(61deg);
 }
 
+.real-map-container :deep(.amap-toolbar .amap-ctrl-zoom-in),
+.real-map-container :deep(.amap-toolbar .amap-ctrl-zoom-out),
+.real-map-container :deep(.amap-toolbar div) {
+  min-width: 34px !important;
+  min-height: 34px !important;
+  line-height: 34px !important;
+  font-size: 18px !important;
+}
+
 .real-map-container :deep(.amap-scale-text) {
   color: #425247 !important;
   text-shadow: 0 1px 2px #fff;
 }
 
-.real-map-container :deep(.amap-marker-content > div > span) {
-  border-color: #5d8d62 !important;
-  background: rgba(101, 153, 104, .22) !important;
-  box-shadow: 0 0 0 7px rgba(101, 153, 104, .12) !important;
-  animation: map-marker-breathe 2.6s ease-in-out infinite;
-}
-
 .map-selected-card {
   right: 70px;
   border: 1px solid rgba(87, 121, 83, .18);
-  border-radius: 17px;
+  border-radius: var(--fresh-radius-sm);
   background: rgba(255, 253, 247, .94);
   box-shadow: 0 10px 28px rgba(56, 73, 54, .17);
   backdrop-filter: blur(16px);
@@ -2117,52 +1796,53 @@ onBeforeUnmount(() => {
   height: 18px;
   border: 0;
   border-radius: 90% 8% 90% 10%;
-  background: #77a171;
+  background: var(--fresh-leaf);
   box-shadow: none;
   transform: rotate(26deg);
 }
 
-.selected-beacon::before,
-.selected-beacon::after { display: none; }
 .map-selected-card small {
-  color: #769174;
+  color: var(--fresh-muted);
   font-family: inherit;
-  font-size: 8px;
+  font-size: 12px;
   letter-spacing: .03em;
 }
-.map-selected-card strong { color: #324739; }
-.map-selected-card div > span { color: #7e897f; }
+.map-selected-card strong { color: var(--fresh-ink); font-size: 15px; }
+.map-selected-card div > span { color: #5f6e62; font-size: 13px; }
 .map-selected-card button {
+  min-height: 44px;
   border: 0;
   border-radius: 11px;
-  background: #688f64;
+  background: var(--fresh-green);
   color: #fff;
+  font-size: 13px;
+  padding: 0 14px;
   box-shadow: 0 6px 15px rgba(74, 111, 70, .2);
 }
 .map-selected-card button i { color: #fff; }
 
 .map-state {
   background: rgba(247, 250, 240, .92);
-  color: #34483a;
+  color: var(--fresh-ink);
   backdrop-filter: blur(9px);
 }
 .map-state__copy small {
-  color: #769073;
+  color: var(--fresh-text);
   font-family: inherit;
-  font-size: 9px;
+  font-size: 12px;
   letter-spacing: .02em;
 }
-.map-state__copy strong { color: #344a39; }
-.map-state__copy span { color: #7a867b; }
+.map-state__copy strong { color: var(--fresh-ink); }
+.map-state__copy span { color: #536356; }
 .state-radar {
   border: 0;
-  background: #e0edd9;
+  background: var(--fresh-mint);
   box-shadow: none;
 }
 .state-radar::before {
   inset: 19px;
   border: 0;
-  background: #f0c97d;
+  background: var(--fresh-sun);
   animation: none;
 }
 .state-radar::after {
@@ -2171,66 +1851,54 @@ onBeforeUnmount(() => {
   width: 15px;
   height: 27px;
   border-radius: 90% 90% 35% 35%;
-  background: #80a878;
+  background: var(--fresh-leaf);
   box-shadow: none;
   transform-origin: 6px 24px;
   animation: map-flower-turn 2.2s linear infinite;
 }
-.state-radar i { display: none; }
 .map-state--error { background: rgba(255, 248, 240, .94); }
-.map-state--error .map-state__copy small { color: #a36756; }
+.map-state--error .map-state__copy small { color: #89503f; }
 .state-alert {
   border: 0;
   border-radius: 50%;
-  background: #f5ded2;
+  background: var(--cm-red-soft);
   clip-path: none;
-  color: #a66050;
+  color: var(--cm-red);
   filter: none;
 }
-.state-alert::before,
-.state-alert::after { display: none; }
-
 .map-placeholder {
   border: 1px solid rgba(88, 118, 83, .14);
   border-radius: 24px;
   background:
     radial-gradient(circle at 50% 30%, rgba(233, 207, 142, .26), transparent 35%),
-    #f2f6ea;
+    var(--fresh-bg);
   box-shadow: 0 13px 30px rgba(65, 82, 62, .09);
-  color: #354a39;
+  color: var(--fresh-ink);
 }
 .placeholder-core {
   border: 0;
   border-radius: 50% 50% 42% 50%;
-  background: #dfead7;
+  background: var(--fresh-mint);
   box-shadow: none;
 }
-.placeholder-core::before,
-.placeholder-core::after,
-.placeholder-core i { display: none; }
 .placeholder-core span { color: #6d8969; }
 .map-placeholder > small {
-  color: #799076;
+  color: var(--fresh-muted);
   font-family: inherit;
   letter-spacing: .02em;
 }
-.map-placeholder > strong { color: #354a39; }
-.map-placeholder > p { color: #7d887e; }
+.map-placeholder > strong { color: var(--fresh-ink); }
+.map-placeholder > p { color: var(--fresh-muted); }
 .map-placeholder code,
 .map-placeholder p span {
   border-radius: 5px;
-  background: #e4eddc;
-  color: #52704f;
+  background: var(--fresh-mint);
+  color: var(--fresh-text);
 }
 
 @keyframes map-leaf-nod {
   0%, 100% { rotate: 0deg; }
   50% { rotate: 10deg; }
-}
-
-@keyframes map-marker-breathe {
-  0%, 100% { transform: scale(.92); opacity: .8; }
-  50% { transform: scale(1.08); opacity: 1; }
 }
 
 @keyframes map-flower-turn {
@@ -2245,8 +1913,6 @@ onBeforeUnmount(() => {
 @media (prefers-reduced-motion: reduce) {
   .real-map-card,
   .real-map-card *,
-  .real-map-card::before,
-  .real-map-card::after,
   .real-map-card *::before,
   .real-map-card *::after {
     animation-duration: .01ms !important;

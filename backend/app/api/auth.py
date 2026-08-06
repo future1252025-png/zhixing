@@ -1,12 +1,14 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
+from app.core import errors, rate_limit
 from app.core.security import create_access_token, get_current_user
 from app.db.database import get_session
 from app.models import User
-from app.schemas.auth import LoginRequest, LoginResponse, RegisterRequest, TokenResponse
+from app.schemas.auth import LoginRequest, LoginResponse, RegisterRequest
 from app.schemas.user import UserProfileUpdate, UserRead
 from app.services.auth_service import (
+    DuplicateUserError,
     authenticate_user,
     create_user,
     get_user_by_student_id,
@@ -17,30 +19,68 @@ from app.services.auth_service import (
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 
+def _client_ip(request: Request) -> str:
+    return request.client.host if request.client is not None else "unknown"
+
+
 @router.post("/register", response_model=UserRead, status_code=status.HTTP_201_CREATED)
-def register(payload: RegisterRequest, session: Session = Depends(get_session)) -> User:
-    if get_user_by_username(session, payload.username) is not None:
+def register(
+    payload: RegisterRequest,
+    request: Request,
+    session: Session = Depends(get_session),
+) -> User:
+    client_ip = _client_ip(request)
+    if rate_limit.register_ip_limiter.is_limited(client_ip):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=rate_limit.REGISTER_RATE_LIMITED,
+        )
+    # Single generic detail for both identity fields so the response cannot be
+    # used to enumerate which one collided.
+    duplicate = get_user_by_username(session, payload.username) is not None or (
+        payload.student_id is not None
+        and get_user_by_student_id(session, payload.student_id) is not None
+    )
+    if duplicate:
+        rate_limit.register_ip_limiter.record_failure(client_ip)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Username already exists",
+            detail=errors.DUPLICATE_USER,
         )
-    if payload.student_id and get_user_by_student_id(session, payload.student_id) is not None:
+    try:
+        return create_user(session, payload)
+    except DuplicateUserError as exc:
+        rate_limit.register_ip_limiter.record_failure(client_ip)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Student ID already exists",
-        )
-    return create_user(session, payload)
+            detail=errors.DUPLICATE_USER,
+        ) from exc
 
 
 @router.post("/login", response_model=LoginResponse)
-def login(payload: LoginRequest, session: Session = Depends(get_session)) -> LoginResponse:
+def login(
+    payload: LoginRequest,
+    request: Request,
+    session: Session = Depends(get_session),
+) -> LoginResponse:
+    client_ip = _client_ip(request)
+    if rate_limit.login_ip_limiter.is_limited(
+        client_ip
+    ) or rate_limit.login_username_limiter.is_limited(payload.username):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=rate_limit.LOGIN_RATE_LIMITED,
+        )
     user = authenticate_user(session, payload.username, payload.password)
     if user is None:
+        rate_limit.login_ip_limiter.record_failure(client_ip)
+        rate_limit.login_username_limiter.record_failure(payload.username)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid username or password",
+            detail=errors.INVALID_CREDENTIALS,
             headers={"WWW-Authenticate": "Bearer"},
         )
+    rate_limit.login_username_limiter.clear(payload.username)
     return LoginResponse(
         access_token=create_access_token(user.username),
         token_type="bearer",

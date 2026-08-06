@@ -42,7 +42,7 @@ const revealDirective: ObjectDirective<HTMLElement, RevealOptions | undefined> =
       const children = Array.from(element.children)
       children.forEach((child, index) => {
         if (!(child instanceof HTMLElement)) return
-        child.style.setProperty('--cm-stagger-opacity', getComputedStyle(child).opacity)
+        child.style.setProperty('--cm-stagger-opacity', '1')
         child.style.setProperty('--cm-stagger-delay', `${Math.min(index, 7) * stagger}ms`)
         child.style.setProperty(
           '--cm-stagger-x',

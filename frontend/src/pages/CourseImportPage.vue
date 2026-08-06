@@ -1,311 +1,586 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
-import { isAxiosError } from 'axios'
-import { showFailToast, showSuccessToast } from 'vant'
+import { computed, nextTick, ref } from 'vue'
+import { showFailToast } from 'vant'
 import { useRouter } from 'vue-router'
 
-import { getBuildings, type Building } from '@/api/buildings'
-import { createCourse, previewCourseImport } from '@/api/courses'
-import type { CourseImportPreviewItem } from '@/types/course'
-import { filterBuildingsByKeyword, includeSelectedBuilding } from '@/utils/buildings'
-import { WEEKDAYS, validateCourseForm } from '@/utils/course'
+import { commitCourseImport, previewCourseImport } from '@/api/courses'
+import { extractBusinessError } from '@/api/errors'
+import ImportSummary from '@/components/import/ImportSummary.vue'
+import {
+  captureHubuCourseTable,
+  captureToHtmlFile,
+  HUBU_ACADEMIC_SYSTEM_URL,
+  supportsNativeHubuCourseImport
+} from '@/native/hubuCourseImport'
+import { useCoursesStore } from '@/stores/courses'
+import type {
+  ImportCandidate,
+  ImportIssue,
+  ImportPreviewResponse
+} from '@/types/courseImport'
+import { useKeyboardAwarePage } from '@/utils/keyboardInset'
+import { goBack } from '@/utils/navigation'
+
+type ImportPageState =
+  | 'idle'
+  | 'previewing'
+  | 'needs_resolution'
+  | 'ready'
+  | 'committing'
+  | 'success'
+  | 'failed'
+
+const LOCATION_ERROR_CODES = new Set(['building_unrecognized', 'room_missing'])
+const NON_BLOCKING_ERROR_CODES = new Set([
+  ...LOCATION_ERROR_CODES,
+  'time_unrecognized'
+])
 
 const router = useRouter()
-const buildings = ref<Building[]>([])
-const previewItems = ref<CourseImportPreviewItem[]>([])
+const coursesStore = useCoursesStore()
 const selectedFile = ref<File | null>(null)
-const loading = ref(false)
-const importing = ref(false)
+const preview = ref<ImportPreviewResponse | null>(null)
+const excludedRowRefs = ref<string[]>([])
+const serverIssues = ref<Record<string, ImportIssue[]>>({})
+const highlightedRowRefs = ref<string[]>([])
+const state = ref<ImportPageState>('idle')
 const errorMessage = ref('')
-const buildingKeyword = ref('')
+const createdCount = ref(0)
+const nativeImporting = ref(false)
+const importSource = ref<'file' | 'hubu'>('file')
+const captureSourceUrl = ref('')
+const nativeHubuImportAvailable = supportsNativeHubuCourseImport()
+const { pageStyle, onFieldFocus } = useKeyboardAwarePage({ basePaddingPx: 34 })
 
-const matchedCount = computed(() => previewItems.value.filter((item) => item.building_id).length)
-const needsReviewCount = computed(() => previewItems.value.filter((item) => !item.building_id).length)
-const filteredBuildings = computed(() =>
-  filterBuildingsByKeyword(buildings.value, buildingKeyword.value, 80)
+const candidates = computed(() => preview.value?.candidates ?? [])
+const activeCandidates = computed(() =>
+  candidates.value.filter((candidate) => !excludedRowRefs.value.includes(candidate.row_ref))
 )
-const matchPercent = computed(() =>
-  previewItems.value.length ? Math.round((matchedCount.value / previewItems.value.length) * 100) : 0
+const excludedCount = computed(() => candidates.value.length - activeCandidates.value.length)
+const resolvedCount = computed(() =>
+  activeCandidates.value.filter((candidate) => isCandidateImportable(candidate)).length
+)
+const unresolvedCount = computed(() => activeCandidates.value.length - resolvedCount.value)
+const pendingCompletionCount = computed(() =>
+  activeCandidates.value.filter((candidate) =>
+    candidate.errors.some((issue) => NON_BLOCKING_ERROR_CODES.has(issue.code))
+  ).length
+)
+const conflictCount = computed(() =>
+  Object.entries(serverIssues.value).filter(([rowRef, issues]) =>
+    !excludedRowRefs.value.includes(rowRef) &&
+    issues.some((issue) => issue.code === 'course_conflict')
+  ).length
+)
+const canCommit = computed(() =>
+  Boolean(
+    selectedFile.value &&
+      preview.value &&
+      activeCandidates.value.length > 0 &&
+      unresolvedCount.value === 0
+  )
+)
+const isBusy = computed(() =>
+  nativeImporting.value || state.value === 'previewing' || state.value === 'committing'
 )
 
-function getVisibleBuildings(selectedBuildingId: number | null) {
-  return includeSelectedBuilding(filteredBuildings.value, buildings.value, selectedBuildingId)
+function hasParsedCourse(candidate: ImportCandidate): boolean {
+  return Boolean(
+    candidate.course_name &&
+      candidate.weekday &&
+      candidate.weeks
+  )
 }
 
-function getErrorMessage(error: unknown): string {
-  if (isAxiosError(error)) {
-    const detail = error.response?.data?.detail
-    if (typeof detail === 'string') return detail
-  }
-  return '课表导入失败，请检查文件格式后重试'
+function hasBlockingSourceIssue(candidate: ImportCandidate): boolean {
+  return candidate.errors.some((issue) => !NON_BLOCKING_ERROR_CODES.has(issue.code))
 }
 
-async function loadBuildings() {
-  try {
-    buildings.value = await getBuildings()
-  } catch (error) {
-    showFailToast(getErrorMessage(error))
-  }
+function isCandidateImportable(candidate: ImportCandidate): boolean {
+  return hasParsedCourse(candidate) && !hasBlockingSourceIssue(candidate)
+}
+
+function shouldSkipCandidateAutomatically(candidate: ImportCandidate): boolean {
+  const hasTime = Boolean(candidate.start_time && candidate.end_time)
+  const hasLocation = Boolean(candidate.source.raw_location.trim())
+  return !isCandidateImportable(candidate) || (!hasTime && !hasLocation)
+}
+
+function prepareAutomaticImportSelection() {
+  excludedRowRefs.value = candidates.value
+    .filter((candidate) => shouldSkipCandidateAutomatically(candidate))
+    .map((candidate) => candidate.row_ref)
+  syncPreviewState()
+}
+
+function syncPreviewState() {
+  if (!preview.value || state.value === 'previewing' || state.value === 'committing') return
+  if (state.value === 'success') return
+  state.value = canCommit.value ? 'ready' : 'needs_resolution'
+}
+
+function resetPreview() {
+  preview.value = null
+  excludedRowRefs.value = []
+  serverIssues.value = {}
+  highlightedRowRefs.value = []
+  errorMessage.value = ''
+  createdCount.value = 0
 }
 
 function handleFileChange(event: Event) {
   const input = event.target as HTMLInputElement
   selectedFile.value = input.files?.[0] ?? null
-  previewItems.value = []
-  errorMessage.value = ''
+  importSource.value = 'file'
+  captureSourceUrl.value = ''
+  resetPreview()
+  state.value = 'idle'
 }
 
 async function previewFile() {
   if (!selectedFile.value) {
-    showFailToast('请先选择 HTML 或 Excel 课表文件')
+    showFailToast('请先选择课表文件')
     return
   }
-  loading.value = true
-  errorMessage.value = ''
+  resetPreview()
+  state.value = 'previewing'
   try {
     const result = await previewCourseImport(selectedFile.value)
-    previewItems.value = result.items
-    if (result.total === 0) showFailToast('没有识别到课程，请检查课表格式')
-  } catch (error) {
-    errorMessage.value = getErrorMessage(error)
-    showFailToast(errorMessage.value)
-  } finally {
-    loading.value = false
-  }
-}
-
-function toPayload(item: CourseImportPreviewItem) {
-  return {
-    course_name: item.course_name,
-    weekday: item.weekday,
-    start_time: item.start_time,
-    end_time: item.end_time,
-    building_id: Number(item.building_id),
-    room_name: item.room_name,
-    teacher: item.teacher,
-    weeks: item.weeks
-  }
-}
-
-async function importCourses() {
-  if (previewItems.value.length === 0) {
-    showFailToast('请先预览课表')
-    return
-  }
-  for (const item of previewItems.value) {
-    const validation = validateCourseForm(toPayload(item))
-    if (validation) {
-      showFailToast(`「${item.course_name}」${validation}`)
+    preview.value = result
+    if (result.candidates.length === 0) {
+      errorMessage.value = '文件中没有识别到课程，请检查文件内容。'
+      state.value = 'failed'
       return
     }
-  }
-  importing.value = true
-  try {
-    for (const item of previewItems.value) await createCourse(toPayload(item))
-    showSuccessToast(`已导入 ${previewItems.value.length} 门课程`)
-    router.push('/courses')
+    prepareAutomaticImportSelection()
+    if (activeCandidates.value.length === 0) {
+      errorMessage.value = '当前课表没有可导入的有效课程。'
+      state.value = 'failed'
+      return
+    }
   } catch (error) {
-    showFailToast(getErrorMessage(error))
-  } finally {
-    importing.value = false
+    errorMessage.value = extractBusinessError(error).message
+    state.value = 'failed'
+    showFailToast(errorMessage.value)
   }
 }
 
-onMounted(loadBuildings)
+function nativeImportErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message.trim()) return error.message
+  if (
+    error !== null &&
+    typeof error === 'object' &&
+    'message' in error &&
+    typeof error.message === 'string' &&
+    error.message.trim()
+  ) {
+    return error.message
+  }
+  return '暂时无法打开教务系统，请稍后再试'
+}
+
+async function startHubuImport() {
+  if (!nativeHubuImportAvailable || isBusy.value) return
+
+  nativeImporting.value = true
+  try {
+    const capture = await captureHubuCourseTable()
+    if (capture.cancelled) return
+
+    selectedFile.value = captureToHtmlFile(capture)
+    importSource.value = 'hubu'
+    captureSourceUrl.value = capture.sourceUrl ?? ''
+    await previewFile()
+    if (canCommit.value) await commitImport()
+    else if (preview.value && activeCandidates.value.length === 0) {
+      errorMessage.value = '当前课表没有可导入的有效课程。'
+      state.value = 'failed'
+      showFailToast(errorMessage.value)
+    }
+  } catch (error) {
+    const message = nativeImportErrorMessage(error)
+    errorMessage.value = message
+    state.value = 'failed'
+    showFailToast(message)
+  } finally {
+    nativeImporting.value = false
+  }
+}
+
+function issueMessageFromConflict(value: Record<string, unknown>): string {
+  const conflictingName =
+    typeof value.conflicting_course_name === 'string'
+      ? value.conflicting_course_name
+      : '已有课程'
+  const weeks = Array.isArray(value.overlap_weeks)
+    ? value.overlap_weeks.filter((week) => Number.isInteger(week)).join('、')
+    : ''
+  return weeks
+    ? `与「${conflictingName}」在第 ${weeks} 周冲突`
+    : `与「${conflictingName}」时间冲突`
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+}
+
+function addServerIssue(rowRef: string, issue: ImportIssue) {
+  serverIssues.value = {
+    ...serverIssues.value,
+    [rowRef]: [...(serverIssues.value[rowRef] ?? []), issue]
+  }
+}
+
+function collectServerRowIssues(code: string, details: Record<string, unknown>): string[] {
+  const rowRefs = new Set<string>()
+  if (typeof details.row_ref === 'string') rowRefs.add(details.row_ref)
+  if (Array.isArray(details.row_refs)) {
+    details.row_refs.forEach((rowRef) => {
+      if (typeof rowRef === 'string') rowRefs.add(rowRef)
+    })
+  }
+  if (Array.isArray(details.rows)) {
+    details.rows.forEach((row) => {
+      if (!isRecord(row) || typeof row.row_ref !== 'string') return
+      rowRefs.add(row.row_ref)
+      if (!Array.isArray(row.issues)) return
+      row.issues.forEach((issue) => {
+        if (!isRecord(issue)) return
+        addServerIssue(row.row_ref as string, {
+          code: typeof issue.code === 'string' ? issue.code : code,
+          field: typeof issue.field === 'string' ? issue.field : 'course',
+          message: typeof issue.message === 'string' ? issue.message : '这行课程仍需处理'
+        })
+      })
+    })
+  }
+  if (Array.isArray(details.conflicts)) {
+    details.conflicts.forEach((conflict) => {
+      if (!isRecord(conflict) || typeof conflict.row_ref !== 'string') return
+      rowRefs.add(conflict.row_ref)
+      addServerIssue(conflict.row_ref, {
+        code: 'course_conflict',
+        field: 'course',
+        message: issueMessageFromConflict(conflict)
+      })
+    })
+  }
+  rowRefs.forEach((rowRef) => {
+    if (!serverIssues.value[rowRef]) {
+      addServerIssue(rowRef, { code, field: 'course', message: '这行课程仍需处理' })
+    }
+  })
+  return [...rowRefs]
+}
+
+async function focusFirstProblem(rowRefs: string[]) {
+  if (!rowRefs.length) return
+  highlightedRowRefs.value = rowRefs
+  await nextTick()
+  document.getElementById(`import-${rowRefs[0]}`)?.scrollIntoView({
+    behavior: 'smooth',
+    block: 'center'
+  })
+}
+
+function candidateBlockingIssues(candidate: ImportCandidate): ImportIssue[] {
+  return [
+    ...candidate.errors.filter((issue) => !NON_BLOCKING_ERROR_CODES.has(issue.code)),
+    ...(serverIssues.value[candidate.row_ref] ?? [])
+  ]
+}
+
+function candidateIsExcluded(candidate: ImportCandidate): boolean {
+  return excludedRowRefs.value.includes(candidate.row_ref)
+}
+
+function toggleCandidateExclusion(candidate: ImportCandidate) {
+  const excluded = new Set(excludedRowRefs.value)
+  if (excluded.has(candidate.row_ref)) {
+    excluded.delete(candidate.row_ref)
+  } else {
+    excluded.add(candidate.row_ref)
+    const nextServerIssues = { ...serverIssues.value }
+    delete nextServerIssues[candidate.row_ref]
+    serverIssues.value = nextServerIssues
+    highlightedRowRefs.value = highlightedRowRefs.value.filter(
+      (rowRef) => rowRef !== candidate.row_ref
+    )
+    errorMessage.value = ''
+  }
+  excludedRowRefs.value = [...excluded]
+  syncPreviewState()
+}
+
+function candidateHasScheduleNote(candidate: ImportCandidate): boolean {
+  return candidate.errors.some((issue) => issue.code === 'time_unrecognized')
+}
+
+function candidateHasLocationNote(candidate: ImportCandidate): boolean {
+  return candidate.errors.some((issue) => LOCATION_ERROR_CODES.has(issue.code))
+}
+
+function candidateSchedule(candidate: ImportCandidate): string {
+  const weekday = candidate.source.raw_weekday.trim()
+  const time = candidate.source.raw_time_or_section.trim()
+  const weeks = candidate.source.raw_weeks.trim()
+  return [weekday, time, weeks].filter(Boolean).join(' · ') || '时间信息未识别'
+}
+
+async function commitImport() {
+  if (!selectedFile.value || !preview.value || !canCommit.value) return
+  serverIssues.value = {}
+  highlightedRowRefs.value = []
+  errorMessage.value = ''
+  state.value = 'committing'
+  try {
+    const result = await commitCourseImport(
+      selectedFile.value,
+      preview.value.file.sha256,
+      excludedRowRefs.value
+    )
+    createdCount.value = result.created_count
+    coursesStore.invalidate()
+    state.value = 'success'
+  } catch (error) {
+    const businessError = extractBusinessError(error)
+    errorMessage.value = businessError.message
+    state.value = 'failed'
+    const rowRefs = collectServerRowIssues(businessError.code, businessError.details)
+    await focusFirstProblem(rowRefs)
+    showFailToast(errorMessage.value)
+  }
+}
+
 </script>
 
 <template>
   <section class="page course-import-page">
-    <van-nav-bar title="导入课表" left-arrow @click-left="router.push('/courses')" />
+    <van-nav-bar title="导入课表" left-arrow @click-left="goBack(router, '/courses')" />
 
-    <main class="page-content import-content">
-      <header v-reveal="{ from: 'left', distance: 34, stagger: 45 }" class="import-hero">
-        <div class="hero-copy">
-          <span class="eyebrow">省一点手动录入的时间</span>
-          <h1>把课表轻轻搬进来</h1>
-          <p>选择 HTML 或 Excel 文件，先预览、再确认，一门课也不会糊里糊涂地进来。</p>
+    <main class="page-content import-content" :style="pageStyle" @focusin="onFieldFocus">
+      <header v-reveal="{ from: 'left', distance: 36, stagger: 60 }" class="import-hero">
+        <div>
+          <span class="eyebrow">密码只留在学校官方页面</span>
+          <h1>从教务系统，把整周课表带回来</h1>
+          <p>安卓 App 可直接采集当前课表；HTML 与 Excel 文件仍然可以照常导入。</p>
         </div>
-        <div class="page-stack" :class="{ reading: loading }" aria-hidden="true">
-          <span class="import-paper paper-three"></span>
-          <span class="import-paper paper-two"></span>
-          <span class="import-paper paper-one">
-            <i></i><i></i><i></i><b></b>
-          </span>
-          <span class="moving-leaf"></span>
+        <div class="paper-garden" :class="{ busy: isBusy }" aria-hidden="true">
+          <span class="paper paper-back"></span>
+          <span class="paper paper-front"><i></i><i></i><i></i></span>
+          <b></b><b></b>
         </div>
       </header>
 
-      <section v-reveal="{ from: 'right', distance: 30, delay: 45 }" class="upload-card">
+      <section v-reveal="{ from: 'right', distance: 30, delay: 60 }" class="hubu-import-sheet">
         <header>
-          <span class="card-step">第一步</span>
+          <span>01</span>
           <div>
-            <h2>选择课表文件</h2>
-            <p>支持 HTML、XLS、XLSX 格式</p>
+            <small>湖北大学 · 官方教务系统</small>
+            <h2>登录后，一键读取当前课表</h2>
           </div>
+          <b :class="{ available: nativeHubuImportAvailable }">
+            {{ nativeHubuImportAvailable ? '安卓已就绪' : '需安卓 App' }}
+          </b>
         </header>
 
-        <label class="file-picker" :class="{ 'has-file': selectedFile, reading: loading }">
-          <input
-            type="file"
-            accept=".html,.htm,.xls,.xlsx,text/html,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            @change="handleFileChange"
-          />
-          <span class="file-flower" aria-hidden="true"><i></i><i></i><i></i></span>
-          <span class="file-copy">
-            <strong>{{ selectedFile?.name || '点这里选择一个文件' }}</strong>
-            <small>{{ selectedFile ? '已选好，下一步看看识别结果' : '也可以随时换一个文件' }}</small>
-          </span>
-          <span class="choose-word">{{ selectedFile ? '重新选择' : '浏览文件' }}</span>
-        </label>
+        <ol class="hubu-import-steps">
+          <li><i>1</i><span><strong>进入官方页面</strong><small>学号和密码只在湖北大学页面输入</small></span></li>
+          <li><i>2</i><span><strong>打开学期理论课表</strong><small>先选好学年学期，确认课表已经完整显示</small></span></li>
+          <li><i>3</i><span><strong>点击“导入课表”</strong><small>返回后自动覆盖当前课表，无需逐门确认</small></span></li>
+        </ol>
 
-        <p v-if="errorMessage" class="error-note" role="alert">{{ errorMessage }}</p>
+        <button
+          type="button"
+          class="hubu-import-button"
+          data-testid="hubu-native-import"
+          :disabled="!nativeHubuImportAvailable || isBusy"
+          @click="startHubuImport"
+        >
+          <i v-if="nativeImporting" aria-hidden="true"></i>
+          <span>{{ nativeImporting ? '等待教务系统返回课表' : '进入教务系统并导入' }}</span>
+          <b aria-hidden="true">↗</b>
+        </button>
 
-        <div class="preview-action">
-          <span>{{ selectedFile ? '文件已就位' : '等待选择文件' }}</span>
-          <van-button
-            type="primary"
-            :disabled="!selectedFile"
-            :loading="loading"
-            loading-text="正在读取课表"
-            @click="previewFile"
-          >
-            预览识别结果
-          </van-button>
-        </div>
+        <a
+          v-if="!nativeHubuImportAvailable"
+          class="hubu-browser-link"
+          :href="HUBU_ACADEMIC_SYSTEM_URL"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          当前是网页版，可先打开湖北大学教务系统
+        </a>
+
+        <p class="privacy-note">
+          <span aria-hidden="true">✓</span>
+          不读取密码，不导出登录 Cookie；课程和地点按课表原文保存，地点未匹配地图也不影响查看。
+        </p>
       </section>
 
-      <template v-if="previewItems.length">
-        <section v-reveal="{ from: 'left', distance: 30, stagger: 55 }" class="report-card">
-          <header>
-            <span class="card-step">第二步</span>
-            <div>
-              <h2>看看识别得对不对</h2>
-              <p>黄色提示的课程，需要补选一个建筑。</p>
-            </div>
-          </header>
-          <div class="report-numbers">
-            <div><strong>{{ previewItems.length }}</strong><span>门课程</span></div>
-            <div><strong>{{ matchedCount }}</strong><span>地点已匹配</span></div>
-            <div :class="{ warning: needsReviewCount }">
-              <strong>{{ needsReviewCount }}</strong><span>需要确认</span>
-            </div>
-          </div>
-          <div class="match-progress">
-            <div><span>地点匹配进度</span><strong>{{ matchPercent }}%</strong></div>
-            <span class="progress-track"><i :style="{ width: `${matchPercent}%` }"></i></span>
-          </div>
-        </section>
-
-        <label v-reveal="{ from: 'right', distance: 28, delay: 70 }" class="building-search">
-          <span class="search-symbol" aria-hidden="true">⌕</span>
+      <section v-reveal="{ from: 'right', distance: 30, delay: 60 }" class="upload-sheet">
+        <header>
+          <span>02</span>
+          <div><h2>或者选择原始课表文件</h2><p>支持 HTM / HTML / XLS / XLSX</p></div>
+        </header>
+        <label class="file-picker" :class="{ selected: selectedFile }">
+          <input
+            type="file"
+            accept=".htm,.html,.xls,.xlsx,text/html,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            :disabled="isBusy"
+            @change="handleFileChange"
+          />
+          <span class="file-icon" aria-hidden="true">↥</span>
           <span>
-            <strong>筛选建筑选项</strong>
-            <input v-model="buildingKeyword" type="search" placeholder="输入教学楼或地点名称" />
+            <strong>{{ selectedFile?.name || '选择一个课表文件' }}</strong>
+            <small v-if="selectedFile && importSource === 'hubu'">
+              已从湖北大学教务系统安全采集
+            </small>
+            <small v-else>{{ selectedFile ? '原文件会原样用于最终提交' : '单个文件不超过 10MB' }}</small>
           </span>
-          <small>{{ filteredBuildings.length }} 个</small>
+          <b>{{ selectedFile ? '更换' : '浏览' }}</b>
         </label>
+        <a
+          v-if="captureSourceUrl"
+          class="capture-source"
+          :href="captureSourceUrl"
+          target="_blank"
+          rel="noopener noreferrer"
+        >
+          来源：{{ captureSourceUrl }}
+        </a>
+        <button
+          type="button"
+          class="preview-button"
+          data-testid="preview-import"
+          :disabled="!selectedFile || isBusy"
+          @click="previewFile"
+        >
+          <i v-if="state === 'previewing'" aria-hidden="true"></i>
+          <span>{{ state === 'previewing' ? '正在逐行读取' : '预览文件原文' }}</span>
+        </button>
+      </section>
 
-        <section class="preview-section">
-          <div class="section-heading">
+      <section v-if="state === 'success'" class="success-sheet" aria-live="polite">
+        <span aria-hidden="true">✓</span>
+        <h2>{{ createdCount }} 门课程已覆盖导入</h2>
+        <p>原课表已由本次课表替换；无有效时间且无地点的条目已自动跳过。</p>
+        <button type="button" data-testid="view-courses" @click="router.push('/courses')">
+          查看我的课表
+        </button>
+      </section>
+
+      <template v-else-if="preview">
+        <ImportSummary
+          v-reveal="{ from: 'left', distance: 30 }"
+          :filename="preview.file.filename"
+          :total="activeCandidates.length"
+          :resolved="resolvedCount"
+          :unresolved="unresolvedCount"
+          :pending="pendingCompletionCount"
+          :conflicts="conflictCount"
+          :ready="canCommit"
+        />
+
+        <p v-if="errorMessage" class="page-error" role="alert">{{ errorMessage }}</p>
+
+        <section class="candidate-list" aria-label="导入课程预览">
+          <div class="list-heading">
+            <span>03</span>
             <div>
-              <span>第三步</span>
-              <h2>逐门确认课程</h2>
+              <h2>导入内容预览</h2>
+              <p>
+                课程、地点和已有时间按原文保存；无法导入的单门课程可以先排除。
+                <b v-if="excludedCount">当前已排除 {{ excludedCount }} 门。</b>
+              </p>
             </div>
-            <p>每项内容都可以在这里调整。</p>
           </div>
-
-          <div class="preview-list">
-            <article
-              v-for="(item, index) in previewItems"
-              :key="`${item.course_name}-${index}`"
-              v-reveal="{
-                from: index % 2 ? 'right' : 'left',
-                distance: 30,
-                delay: Math.min(index * 45, 220),
-                stagger: 30
-              }"
-              class="preview-card"
-              :class="{ 'needs-review': !item.building_id }"
-            >
-              <header class="preview-heading">
-                <span class="course-number">{{ String(index + 1).padStart(2, '0') }}</span>
-                <div>
-                  <strong>{{ item.course_name || '未命名课程' }}</strong>
-                  <p>{{ item.raw_location || '暂未读取到原始地点' }}</p>
-                </div>
-                <span class="match-badge" :class="{ warning: !item.building_id }">
-                  {{ item.building_id ? '地点已匹配' : '请补选地点' }}
-                </span>
-              </header>
-
-              <div class="edit-grid">
-                <van-field v-model="item.course_name" required label="课程名称" />
-                <van-field required label="星期">
-                  <template #input>
-                    <select v-model.number="item.weekday" class="form-select">
-                      <option v-for="weekday in WEEKDAYS" :key="weekday.value" :value="weekday.value">
-                        {{ weekday.label }}
-                      </option>
-                    </select>
-                  </template>
-                </van-field>
-                <van-field v-model="item.start_time" required type="time" label="开始时间" />
-                <van-field v-model="item.end_time" required type="time" label="结束时间" />
-                <van-field
-                  :model-value="item.teacher ?? ''"
-                  label="老师"
-                  placeholder="选填"
-                  @update:model-value="item.teacher = String($event || '') || null"
-                />
-                <van-field
-                  :model-value="item.weeks ?? ''"
-                  label="上课周次"
-                  placeholder="例如：1-16"
-                  @update:model-value="item.weeks = String($event || '') || null"
-                />
-                <van-field class="wide-field" required label="上课建筑">
-                  <template #input>
-                    <select v-model.number="item.building_id" class="form-select">
-                      <option :value="null">请选择建筑</option>
-                      <option
-                        v-for="building in getVisibleBuildings(item.building_id)"
-                        :key="building.id"
-                        :value="building.id"
-                      >
-                        {{ building.name }}
-                      </option>
-                    </select>
-                  </template>
-                </van-field>
-                <van-field
-                  v-model="item.room_name"
-                  class="wide-field"
-                  required
-                  label="教室"
-                  placeholder="例如：A101"
-                />
+          <article
+            v-for="(candidate, index) in candidates"
+            :key="candidate.row_ref"
+            :id="`import-${candidate.row_ref}`"
+            class="candidate-preview"
+            :class="{
+              'has-error': !candidateIsExcluded(candidate) && candidateBlockingIssues(candidate).length,
+              'is-highlighted': highlightedRowRefs.includes(candidate.row_ref),
+              'is-excluded': candidateIsExcluded(candidate)
+            }"
+            :data-row-ref="candidate.row_ref"
+            v-reveal="{
+              from: index % 2 ? 'right' : 'left',
+              distance: 32,
+              delay: Math.min(index * 65, 260)
+            }"
+          >
+            <header>
+              <span>{{ String(index + 1).padStart(2, '0') }}</span>
+              <div>
+                <strong>{{ candidate.source.raw_course_name || candidate.course_name || '未识别课程' }}</strong>
+                <small>{{ candidateSchedule(candidate) }}</small>
               </div>
-            </article>
-          </div>
+              <button
+                type="button"
+                class="candidate-exclusion"
+                :class="{ restore: candidateIsExcluded(candidate) }"
+                :aria-pressed="candidateIsExcluded(candidate)"
+                :disabled="state === 'committing'"
+                :data-testid="`toggle-exclusion-${candidate.row_ref}`"
+                @click="toggleCandidateExclusion(candidate)"
+              >
+                {{ candidateIsExcluded(candidate) ? '恢复这门' : '不导入这门' }}
+              </button>
+            </header>
+            <p v-if="candidateIsExcluded(candidate)" class="excluded-note">
+              这门课程已从本次导入中排除，不会影响其余课程。
+            </p>
+            <dl>
+              <div>
+                <dt>教师</dt>
+                <dd>{{ candidate.source.raw_teacher || '—' }}</dd>
+              </div>
+              <div>
+                <dt>地点原文</dt>
+                <dd>{{ candidate.source.raw_location || '—' }}</dd>
+              </div>
+            </dl>
+            <p v-if="candidateHasLocationNote(candidate)" class="location-note">
+              <span aria-hidden="true">i</span>
+              地点会照原文导入，不影响课表查看；发起路线时若仍未匹配地图，再提示补全。
+            </p>
+            <p v-if="candidateHasScheduleNote(candidate)" class="location-note schedule-note">
+              <span aria-hidden="true">i</span>
+              上课时间暂未识别，仍会导入到“待补全课程”；之后可以手动补时间或直接删除。
+            </p>
+            <ul v-if="candidateBlockingIssues(candidate).length" class="candidate-issues">
+              <li v-for="issue in candidateBlockingIssues(candidate)" :key="`${issue.code}-${issue.field}-${issue.message}`">
+                {{ issue.message }}
+              </li>
+            </ul>
+          </article>
         </section>
 
-        <footer v-reveal="{ from: 'right', distance: 28, delay: 100 }" class="import-actions">
+        <footer class="commit-sheet">
           <div>
-            <strong>{{ needsReviewCount ? '还有课程需要确认地点' : '课程已经整理好了' }}</strong>
-            <p>{{ needsReviewCount ? '补全黄色卡片后，就可以一起导入。' : '确认无误后，把它们放进我的课表。' }}</p>
+            <strong v-if="canCommit && excludedCount">
+              已排除 {{ excludedCount }} 门，本次导入 {{ activeCandidates.length }} 门
+            </strong>
+            <strong v-else-if="canCommit">全部课程都可按原文导入</strong>
+            <strong v-else>还有 {{ unresolvedCount }} 门课程的排课信息无法识别</strong>
+            <p>提交后会替换当前课表；地点或时间缺失不会阻止整批导入。</p>
           </div>
-          <van-button
-            type="primary"
-            block
-            :disabled="needsReviewCount > 0"
-            :loading="importing"
-            loading-text="正在导入课程"
-            @click="importCourses"
+          <button
+            type="button"
+            data-testid="commit-import"
+            :disabled="!canCommit || state === 'committing'"
+            @click="commitImport"
           >
-            导入 {{ previewItems.length }} 门课程
-          </van-button>
+            <i v-if="state === 'committing'" aria-hidden="true"></i>
+            <span>{{ state === 'committing' ? '正在校验并替换课表' : `覆盖导入 ${activeCandidates.length} 门课程` }}</span>
+          </button>
         </footer>
       </template>
+
+      <p v-else-if="errorMessage" class="page-error" role="alert">{{ errorMessage }}</p>
     </main>
   </section>
 </template>
@@ -313,7 +588,7 @@ onMounted(loadBuildings)
 <style scoped>
 .import-content {
   display: grid;
-  width: min(100%, 760px);
+  width: min(100%, 780px);
   gap: 18px;
   padding-top: 14px;
 }
@@ -321,389 +596,448 @@ onMounted(loadBuildings)
 .import-hero {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 180px;
-  min-height: 245px;
+  grid-template-columns: minmax(0, 1fr) 174px;
+  min-height: 250px;
   overflow: hidden;
   align-items: center;
-  border: 1px solid rgba(91, 125, 91, .14);
-  border-radius: 36px 36px 36px 88px;
-  background:
-    radial-gradient(circle at 12% 110%, rgba(137, 183, 176, .28), transparent 40%),
-    linear-gradient(150deg, #eef6eb, #f6f1d9 68%, #f0e4c4);
-  box-shadow: 0 22px 50px rgba(74, 103, 70, .12);
+  border: 1px solid rgba(90, 124, 91, .13);
+  border-radius: 36px 36px 82px 36px;
+  background: radial-gradient(circle at 90% 2%, #f7e7bd 0, transparent 34%), linear-gradient(145deg, #f4f5df, var(--fresh-mint) 70%);
+  box-shadow: 0 22px 52px rgba(68, 94, 66, .12);
   padding: 28px;
 }
-.import-hero::after {
-  position: absolute;
-  right: -45px;
-  bottom: -85px;
-  width: 245px;
-  height: 175px;
-  border-radius: 50%;
-  background: rgba(99, 151, 119, .12);
-  content: "";
-}
-.hero-copy { position: relative; z-index: 2; }
-.eyebrow {
-  display: inline-flex;
-  border-radius: 99px;
-  background: rgba(255, 255, 255, .72);
-  color: #6c8464;
-  font-size: 12px;
-  font-weight: 700;
-  padding: 7px 12px;
-}
-.hero-copy h1 {
-  max-width: 410px;
-  margin: 16px 0 9px;
-  color: #314b38;
-  font-size: clamp(30px, 7vw, 44px);
-  letter-spacing: -.055em;
-  line-height: 1.1;
-}
-.hero-copy p { max-width: 430px; margin: 0; color: #738174; font-size: 13px; line-height: 1.75; }
+.import-hero::after { position: absolute; right: -70px; bottom: -95px; width: 270px; height: 190px; border-radius: 50%; background: rgba(112,158,118,.1); content: ""; }
+.import-hero > div:first-child { position: relative; z-index: 2; }
+.eyebrow { display: inline-flex; border-radius: var(--radius-pill); background: rgba(255,255,255,.72); color: var(--fresh-text); font-size: 12px; font-weight: 800; padding: 7px 11px; }
+.import-hero h1 { max-width: 440px; margin: 15px 0 10px; color: var(--fresh-ink); font-size: clamp(29px, 7vw, 43px); letter-spacing: -.05em; line-height: 1.12; }
+.import-hero p { max-width: 470px; margin: 0; color: var(--fresh-muted); font-size: 13px; line-height: 1.75; }
 
-.page-stack { position: relative; z-index: 1; width: 166px; height: 162px; }
-.import-paper {
-  position: absolute;
-  width: 114px;
-  height: 142px;
-  border-radius: 10px 17px 17px 10px;
-  transform-origin: bottom left;
-}
-.paper-three { top: 5px; left: 37px; background: #d4b383; transform: rotate(11deg); }
-.paper-two { top: 3px; left: 24px; background: #c4d7b7; transform: rotate(5deg); }
-.paper-one {
-  top: 0;
-  left: 10px;
-  overflow: hidden;
-  background: #fffef8;
-  box-shadow: inset 8px 0 #f0dcb0, 0 15px 30px rgba(72, 90, 66, .16);
-}
-.paper-one i {
-  display: block;
-  width: 67px;
-  height: 5px;
-  margin: 26px 0 -10px 29px;
-  border-radius: 9px;
-  background: #a9c7a5;
-}
-.paper-one i:nth-child(2) { width: 51px; background: #e8bf83; }
-.paper-one i:nth-child(3) { width: 72px; background: #a9cbd0; }
-.paper-one b {
-  position: absolute;
-  right: 14px;
-  bottom: 12px;
-  width: 29px;
-  height: 36px;
-  border-radius: 90% 7% 90% 10%;
-  background: #77a370;
-  transform: rotate(23deg);
-}
-.moving-leaf {
-  position: absolute;
-  right: 0;
-  bottom: -3px;
-  width: 33px;
-  height: 54px;
-  border-radius: 90% 8% 90% 10%;
-  background: #70996c;
-  transform: rotate(24deg);
-  animation: import-leaf 3.8s ease-in-out infinite;
-}
-.page-stack.reading .paper-one { animation: page-read 1.25s ease-in-out infinite; }
+.paper-garden { position: relative; z-index: 1; width: 160px; height: 172px; animation: paper-breathe 5.2s ease-in-out infinite; }
+.paper { position: absolute; width: 112px; height: 143px; border-radius: 10px 18px 18px 10px; }
+.paper-back { top: 12px; left: 33px; background: #dbb983; transform: rotate(10deg); }
+.paper-front { top: 2px; left: 17px; background: repeating-linear-gradient(180deg, transparent 0 26px, rgba(105,146,108,.12) 27px 28px), var(--fresh-paper); box-shadow: inset 8px 0 #ead7a9, 0 14px 30px rgba(67,83,61,.15); }
+.paper-front i { display: block; width: 61px; height: 5px; margin: 26px 0 -10px 30px; border-radius: 8px; background: #a9c7a2; }
+.paper-front i:nth-child(2) { width: 43px; background: #e8bf79; }
+.paper-front i:nth-child(3) { width: 67px; background: #9fc4c7; }
+.paper-garden b { position: absolute; right: 2px; bottom: 2px; width: 32px; height: 54px; border-radius: 90% 8% 90% 10%; background: #739c70; transform: rotate(27deg); transform-origin: bottom; animation: leaf-sway 4s ease-in-out infinite; }
+.paper-garden b:last-child { right: 31px; bottom: -5px; width: 25px; height: 43px; background: #a8bd75; transform: rotate(-13deg); animation-delay: .6s; }
+.paper-garden.busy .paper-front { animation: paper-read 1.45s ease-in-out infinite; }
 
-.upload-card,
-.report-card,
-.preview-card,
-.import-actions {
-  border: 1px solid rgba(90, 119, 85, .13);
-  background: rgba(255, 253, 247, .92);
-  box-shadow: 0 18px 44px rgba(73, 91, 68, .08);
-}
-.upload-card,
-.report-card { border-radius: 28px; padding: 18px; }
-.upload-card > header,
-.report-card > header {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 14px;
-}
-.card-step {
-  display: grid;
-  min-width: 54px;
-  height: 32px;
-  place-items: center;
-  border-radius: 99px;
-  background: #e4efdc;
-  color: #557454;
-  font-size: 11px;
-  font-weight: 700;
-}
-.upload-card h2,
-.report-card h2 { margin: 0; color: #384e3c; font-size: 18px; }
-.upload-card header p,
-.report-card header p { margin: 4px 0 0; color: #879188; font-size: 11px; }
-
-.file-picker {
-  position: relative;
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  min-height: 118px;
-  align-items: center;
-  gap: 14px;
-  overflow: hidden;
-  border: 2px dashed #cbdcc7;
-  border-radius: 22px;
-  background:
-    radial-gradient(circle at 90% 15%, rgba(246, 210, 137, .25), transparent 25%),
-    #f7faef;
-  cursor: pointer;
+.upload-sheet,
+.hubu-import-sheet,
+.success-sheet,
+.commit-sheet {
+  border: 1px solid var(--fresh-line);
+  border-radius: var(--radius-lg);
+  background: var(--fresh-paper);
+  box-shadow: 0 16px 38px rgba(59,79,57,.08);
   padding: 18px;
-  transition: border-color .2s ease, transform .25s ease, background .2s ease;
 }
-.file-picker:hover { border-color: #8cac86; transform: translateY(-2px); }
-.file-picker:focus-within { outline: 3px solid rgba(101, 145, 95, .18); outline-offset: 2px; }
-.file-picker.has-file { border-style: solid; border-color: #94b28e; background: #f1f7e9; }
-.file-picker input {
-  position: absolute;
-  width: 1px;
-  height: 1px;
+.hubu-import-sheet {
+  display: grid;
+  gap: 16px;
   overflow: hidden;
-  opacity: 0;
+  border-color: rgba(83, 120, 89, .22);
+  background:
+    radial-gradient(circle at 100% 0, rgba(234, 197, 125, .22), transparent 13rem),
+    linear-gradient(145deg, #fdfcf6, #edf5eb);
 }
-.file-flower {
-  position: relative;
-  width: 58px;
-  height: 58px;
-  border-radius: 20px 20px 28px 20px;
-  background: #e3eedb;
-}
-.file-flower i {
-  position: absolute;
-  top: 11px;
-  left: 24px;
-  width: 13px;
-  height: 25px;
-  border-radius: 80% 80% 30% 30%;
-  background: #80a77a;
-  transform-origin: 6px 20px;
-}
-.file-flower i:nth-child(2) { transform: rotate(120deg); }
-.file-flower i:nth-child(3) { transform: rotate(240deg); }
-.reading .file-flower { animation: flower-spin 2.3s linear infinite; }
-.file-copy { display: grid; min-width: 0; gap: 6px; }
-.file-copy strong { overflow: hidden; color: #3c513f; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
-.file-copy small { color: #849087; font-size: 11px; }
-.choose-word {
-  min-height: 38px;
-  border-radius: 12px;
-  background: #fff;
-  color: #587458;
-  font-size: 12px;
-  font-weight: 700;
-  padding: 11px 13px;
-}
-.error-note {
-  margin: 11px 0 0;
-  border-radius: 13px;
-  background: #fbe7dd;
-  color: #9a5a4d;
-  font-size: 12px;
-  line-height: 1.55;
-  padding: 10px 12px;
-}
-.preview-action {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-top: 13px;
-}
-.preview-action > span { color: #849087; font-size: 11px; }
-
-.report-numbers { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 9px; }
-.report-numbers > div {
-  display: grid;
-  min-height: 82px;
-  align-content: center;
-  justify-items: center;
-  border-radius: 17px;
-  background: #eff5ea;
-}
-.report-numbers > div:nth-child(2) { background: #e7f2ee; }
-.report-numbers > div.warning { background: #fff0d5; }
-.report-numbers strong { color: #405941; font-family: Georgia, serif; font-size: 26px; }
-.report-numbers span { margin-top: 3px; color: #7d8b7d; font-size: 10px; }
-.match-progress { margin-top: 13px; }
-.match-progress > div { display: flex; justify-content: space-between; color: #758276; font-size: 10px; }
-.match-progress strong { color: #5d8259; }
-.progress-track { display: block; height: 7px; overflow: hidden; margin-top: 7px; border-radius: 99px; background: #e4eadf; }
-.progress-track i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #9fc495, #70a994); transition: width .5s cubic-bezier(.22, 1, .36, 1); }
-
-.building-search {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 12px;
-  border: 1px solid rgba(90, 119, 85, .13);
-  border-radius: 20px;
-  background: #eef5e9;
-  padding: 12px 14px;
-}
-.search-symbol {
-  display: grid;
-  width: 40px;
-  height: 40px;
-  place-items: center;
-  border-radius: 14px;
-  background: #fff;
-  color: #658261;
-  font-size: 23px;
-}
-.building-search > span:nth-child(2) { display: grid; min-width: 0; gap: 5px; }
-.building-search strong { color: #506752; font-size: 11px; }
-.building-search input {
-  width: 100%;
-  min-height: 36px;
-  border: 1px solid #d7e3d4;
-  border-radius: 11px;
-  background: #fff;
-  color: #304537;
-  font: inherit;
-  font-size: 12px;
-  outline: none;
-  padding: 0 10px;
-}
-.building-search input:focus { border-color: #7fa17a; box-shadow: 0 0 0 3px rgba(105, 146, 99, .13); }
-.building-search > small { color: #789078; font-size: 11px; }
-
-.preview-section { display: grid; gap: 12px; }
-.section-heading { display: flex; align-items: end; justify-content: space-between; gap: 12px; padding: 5px 3px; }
-.section-heading span { color: #789076; font-size: 10px; font-weight: 700; }
-.section-heading h2 { margin: 4px 0 0; color: #354b39; font-size: 20px; }
-.section-heading p { margin: 0; color: #899389; font-size: 10px; }
-.preview-list { display: grid; gap: 13px; }
-.preview-card {
-  position: relative;
-  overflow: hidden;
-  border-radius: 25px;
-  padding: 16px;
-}
-.preview-card::before {
-  position: absolute;
-  top: 0;
-  right: 30px;
-  width: 74px;
-  height: 22px;
-  opacity: .65;
-  background: #bcd6b4;
-  content: "";
-  transform: rotate(3deg) translateY(-9px);
-}
-.preview-card.needs-review { border-color: #e7c781; background: #fffaf0; }
-.preview-card.needs-review::before { background: #f1d48d; }
-.preview-heading {
-  position: relative;
+.hubu-import-sheet > header {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 11px;
-  padding-bottom: 12px;
 }
-.course-number {
+.hubu-import-sheet > header > span {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  place-items: center;
+  border-radius: 50%;
+  background: #dfeede;
+  color: #47694e;
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+  font-weight: 900;
+}
+.hubu-import-sheet header small {
+  color: #718074;
+  font-size: 11px;
+  font-weight: 700;
+}
+.hubu-import-sheet h2 {
+  margin: 3px 0 0;
+  color: var(--fresh-ink);
+  font-size: 19px;
+}
+.hubu-import-sheet header > b {
+  border: 1px solid #d8ded4;
+  border-radius: var(--radius-pill);
+  background: rgba(255,255,255,.72);
+  color: #7f877e;
+  font-size: 11px;
+  padding: 6px 9px;
+}
+.hubu-import-sheet header > b.available {
+  border-color: #a8c6aa;
+  background: #dfeede;
+  color: #3f6748;
+}
+.hubu-import-steps {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.hubu-import-steps li {
+  display: grid;
+  min-width: 0;
+  align-content: start;
+  gap: 9px;
+  border: 1px solid rgba(91, 121, 91, .13);
+  border-radius: 16px;
+  background: rgba(255,255,255,.68);
+  padding: 12px;
+}
+.hubu-import-steps li > i {
+  display: grid;
+  width: 27px;
+  height: 27px;
+  place-items: center;
+  border-radius: 50%;
+  background: #608966;
+  color: #fff;
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 900;
+}
+.hubu-import-steps li > span {
+  display: grid;
+  gap: 4px;
+}
+.hubu-import-steps strong {
+  color: var(--fresh-ink);
+  font-size: 13px;
+}
+.hubu-import-steps small {
+  color: var(--fresh-muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+.hubu-import-button {
+  display: grid;
+  min-height: 54px;
+  grid-template-columns: auto auto auto;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  border: 1px solid #567e5e;
+  border-radius: 17px;
+  background: #52775a;
+  box-shadow: 0 13px 24px rgba(63, 98, 71, .17);
+  color: #fff;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 850;
+  padding: 0 17px;
+  transition: transform 300ms var(--fresh-spring), box-shadow 300ms ease, background 300ms ease;
+}
+.hubu-import-button > b {
+  font-size: 19px;
+}
+.hubu-import-button:disabled {
+  border-color: #cbd3c8;
+  background: #e4e8e1;
+  box-shadow: none;
+  color: #7e887d;
+  cursor: not-allowed;
+}
+.hubu-import-button > i {
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(255,255,255,.45);
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+.hubu-browser-link {
+  justify-self: center;
+  color: #4e7055;
+  font-size: 12px;
+  font-weight: 760;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.privacy-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin: 0;
+  color: #607064;
+  font-size: 11px;
+  line-height: 1.55;
+}
+.privacy-note span {
+  display: grid;
+  width: 17px;
+  height: 17px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 50%;
+  background: #d8ead8;
+  color: #42694b;
+  font-size: 10px;
+  font-weight: 900;
+}
+.upload-sheet { display: grid; gap: 14px; }
+.upload-sheet > header,
+.list-heading { display: flex; align-items: center; gap: 10px; }
+.upload-sheet > header > span,
+.list-heading > span { display: grid; width: 40px; height: 40px; flex: 0 0 auto; place-items: center; border-radius: 50%; background: var(--fresh-mint); color: #507156; font-family: ui-monospace, monospace; font-size: 12px; font-weight: 900; }
+.upload-sheet h2,
+.list-heading h2 { margin: 0; color: var(--fresh-ink); font-size: 18px; }
+.upload-sheet header p,
+.list-heading p { margin: 3px 0 0; color: var(--fresh-muted); font-size: 12px; }
+.list-heading p b { color: #86552f; }
+
+.file-picker { display: grid; grid-template-columns: auto minmax(0,1fr) auto; min-height: 88px; align-items: center; gap: 12px; border: 1px dashed var(--fresh-line-strong); border-radius: 19px; background: var(--fresh-bg); cursor: pointer; padding: 13px; transition: background 360ms ease, border-color 360ms ease, transform 360ms ease; }
+.file-picker.selected { border-style: solid; border-color: #a9c3a5; background: var(--fresh-mint); }
+.file-picker input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.file-icon { display: grid; width: 43px; height: 43px; place-items: center; border-radius: 50% 50% 42% 50%; background: var(--fresh-mint); color: #4f7457; font-size: 22px; font-weight: 800; }
+.file-picker > span:nth-of-type(2) { display: grid; min-width: 0; gap: 4px; }
+.file-picker strong { color: var(--fresh-ink); font-size: 14px; overflow-wrap: anywhere; }
+.file-picker small { color: var(--fresh-muted); font-size: 12px; }
+.file-picker > b { border-radius: var(--radius-pill); background: var(--fresh-paper); color: var(--fresh-green-dark); font-size: 12px; padding: 8px 10px; }
+.capture-source {
+  overflow: hidden;
+  color: var(--fresh-muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.preview-button,
+.commit-sheet button,
+.success-sheet button { display: inline-flex; min-height: 48px; align-items: center; justify-content: center; gap: 9px; border: 1px solid var(--fresh-green); border-radius: var(--radius-sm); background: #608966; color: #fff; cursor: pointer; font-size: 14px; font-weight: 800; padding: 0 17px; }
+.preview-button:disabled,
+.commit-sheet button:disabled {
+  border-color: var(--fresh-line);
+  background: var(--disabled-surface);
+  color: var(--disabled-text);
+  opacity: 1;
+  cursor: not-allowed;
+}
+.preview-button i,
+.commit-sheet button i { width: 16px; height: 16px; flex: 0 0 auto; border: 2px solid rgba(255,255,255,.45); border-top-color: currentColor; border-radius: 50%; animation: spin 1s linear infinite; }
+
+.candidate-list { display: grid; gap: 14px; }
+.list-heading { padding: 4px 3px; }
+.candidate-preview {
+  display: grid;
+  gap: 14px;
+  border: 1px solid var(--fresh-line);
+  border-radius: 22px;
+  background: var(--fresh-paper);
+  box-shadow: 0 12px 28px rgba(59, 79, 57, .07);
+  padding: 17px;
+  transition: border-color 240ms ease, box-shadow 240ms ease;
+}
+.candidate-preview.has-error {
+  border-color: #dfad9f;
+  background: linear-gradient(145deg, var(--fresh-paper), #fff8f5);
+}
+.candidate-preview.is-highlighted {
+  border-color: #ba6f5d;
+  box-shadow: 0 0 0 3px rgba(186, 111, 93, .14), 0 14px 32px rgba(86, 55, 48, .11);
+}
+.candidate-preview.is-excluded {
+  border-style: dashed;
+  border-color: #b9c5b6;
+  background: #f2f4ed;
+  box-shadow: none;
+}
+.candidate-preview > header {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 11px;
+}
+.candidate-preview > header > span {
   display: grid;
   width: 38px;
   height: 38px;
+  flex: 0 0 auto;
   place-items: center;
   border-radius: 50%;
-  background: #e8f1e2;
-  color: #557454;
-  font-family: Georgia, serif;
-  font-size: 13px;
-}
-.preview-heading > div { min-width: 0; }
-.preview-heading strong { display: block; overflow: hidden; color: #35493a; font-size: 15px; text-overflow: ellipsis; white-space: nowrap; }
-.preview-heading p { overflow: hidden; margin: 4px 0 0; color: #8a938a; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
-.match-badge {
-  border-radius: 99px;
-  background: #e5f1df;
-  color: #577752;
-  font-size: 10px;
-  font-weight: 700;
-  padding: 7px 9px;
-}
-.match-badge.warning { background: #ffedc9; color: #946d2e; }
-.edit-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-.edit-grid :deep(.van-cell) {
-  min-width: 0;
-  border: 1px solid #e0e8dc;
-  border-radius: 14px;
-  background: #fbfdf8;
-  padding: 11px;
-}
-.edit-grid :deep(.van-cell::after) { display: none; }
-.edit-grid :deep(.van-field__label) { width: 65px; color: #718073; font-size: 11px; }
-.edit-grid :deep(.van-field__control) { color: #304537; font-size: 12px; }
-.edit-grid .wide-field { grid-column: 1 / -1; }
-.form-select {
-  width: 100%;
-  min-height: 36px;
-  border: 1px solid #d8e4d5;
-  border-radius: 10px;
-  background: #fff;
-  color: #304537;
-  font: inherit;
+  background: var(--fresh-mint);
+  color: var(--fresh-green-dark);
+  font-family: ui-monospace, monospace;
   font-size: 12px;
-  outline: none;
-  padding: 0 30px 0 9px;
+  font-weight: 900;
 }
-.form-select:focus { border-color: #7c9f77; box-shadow: 0 0 0 3px rgba(105, 146, 99, .12); }
-
-.import-actions {
+.candidate-preview > header > div {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(210px, .62fr);
-  align-items: center;
-  gap: 15px;
-  border-radius: 25px;
-  background: #edf4e7;
-  padding: 17px;
+  min-width: 0;
+  gap: 3px;
 }
-.import-actions strong { color: #405643; font-size: 15px; }
-.import-actions p { margin: 5px 0 0; color: #7d897e; font-size: 11px; line-height: 1.5; }
+.candidate-preview > header strong {
+  color: var(--fresh-ink);
+  font-size: 16px;
+  overflow-wrap: anywhere;
+}
+.candidate-preview > header small {
+  color: var(--fresh-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.candidate-exclusion {
+  min-height: 42px;
+  flex: 0 0 auto;
+  border: 1px solid #d5a89d;
+  border-radius: 13px;
+  background: #fff7f4;
+  color: #884a40;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 800;
+  padding: 0 12px;
+}
+.candidate-exclusion.restore {
+  border-color: var(--fresh-line-strong);
+  background: var(--fresh-paper);
+  color: var(--fresh-green-dark);
+}
+.excluded-note {
+  margin: 0;
+  border-radius: 13px;
+  background: #e4eadf;
+  color: #49614d;
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 1.55;
+  padding: 10px 12px;
+}
+.candidate-preview dl {
+  display: grid;
+  grid-template-columns: minmax(120px, .6fr) minmax(0, 1.4fr);
+  gap: 9px;
+  margin: 0;
+}
+.candidate-preview dl > div {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+  border-radius: 14px;
+  background: var(--fresh-bg);
+  padding: 11px 12px;
+}
+.candidate-preview dt {
+  color: var(--fresh-muted);
+  font-size: 11px;
+}
+.candidate-preview dd {
+  margin: 0;
+  color: var(--fresh-ink);
+  font-size: 13px;
+  font-weight: 750;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+.location-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0;
+  border-radius: 13px;
+  background: #f4f1e7;
+  color: #667065;
+  font-size: 12px;
+  line-height: 1.6;
+  padding: 10px 12px;
+}
+.location-note span {
+  display: grid;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 50%;
+  background: #dce9d8;
+  color: #476a4d;
+  font-family: ui-serif, serif;
+  font-size: 11px;
+  font-weight: 900;
+}
+.candidate-issues {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  border-radius: 13px;
+  background: var(--cm-red-soft);
+  color: #7c3c32;
+  font-size: 12px;
+  line-height: 1.55;
+  padding: 10px 12px 10px 29px;
+}
+.page-error { border: 1px solid #e1b0a3; border-radius: 16px; background: var(--cm-red-soft); color: #7c3c32; font-size: 13px; line-height: 1.6; margin: 0; padding: 12px 14px; }
 
-@keyframes import-leaf {
-  0%, 100% { transform: rotate(24deg) translateY(0); }
-  50% { transform: rotate(16deg) translateY(-7px); }
-}
-@keyframes page-read {
-  0%, 100% { transform: rotate(0); }
-  50% { transform: rotateY(-9deg) translateX(-3px); }
-}
-@keyframes flower-spin { to { transform: rotate(360deg); } }
+.commit-sheet { display: grid; grid-template-columns: minmax(0,1fr) minmax(220px,.65fr); align-items: center; gap: 14px; background: var(--fresh-mint); }
+.commit-sheet strong { color: #35503b; font-size: 15px; }
+.commit-sheet p { margin: 5px 0 0; color: var(--fresh-text); font-size: 12px; line-height: 1.55; }
 
-@media (max-width: 590px) {
-  .import-hero { grid-template-columns: minmax(0, 1fr) 115px; min-height: 225px; padding: 22px 18px; }
-  .page-stack { width: 115px; transform: scale(.78); transform-origin: center; }
-  .file-picker { grid-template-columns: auto minmax(0, 1fr); }
-  .choose-word { grid-column: 1 / -1; text-align: center; }
-  .import-actions { grid-template-columns: 1fr; }
+.success-sheet { display: grid; justify-items: center; text-align: center; padding: 34px 20px; }
+.success-sheet > span { display: grid; width: 58px; height: 58px; place-items: center; border-radius: 50%; background: var(--fresh-mint); color: var(--fresh-green-dark); font-size: 25px; font-weight: 900; animation: success-arrive 700ms cubic-bezier(.2,.9,.2,1) both; }
+.success-sheet h2 { margin: 15px 0 5px; color: var(--fresh-ink); font-size: 21px; }
+.success-sheet p { margin: 0 0 18px; color: var(--fresh-text); font-size: 13px; }
+.success-sheet button { min-width: 190px; }
+
+@keyframes paper-breathe { 0%,100% { transform: translateY(0) rotate(1deg); } 50% { transform: translateY(-8px) rotate(-1deg); } }
+@keyframes leaf-sway { 0%,100% { rotate: 0deg; } 50% { rotate: 8deg; } }
+@keyframes paper-read { 0%,100% { transform: rotate(0); } 50% { transform: rotate(-5deg) translateX(-4px); } }
+@keyframes spin { to { transform: rotate(360deg); } }
+@keyframes success-arrive { from { opacity: 0; transform: scale(.65) rotate(-18deg); } to { opacity: 1; transform: scale(1) rotate(0); } }
+
+@media (hover: hover) and (pointer: fine) {
+  .file-picker:hover { border-color: #799c79; background: var(--fresh-mint); transform: translateY(-2px); }
+  .preview-button:not(:disabled):hover,
+  .commit-sheet button:not(:disabled):hover,
+  .success-sheet button:hover,
+  .hubu-import-button:not(:disabled):hover {
+    background: var(--fresh-green);
+    transform: translateY(-2px);
+  }
 }
-@media (max-width: 420px) {
-  .import-hero { grid-template-columns: 1fr; padding-right: 92px; }
-  .hero-copy h1 { font-size: 28px; }
-  .page-stack { position: absolute; right: -13px; bottom: -20px; }
-  .preview-action { align-items: stretch; flex-direction: column; }
-  .preview-heading { grid-template-columns: auto minmax(0, 1fr); }
-  .match-badge { grid-column: 1 / -1; width: fit-content; margin-left: 49px; }
-  .edit-grid { grid-template-columns: 1fr; }
-  .edit-grid .wide-field { grid-column: auto; }
-  .section-heading p { display: none; }
+
+@media (max-width: 580px) {
+  .import-hero { grid-template-columns: minmax(0,1fr) 105px; min-height: 235px; padding: 22px 18px; }
+  .paper-garden { width: 105px; transform: scale(.74); transform-origin: center; }
+  .commit-sheet { grid-template-columns: 1fr; }
+  .hubu-import-steps { grid-template-columns: 1fr; }
+  .hubu-import-steps li { grid-template-columns: auto minmax(0,1fr); }
+  .candidate-preview dl { grid-template-columns: 1fr; }
+  .candidate-preview > header { flex-wrap: wrap; }
+  .candidate-exclusion { margin-left: 49px; }
 }
+
+@media (max-width: 390px) {
+  .import-hero { grid-template-columns: 1fr; padding-right: 95px; }
+  .paper-garden { position: absolute; right: -7px; bottom: -15px; }
+  .file-picker { grid-template-columns: auto minmax(0,1fr); }
+  .file-picker > b { grid-column: 1 / -1; justify-self: stretch; text-align: center; }
+  .hubu-import-sheet > header { grid-template-columns: auto minmax(0,1fr); }
+  .hubu-import-sheet header > b { grid-column: 1 / -1; justify-self: start; margin-left: 51px; }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .moving-leaf,
-  .page-stack.reading .paper-one,
-  .reading .file-flower { animation: none; }
+  .paper-garden,
+  .paper-garden b,
+  .paper-garden.busy .paper-front,
+  .hubu-import-button > i,
+  .preview-button i,
+  .commit-sheet button i,
+  .success-sheet > span { animation: none; }
 }
 </style>

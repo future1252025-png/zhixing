@@ -596,8 +596,16 @@ function estimateMapY(latitude: number): number {
 }
 
 async function copySeedData() {
-  await navigator.clipboard.writeText(seedPreview.value)
-  showSuccessToast('已复制采点数据')
+  if (!navigator.clipboard) {
+    showFailToast('复制失败，请手动选择文本复制')
+    return
+  }
+  try {
+    await navigator.clipboard.writeText(seedPreview.value)
+    showSuccessToast('已复制采点数据')
+  } catch {
+    showFailToast('复制失败，请手动选择文本复制')
+  }
 }
 
 function escapeHtml(value: string): string {
@@ -806,7 +814,7 @@ onBeforeUnmount(() => {
 .map-panel,
 .controls-panel,
 .preview-panel {
-  border-radius: 26px;
+  border-radius: var(--radius-lg);
   background: rgba(255, 253, 247, .92);
   box-shadow: 0 17px 42px rgba(70, 90, 66, .09);
   padding: 16px;
@@ -836,7 +844,7 @@ onBeforeUnmount(() => {
 
 .collector-heading > span {
   flex: 0 0 auto;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--cm-primary-soft);
   color: var(--cm-primary-dark);
   font-size: 12px;
@@ -851,7 +859,7 @@ onBeforeUnmount(() => {
   overflow: hidden;
   border: 1px solid var(--cm-line);
   border-radius: 22px;
-  background: #e5eee1;
+  background: var(--fresh-mint);
 }
 
 .map-mode-tip {
@@ -861,7 +869,7 @@ onBeforeUnmount(() => {
   z-index: 2;
   max-width: calc(100% - 20px);
   border: 1px solid rgba(88, 119, 84, .16);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: rgba(255, 253, 247, .92);
   box-shadow: 0 5px 16px rgba(54, 72, 52, .12);
   color: #4b644d;
@@ -872,7 +880,7 @@ onBeforeUnmount(() => {
 }
 
 .map-mode-tip.active {
-  border-color: #e5bd72;
+  border-color: var(--fresh-sun);
   background: rgba(255, 238, 199, .95);
   color: #825f27;
 }
@@ -909,12 +917,13 @@ onBeforeUnmount(() => {
 }
 
 .collector-input {
-  min-height: 36px;
+  min-height: 44px;
   border: 1px solid var(--cm-line);
   border-radius: 12px;
-  background: #fbfdf8;
+  background: var(--fresh-paper-2);
   color: var(--cm-ink);
   font: inherit;
+  font-size: 16px;
   padding: 0 10px;
 }
 
@@ -927,8 +936,8 @@ onBeforeUnmount(() => {
   gap: 8px;
   margin-top: 12px;
   border: 1px solid var(--cm-line);
-  border-radius: 18px;
-  background: #f1f6eb;
+  border-radius: var(--radius-md);
+  background: var(--fresh-bg);
   padding: 13px;
 }
 
@@ -977,19 +986,19 @@ onBeforeUnmount(() => {
   cursor: pointer;
   border: 1px solid var(--cm-line);
   border-radius: 15px;
-  background: #fbfdf8;
+  background: var(--fresh-paper-2);
   padding: 11px;
   transition: transform .2s ease, border-color .2s ease, background .2s ease;
 }
 
 .collector-item.disabled {
-  border-color: #e5e9e1;
-  background: #f3f4ef;
+  border-color: var(--fresh-line);
+  background: var(--disabled-surface);
   opacity: 1;
 }
 
 .collector-item.disabled strong {
-  color: #778178;
+  color: var(--disabled-text);
 }
 
 .collector-item.disabled span,
@@ -1015,9 +1024,9 @@ onBeforeUnmount(() => {
   max-height: 360px;
   overflow: auto;
   margin: 0;
-  border: 1px solid #e3e9df;
+  border: 1px solid var(--fresh-line);
   border-radius: 16px;
-  background: #f4f6ef;
+  background: var(--fresh-bg);
   color: #3f5143;
   font-size: 12px;
   line-height: 1.55;
@@ -1026,14 +1035,14 @@ onBeforeUnmount(() => {
 }
 
 .collector-input:focus {
-  border-color: #7fa17a;
+  border-color: var(--fresh-leaf);
   outline: 0;
   box-shadow: 0 0 0 3px rgba(105, 146, 99, .13);
 }
 
 .collector-item:not(.disabled):hover {
-  border-color: #9bb896;
-  background: #f1f7eb;
+  border-color: var(--fresh-leaf);
+  background: var(--fresh-bg);
   transform: translateY(-2px);
 }
 
@@ -1043,11 +1052,11 @@ onBeforeUnmount(() => {
   height: 20px;
   place-items: center;
   border: 3px solid #ffffff;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: #1f6feb;
   box-shadow: 0 6px 14px rgb(15 23 42 / 24%);
   color: #ffffff;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 800;
 }
 
@@ -1057,11 +1066,11 @@ onBeforeUnmount(() => {
   height: 22px;
   place-items: center;
   border: 2px solid #ffffff;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: #13a46b;
   box-shadow: 0 6px 14px rgb(15 23 42 / 24%);
   color: #ffffff;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 800;
 }
 
@@ -1071,7 +1080,7 @@ onBeforeUnmount(() => {
   height: 28px;
   place-items: center;
   border: 2px solid #ffffff;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: #f59e0b;
   box-shadow: 0 8px 18px rgb(15 23 42 / 24%);
   color: #ffffff;

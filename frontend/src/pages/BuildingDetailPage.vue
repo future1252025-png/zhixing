@@ -4,6 +4,8 @@ import { useRoute, useRouter } from 'vue-router'
 import { getBuildingDetail, type Building } from '@/api/buildings'
 import RealCampusMap from '@/components/RealCampusMap.vue'
 import TechIcon from '@/components/TechIcon.vue'
+import { formatBuildingDisplayName } from '@/utils/buildings'
+import { goBack } from '@/utils/navigation'
 
 const route = useRoute()
 const router = useRouter()
@@ -33,7 +35,7 @@ onMounted(loadBuilding)
 
 <template>
   <section class="page building-detail-page">
-    <van-nav-bar title="校园地点" left-arrow @click-left="router.push('/home')" />
+    <van-nav-bar title="校园地点" left-arrow @click-left="goBack(router, '/home')" />
     <div class="page-content building-content">
       <div v-if="loading" class="place-loading" role="status" aria-live="polite">
         <span><i></i><i></i><i></i></span>
@@ -60,11 +62,11 @@ onMounted(loadBuilding)
           <span class="place-number">{{ String(building.id).padStart(2, '0') }}</span>
           <div class="place-copy">
             <span class="fresh-kicker">{{ building.type }}</span>
-            <h1>{{ building.name }}</h1>
+            <h1>{{ formatBuildingDisplayName(building.name) }}</h1>
             <p>{{ building.description }}</p>
           </div>
           <div class="place-walk">
-            <span><van-icon name="guide-o" /></span>
+            <span><TechIcon name="guide" :size="18" /></span>
             <div><small>步行提示</small><strong>{{ building.walk_hint || '校园内步行可达' }}</strong></div>
           </div>
         </header>
@@ -75,7 +77,7 @@ onMounted(loadBuilding)
           </div>
           <RealCampusMap
             :buildings="[building]"
-            :selected-building-id="building.id"
+            :active-building-id="building.id"
             title=""
             subtitle=""
             height="330px"
@@ -89,18 +91,18 @@ onMounted(loadBuilding)
           class="place-facts"
         >
           <article>
-            <span><van-icon name="location-o" /></span>
+            <span><TechIcon name="location" :size="18" /></span>
             <div><small>地点类型</small><strong>{{ building.type }}</strong></div>
           </article>
           <article>
-            <span><van-icon name="aim" /></span>
+            <span><TechIcon name="aim" :size="18" /></span>
             <div><small>校园坐标</small><strong>{{ building.latitude.toFixed(4) }}, {{ building.longitude.toFixed(4) }}</strong></div>
           </article>
         </section>
 
         <section v-reveal="{ from: 'right', distance: 36 }" class="place-actions">
           <button type="button" class="chat-action" @click="openMessages">
-            <span><van-icon name="chat-o" /></span>
+            <span><TechIcon name="chat" :size="19" /></span>
             <span><strong>看看地点频道</strong><small>找到同在这里的人和留言</small></span>
             <TechIcon name="arrow" :size="19" />
           </button>
@@ -147,7 +149,7 @@ onMounted(loadBuilding)
 .place-loading i {
   width: 7px;
   height: 13px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--fresh-leaf);
   animation: place-load 850ms ease-in-out infinite alternate;
 }
@@ -155,7 +157,7 @@ onMounted(loadBuilding)
 .place-loading i:nth-child(2) { height: 27px; animation-delay: 150ms; }
 .place-loading i:nth-child(3) { height: 19px; animation-delay: 300ms; }
 .place-loading strong { display: block; color: var(--fresh-ink); font-size: 13px; }
-.place-loading p { margin: 4px 0 0; color: var(--fresh-muted); font-size: 10px; }
+.place-loading p { margin: 4px 0 0; color: var(--fresh-muted); font-size: 12px; }
 
 .place-hero {
   position: relative;
@@ -164,7 +166,7 @@ onMounted(loadBuilding)
   border-radius: 34px 34px 26px 34px;
   background:
     linear-gradient(145deg, rgba(255, 255, 255, 0.46), transparent 43%),
-    #e5eee0;
+    var(--fresh-mint);
   padding: 25px 22px 20px;
   box-shadow: var(--fresh-shadow-soft);
 }
@@ -186,7 +188,7 @@ onMounted(loadBuilding)
   top: 20px;
   right: 25px;
   color: rgba(38, 54, 42, 0.16);
-  font-family: "STKaiti", "KaiTi", serif;
+  font-family: var(--font-serif);
   font-size: 72px;
   line-height: 1;
 }
@@ -200,7 +202,7 @@ onMounted(loadBuilding)
 .place-copy h1 {
   margin: 12px 0 0;
   color: var(--fresh-ink);
-  font-family: "STKaiti", "KaiTi", "PingFang SC", sans-serif;
+  font-family: var(--font-serif);
   font-size: clamp(34px, 9vw, 46px);
   line-height: 1.08;
   letter-spacing: -0.05em;
@@ -255,7 +257,7 @@ onMounted(loadBuilding)
   gap: 9px;
   align-items: center;
   max-width: 275px;
-  border-radius: 18px;
+  border-radius: var(--radius-md);
   background: rgba(255, 255, 255, 0.6);
   padding: 9px;
 }
@@ -271,8 +273,14 @@ onMounted(loadBuilding)
 }
 
 .place-walk > div { display: grid; min-width: 0; gap: 3px; }
-.place-walk small { color: var(--fresh-muted); font-size: 8px; }
-.place-walk strong { overflow: hidden; color: var(--fresh-ink); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.place-walk small { color: var(--fresh-muted); font-size: 12px; }
+.place-walk strong {
+  color: var(--fresh-ink);
+  font-size: 13px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
 
 .place-map {
   overflow: hidden;
@@ -306,19 +314,25 @@ onMounted(loadBuilding)
   width: 38px;
   height: 38px;
   place-items: center;
-  border-radius: 14px;
+  border-radius: var(--radius-sm);
   background: var(--fresh-mint);
   color: var(--fresh-green-dark);
 }
 
 .place-facts article:nth-child(2) > span {
   background: var(--fresh-sky);
-  color: #5b848c;
+  color: var(--cm-chat-dark);
 }
 
 .place-facts article > div { display: grid; min-width: 0; gap: 3px; }
-.place-facts small { color: var(--fresh-muted); font-size: 8px; }
-.place-facts strong { overflow: hidden; color: var(--fresh-ink); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.place-facts small { color: var(--fresh-muted); font-size: 12px; }
+.place-facts strong {
+  color: var(--fresh-ink);
+  font-size: 14px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
 
 .place-actions {
   display: grid;
@@ -339,8 +353,8 @@ onMounted(loadBuilding)
   text-align: left;
 }
 
-.chat-action { background: #e5eee0; }
-.route-action { background: #e1edef; }
+.chat-action { background: var(--fresh-mint); }
+.route-action { background: var(--fresh-sky); }
 
 .place-actions button > span:first-child {
   display: grid;
@@ -352,10 +366,10 @@ onMounted(loadBuilding)
   color: var(--fresh-green-dark);
 }
 
-.route-action > span:first-child { color: #5a838c; }
+.route-action > span:first-child { color: var(--cm-chat-dark); }
 .place-actions button > span:nth-child(2) { display: grid; gap: 3px; }
-.place-actions strong { font-size: 12px; }
-.place-actions small { color: var(--fresh-muted); font-size: 9px; }
+.place-actions strong { font-size: 15px; }
+.place-actions small { color: var(--fresh-muted); font-size: 12px; line-height: 1.4; }
 
 @keyframes place-load {
   to { transform: scaleY(1.4); }

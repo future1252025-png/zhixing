@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import router, {
   resolveAuthRedirect,
   resolveRouteScrollPosition,
+  sanitizeInternalRedirect,
   shouldLoadCurrentUser
 } from './index'
 
@@ -88,6 +89,14 @@ describe('auth route guard decisions', () => {
     })
   })
 
+  it('scrolls a course settings link to the requested section', () => {
+    expect(resolveRouteScrollPosition(null, '#semester-settings')).toEqual({
+      el: '#semester-settings',
+      top: 12,
+      behavior: 'smooth'
+    })
+  })
+
   it('registers building detail as a protected route', () => {
     const match = router.resolve('/buildings/1')
 
@@ -122,10 +131,21 @@ describe('auth route guard decisions', () => {
     expect(editMatch.meta.requiresAuth).toBe(true)
   })
 
-  it('registers map collector as a public utility route', () => {
+  it('registers map collector as a protected route', () => {
     const match = router.resolve('/map-collector')
 
     expect(match.name).toBe('map-collector')
-    expect(match.meta.requiresAuth).toBeUndefined()
+    expect(match.meta.requiresAuth).toBe(true)
+  })
+
+  it.each([
+    ['/courses?week=3', '/courses?week=3'],
+    ['/home#today', '/home#today'],
+    ['//evil.example/login', '/home'],
+    ['https://evil.example/login', '/home'],
+    ['/\\evil.example/login', '/home'],
+    ['', '/home']
+  ])('sanitizes login redirect %s', (input, expected) => {
+    expect(sanitizeInternalRedirect(input)).toBe(expected)
   })
 })

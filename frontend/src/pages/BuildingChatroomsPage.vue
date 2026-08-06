@@ -7,10 +7,15 @@ import {
   type BuildingChatRoom
 } from '@/api/messages'
 import TechIcon from '@/components/TechIcon.vue'
+import { useAuthStore } from '@/stores/auth'
+import { formatBuildingDisplayName } from '@/utils/buildings'
 import { rememberRecentChatEntry } from '@/utils/chat'
+import { goBack } from '@/utils/navigation'
+import { createScopedStorage } from '@/utils/scopedStorage'
 
 const route = useRoute()
 const router = useRouter()
+const authStore = useAuthStore()
 const building = ref<Building | null>(null)
 const rooms = ref<BuildingChatRoom[]>([])
 const loading = ref(true)
@@ -37,8 +42,9 @@ const canOpenCustomRoom = computed(() => {
 })
 
 function openRoom(room: BuildingChatRoom) {
-  if (building.value && typeof window !== 'undefined') {
-    rememberRecentChatEntry(window.localStorage, {
+  const userId = authStore.currentUser?.id
+  if (building.value && typeof window !== 'undefined' && userId) {
+    rememberRecentChatEntry(createScopedStorage(userId), {
       buildingId: buildingId.value,
       buildingName: building.value.name,
       roomName: room.room_name || null
@@ -52,12 +58,15 @@ function openRoom(room: BuildingChatRoom) {
 
 function openCustomRoom() {
   const roomName = roomQuery.value.trim()
+  const userId = authStore.currentUser?.id
   if (!roomName || !building.value) return
-  rememberRecentChatEntry(window.localStorage, {
-    buildingId: buildingId.value,
-    buildingName: building.value.name,
-    roomName
-  })
+  if (userId) {
+    rememberRecentChatEntry(createScopedStorage(userId), {
+      buildingId: buildingId.value,
+      buildingName: building.value.name,
+      roomName
+    })
+  }
   router.push({
     path: `/buildings/${buildingId.value}/messages`,
     query: { room_name: roomName }
@@ -91,7 +100,7 @@ onMounted(loadPage)
 
 <template>
   <section class="page chatrooms-page">
-    <van-nav-bar title="地点频道" left-arrow @click-left="router.push(`/buildings/${buildingId}`)" />
+    <van-nav-bar title="地点频道" left-arrow @click-left="goBack(router, '/home')" />
     <div class="page-content chatrooms-content">
       <div v-if="loading" class="channel-loading" role="status" aria-live="polite">
         <span><i></i><i></i><i></i></span>
@@ -110,7 +119,7 @@ onMounted(loadPage)
           <span class="channel-sun" aria-hidden="true"></span>
           <span class="talk-bubbles" aria-hidden="true"><i></i><i></i><i></i></span>
           <span class="fresh-kicker">{{ building?.type || '校园地点' }}</span>
-          <h1>{{ building?.name || '地点频道' }}</h1>
+          <h1>{{ building ? formatBuildingDisplayName(building.name) : '地点频道' }}</h1>
           <p>{{ roomCountText }} · 选择一个频道，看看此刻留在这里的话。</p>
           <div class="channel-count">
             <span>可进入频道</span>
@@ -133,7 +142,7 @@ onMounted(loadPage)
             class="custom-room"
             @click="openCustomRoom"
           >
-            <span><van-icon name="plus" /></span>
+            <span><TechIcon name="plus" :size="17" /></span>
             <span><strong>进入“{{ roomQuery.trim() }}”</strong><small>这个教室还没有留言，也可以先进去</small></span>
             <TechIcon name="arrow" :size="18" />
           </button>
@@ -144,7 +153,7 @@ onMounted(loadPage)
           class="room-list-section"
         >
           <div class="fresh-section-heading">
-            <div><h2>{{ roomQuery.trim() ? '搜索结果' : '这里的频道' }}</h2><p>公共频道和教室频道都在这里</p></div>
+            <div><h2>{{ roomQuery.trim() ? '搜索结果' : '这里的频道' }}</h2><p>地点频道和教室频道都在这里</p></div>
           </div>
 
           <div class="room-list">
@@ -156,7 +165,7 @@ onMounted(loadPage)
               @click="openRoom(room)"
             >
               <span class="room-icon">
-                <van-icon :name="room.is_general ? 'friends-o' : 'chat-o'" />
+                <TechIcon :name="room.is_general ? 'users' : 'chat'" :size="22" />
               </span>
               <span class="room-copy">
                 <small>{{ room.is_general ? '大家都在这里' : `教室频道 ${String(index + 1).padStart(2, '0')}` }}</small>
@@ -206,7 +215,7 @@ onMounted(loadPage)
 .channel-loading i {
   width: 7px;
   height: 12px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--fresh-lilac);
   animation: room-load 850ms ease-in-out infinite alternate;
 }
@@ -214,7 +223,7 @@ onMounted(loadPage)
 .channel-loading i:nth-child(2) { height: 26px; animation-delay: 150ms; }
 .channel-loading i:nth-child(3) { height: 18px; animation-delay: 300ms; }
 .channel-loading strong { display: block; color: var(--fresh-ink); font-size: 13px; }
-.channel-loading p { margin: 4px 0 0; color: var(--fresh-muted); font-size: 10px; }
+.channel-loading p { margin: 4px 0 0; color: var(--fresh-muted); font-size: 12px; }
 
 .channel-hero {
   position: relative;
@@ -246,7 +255,7 @@ onMounted(loadPage)
   max-width: 320px;
   margin: 15px 0 0;
   color: var(--fresh-ink);
-  font-family: "STKaiti", "KaiTi", "PingFang SC", sans-serif;
+  font-family: var(--font-serif);
   font-size: clamp(34px, 9vw, 46px);
   line-height: 1.08;
   letter-spacing: -0.05em;
@@ -258,7 +267,7 @@ onMounted(loadPage)
   max-width: 310px;
   margin: 12px 0 0;
   color: var(--fresh-text);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.7;
 }
 
@@ -304,8 +313,8 @@ onMounted(loadPage)
   gap: 8px;
 }
 
-.channel-count span { color: var(--fresh-muted); font-size: 9px; }
-.channel-count strong { color: var(--fresh-ink); font-family: "STKaiti", "KaiTi", serif; font-size: 32px; line-height: 0.8; }
+.channel-count span { color: var(--fresh-muted); font-size: 13px; font-weight: 600; }
+.channel-count strong { color: var(--fresh-ink); font-family: var(--font-serif); font-size: 32px; line-height: 0.8; }
 
 .room-search {
   padding: 18px;
@@ -324,7 +333,7 @@ onMounted(loadPage)
   min-height: 60px;
   margin-top: 9px;
   border: 1px dashed #a9bfa9;
-  border-radius: 18px;
+  border-radius: var(--radius-md);
   background: var(--fresh-mint);
   color: var(--fresh-green-dark);
   cursor: pointer;
@@ -342,8 +351,8 @@ onMounted(loadPage)
 }
 
 .custom-room > span:nth-child(2) { display: grid; min-width: 0; gap: 3px; }
-.custom-room strong { overflow: hidden; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
-.custom-room small { color: var(--fresh-muted); font-size: 8px; }
+.custom-room strong { overflow: hidden; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
+.custom-room small { color: var(--fresh-muted); font-size: 12px; }
 
 .room-list-section {
   display: grid;
@@ -386,7 +395,7 @@ onMounted(loadPage)
 
 .room-list > button.general {
   border-color: rgba(79, 125, 88, 0.14);
-  background: #e8f0e4;
+  background: var(--fresh-mint);
 }
 
 .room-icon {
@@ -394,9 +403,9 @@ onMounted(loadPage)
   width: 48px;
   height: 48px;
   place-items: center;
-  border-radius: 18px;
+  border-radius: var(--radius-md);
   background: var(--fresh-sky);
-  color: #5c858e;
+  color: var(--cm-chat-dark);
   font-size: 20px;
 }
 
@@ -411,9 +420,10 @@ onMounted(loadPage)
   gap: 3px;
 }
 
-.room-copy small { color: var(--fresh-muted); font-size: 8px; }
+.room-copy strong { font-size: 15px; }
+.room-copy small { color: var(--fresh-muted); font-size: 13px; }
 .room-copy strong { overflow: hidden; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
-.room-copy > span { color: var(--fresh-green); font-size: 9px; }
+.room-copy > span { color: var(--fresh-green); font-size: 12px; }
 
 .room-arrow {
   position: relative;

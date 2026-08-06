@@ -76,6 +76,12 @@ def test_get_missing_building_returns_404(seeded_client: TestClient) -> None:
     response = seeded_client.get("/api/buildings/999999")
 
     assert response.status_code == 404
+    assert response.json() == {
+        "code": "building_not_found",
+        "message": "建筑不存在",
+        "fields": [],
+        "details": {},
+    }
 
 
 def test_get_location_presets_returns_seeded_presets(
@@ -95,3 +101,17 @@ def test_get_location_presets_returns_seeded_presets(
         "longitude",
         "description",
     }.issubset(data[0])
+
+
+def test_global_openapi_documents_business_error_response_for_validation_422() -> None:
+    app.openapi_schema = None
+    schema = app.openapi()
+    expected = {"$ref": "#/components/schemas/BusinessErrorResponse"}
+
+    for path, method in (
+        ("/api/courses", "post"),
+        ("/api/semester", "put"),
+        ("/api/auth/register", "post"),
+        ("/api/buildings/{building_id}", "get"),
+    ):
+        assert schema["paths"][path][method]["responses"]["422"]["content"]["application/json"]["schema"] == expected

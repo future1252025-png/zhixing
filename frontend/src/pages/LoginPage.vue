@@ -1,38 +1,42 @@
 <script setup lang="ts">
-import { reactive, ref } from 'vue'
-import { isAxiosError } from 'axios'
-import { showFailToast, showSuccessToast } from 'vant'
+import { computed, reactive, ref } from 'vue'
+import { showFailToast } from 'vant'
 import { useRoute, useRouter } from 'vue-router'
 
 import { getCourses } from '@/api/courses'
+import { extractBusinessError } from '@/api/errors'
+import { fetchSemester } from '@/api/semester'
 import TechIcon from '@/components/TechIcon.vue'
 import { useAuthStore } from '@/stores/auth'
+import { sanitizeInternalRedirect } from '@/router'
+import { useKeyboardAwarePage } from '@/utils/keyboardInset'
 import { prepareLoginIntro } from '@/utils/loginIntro'
 
 const router = useRouter()
 const route = useRoute()
 const authStore = useAuthStore()
 const submitting = ref(false)
+const showPassword = ref(false)
 const form = reactive({ username: '', password: '' })
-
-function getErrorMessage(error: unknown): string {
-  if (isAxiosError(error)) {
-    const detail = error.response?.data?.detail
-    if (typeof detail === 'string') return detail
-  }
-  return '登录失败，请检查账号或密码'
-}
+// 会话过期被踢回来时给一句温和的解释，比一闪而过的 toast 更不容易错过
+const sessionExpired = computed(() => route.query.reason === 'expired')
+const { keyboardInset, onFieldFocus } = useKeyboardAwarePage({ basePaddingPx: 24 })
+const pageStyle = computed(() => ({
+  paddingBottom: `calc(24px + env(safe-area-inset-bottom, 0px) + ${keyboardInset.value}px)`,
+  scrollPaddingBottom: `calc(24px + env(safe-area-inset-bottom, 0px) + ${keyboardInset.value}px)`
+}))
 
 async function handleSubmit() {
   submitting.value = true
   try {
     await authStore.login(form)
-    await prepareLoginIntro(getCourses)
-    showSuccessToast('欢迎回来')
-    const redirect = typeof route.query.redirect === 'string' ? route.query.redirect : '/home'
+    // 乐观导航：登录成功立刻进首页，欢迎卡数据在后台预取；
+    // 首页欢迎卡是唯一的欢迎反馈，这里不再叠加 toast
+    void prepareLoginIntro(getCourses, fetchSemester)
+    const redirect = sanitizeInternalRedirect(route.query.redirect)
     await router.replace(redirect)
   } catch (error) {
-    showFailToast(getErrorMessage(error))
+    showFailToast(extractBusinessError(error).message)
   } finally {
     submitting.value = false
   }
@@ -40,7 +44,7 @@ async function handleSubmit() {
 </script>
 
 <template>
-  <main class="auth-page">
+  <main class="auth-page" :style="pageStyle" @focusin="onFieldFocus">
     <span class="wash wash-one" aria-hidden="true"></span>
     <span class="wash wash-two" aria-hidden="true"></span>
 
@@ -86,6 +90,10 @@ async function handleSubmit() {
       </section>
 
       <section class="login-card">
+        <p v-if="sessionExpired" class="expired-note" role="status">
+          <i aria-hidden="true"></i>
+          登录状态过期了，重新登录就好。
+        </p>
         <div class="card-heading">
           <div>
             <span>欢迎回来</span>
@@ -107,13 +115,15 @@ async function handleSubmit() {
             />
             <van-field
               v-model="form.password"
-              type="password"
+              :type="showPassword ? 'text' : 'password'"
               name="password"
               label="密码"
               placeholder="输入登录密码"
               autocomplete="current-password"
               left-icon="shield-o"
+              :right-icon="showPassword ? 'eye-o' : 'closed-eye'"
               :rules="[{ required: true, message: '请输入密码' }]"
+              @click-right-icon="showPassword = !showPassword"
             />
           </van-cell-group>
 
@@ -130,7 +140,12 @@ async function handleSubmit() {
               进入智行
               <TechIcon v-if="!submitting" name="arrow" :size="18" />
             </van-button>
-            <van-button plain block native-type="button" @click="router.push('/register')">
+            <van-button
+              plain
+              block
+              native-type="button"
+              @click="router.push({ path: '/register', query: { redirect: route.query.redirect } })"
+            >
               第一次来？创建账号
             </van-button>
           </div>
@@ -147,7 +162,7 @@ async function handleSubmit() {
   overflow: hidden;
   background:
     linear-gradient(158deg, rgba(255, 255, 255, 0.7), transparent 46%),
-    #f1f5ec;
+    var(--fresh-bg);
   padding: 24px 16px 42px;
 }
 
@@ -203,7 +218,7 @@ async function handleSubmit() {
 .auth-brand small {
   justify-self: end;
   color: var(--fresh-muted);
-  font-size: 11px;
+  font-size: 13px;
 }
 
 .brand-mark {
@@ -221,7 +236,7 @@ async function handleSubmit() {
   width: 9px;
   height: 15px;
   border-radius: 100% 0 100% 0;
-  background: #e9f3e5;
+  background: var(--fresh-mint);
 }
 
 .brand-mark i:first-child {
@@ -244,16 +259,16 @@ async function handleSubmit() {
 
 .welcome-copy > span {
   color: var(--fresh-green-dark);
-  font-size: 12px;
-  font-weight: 720;
+  font-size: 13px;
+  font-weight: 700;
 }
 
 .welcome-copy h1 {
   margin: 9px 0 0;
   color: var(--fresh-ink);
-  font-family: "STKaiti", "KaiTi", "PingFang SC", sans-serif;
+  font-family: var(--font-serif);
   font-size: clamp(29px, 7.4vw, 43px);
-  font-weight: 760;
+  font-weight: 700;
   line-height: 1.17;
   letter-spacing: -0.045em;
 }
@@ -318,7 +333,7 @@ async function handleSubmit() {
   width: 37px;
   height: 37px;
   place-items: center;
-  border: 4px solid #f1f5ec;
+  border: 4px solid var(--fresh-bg);
   border-radius: 50%;
   background: var(--fresh-paper);
   color: var(--fresh-green-dark);
@@ -344,7 +359,7 @@ async function handleSubmit() {
 .dot-b {
   top: 18px;
   right: 19%;
-  color: #547f88;
+  color: var(--cm-chat-dark);
   animation-delay: 2.75s;
 }
 
@@ -387,10 +402,10 @@ async function handleSubmit() {
   display: flex;
   align-items: center;
   gap: 6px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: rgba(255, 253, 248, 0.72);
   color: var(--fresh-muted);
-  font-size: 9px;
+  font-size: 13px;
   font-weight: 700;
   opacity: 0;
   padding: 5px 8px;
@@ -414,6 +429,29 @@ async function handleSubmit() {
   animation: card-rise 1080ms 420ms var(--fresh-spring) both;
 }
 
+.expired-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 13px;
+  border: 1px solid rgba(226, 197, 154, 0.55);
+  border-radius: var(--radius-sm);
+  background: var(--cm-amber-soft);
+  color: #7a5c2c;
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  padding: 9px 12px;
+}
+
+.expired-note i {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 70% 30% 62% 38%;
+  background: var(--fresh-sun);
+  transform: rotate(34deg);
+}
+
 .card-heading {
   display: flex;
   align-items: center;
@@ -424,8 +462,8 @@ async function handleSubmit() {
 
 .card-heading span {
   color: var(--fresh-green);
-  font-size: 11px;
-  font-weight: 720;
+  font-size: 13px;
+  font-weight: 700;
 }
 
 .card-heading h2 {
@@ -438,7 +476,7 @@ async function handleSubmit() {
   width: 30px;
   height: 42px;
   border-radius: 100% 0 100% 0;
-  background: #dcebd6;
+  background: var(--fresh-mint);
   transform: rotate(38deg);
   transform-origin: bottom left;
   animation: tiny-leaf-wave 4.2s 1.6s ease-in-out infinite;
@@ -448,8 +486,33 @@ async function handleSubmit() {
   min-height: 58px;
 }
 
+.auth-form :deep(.van-field__control) {
+  font-size: 16px;
+}
+
 .auth-form :deep(.van-field__label) {
   width: 43px;
+}
+
+@media (max-width: 520px) {
+  .auth-form :deep(.van-field__value) {
+    display: block;
+    min-width: 0;
+  }
+
+  .auth-form :deep(.van-field__body) {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .auth-form :deep(.van-field__label) {
+    width: 40px;
+  }
+
+  .auth-form :deep(.van-field__error-message) {
+    margin-top: 4px;
+    line-height: 1.4;
+  }
 }
 
 .privacy-note {
@@ -458,7 +521,7 @@ async function handleSubmit() {
   gap: 7px;
   margin: 12px 3px 0;
   color: var(--fresh-muted);
-  font-size: 10px;
+  font-size: 13px;
 }
 
 .privacy-note i {

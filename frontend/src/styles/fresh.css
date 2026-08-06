@@ -1,11 +1,21 @@
 :root {
   color-scheme: light;
+  --text-primary: #26362a;
+  --text-secondary: #536657;
+  --surface-page: #f7f5ef;
+  --surface-card: #ffffff;
+  --surface-mint: #f3f7f0;
+  --surface-sun: #fff1d3;
+  --disabled-text: #56645a;
+  --disabled-surface: #edf0e9;
+  --motion-stagger: 72ms;
   --fresh-bg: #f4f6ef;
   --fresh-paper: #fffdf8;
   --fresh-paper-2: #f9faf4;
   --fresh-ink: #26362a;
   --fresh-text: #536657;
-  --fresh-muted: #7c897d;
+  /* Darker muted for small labels on pale green backgrounds */
+  --fresh-muted: #5f6f62;
   --fresh-green: #4f7d58;
   --fresh-green-dark: #355f40;
   --fresh-leaf: #87a878;
@@ -22,6 +32,38 @@
   --fresh-shadow: 0 18px 48px rgba(49, 72, 49, 0.1);
   --fresh-shadow-soft: 0 9px 28px rgba(49, 72, 49, 0.075);
   --fresh-spring: cubic-bezier(0.16, 1, 0.3, 1);
+  /* Readable mobile type scale — avoid user text under 12px */
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-md: 15px;
+  --text-lg: 17px;
+  --text-xl: 20px;
+  --text-display: clamp(36px, 11vw, 48px);
+  --touch-min: 44px;
+
+  /* Spacing scale — single source for page/section/inline rhythm */
+  --space-2xs: 4px;
+  --space-xs: 8px;
+  --space-sm: 12px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 32px;
+  /* Radius scale (aliases onto the fresh radii; use these going forward) */
+  --radius-sm: 14px;
+  --radius-md: 18px;
+  --radius-lg: var(--fresh-radius);
+  --radius-pill: 999px;
+  /* Shared shell dimensions — nav / content / tabbar align to one width */
+  --page-max: 600px;
+  --nav-height: 58px;
+  --app-safe-area-top: env(safe-area-inset-top, 0px);
+  /* Keep Vant's own nav-bar var in sync so sticky offsets compute correctly */
+  --van-nav-bar-height: 58px;
+  /* Font stacks — serif carries the brand "handwritten" headings */
+  --font-sans:
+    "HarmonyOS Sans SC", "MiSans", "PingFang SC", "Microsoft YaHei",
+    system-ui, sans-serif;
+  --font-serif: "LXGW WenKai Screen", "STKaiti", "KaiTi", "PingFang SC", serif;
 
   --cm-primary: var(--fresh-green);
   --cm-primary-dark: var(--fresh-green-dark);
@@ -61,6 +103,11 @@ html {
   background: var(--fresh-bg);
 }
 
+/* Android WebView can report a zero top inset while the status bar still overlays content. */
+html.capacitor-android {
+  --app-safe-area-top: max(env(safe-area-inset-top, 0px), 32px);
+}
+
 body {
   overflow-x: hidden;
   background:
@@ -68,9 +115,7 @@ body {
     radial-gradient(circle at 95% 16%, rgba(121, 168, 155, 0.15), transparent 22rem),
     linear-gradient(180deg, #fafbf6 0, var(--fresh-bg) 32rem);
   color: var(--fresh-ink);
-  font-family:
-    "HarmonyOS Sans SC", "MiSans", "PingFang SC", "Microsoft YaHei",
-    system-ui, sans-serif;
+  font-family: var(--font-sans);
   font-variant-numeric: tabular-nums;
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
@@ -102,7 +147,7 @@ body {
 
 .app-shell {
   overflow-x: clip;
-  padding-bottom: calc(90px + env(safe-area-inset-bottom));
+  padding-bottom: calc(96px + env(safe-area-inset-bottom));
 }
 
 .page {
@@ -111,37 +156,93 @@ body {
 }
 
 .page-content {
-  width: min(100%, 580px);
+  width: min(100%, var(--page-max));
   margin: 0 auto;
   padding: 18px 16px 34px;
 }
 
 .van-nav-bar {
   position: sticky;
-  top: 0;
+  top: var(--app-safe-area-top);
   z-index: 100;
-  width: min(100%, 600px);
-  height: 58px;
-  margin: 0 auto;
-  border-bottom: 1px solid rgba(79, 125, 88, 0.09);
-  background: rgba(250, 251, 246, 0.88);
-  box-shadow: none;
-  backdrop-filter: blur(16px);
+  width: min(calc(100% - 32px), calc(var(--page-max) - 32px));
+  height: auto;
+  min-height: var(--nav-height);
+  margin: 10px auto 0;
+  overflow: hidden;
+  padding-top: 0;
+  border: 1px solid rgba(79, 125, 88, 0.12);
+  border-radius: 19px 19px 14px 19px;
+  background:
+    radial-gradient(circle at 88% -55%, rgba(135, 168, 120, 0.2), transparent 48%),
+    rgba(255, 253, 248, 0.9);
+  box-shadow:
+    0 9px 26px rgba(49, 72, 49, 0.075),
+    inset 0 1px rgba(255, 255, 255, 0.86);
+  backdrop-filter: blur(18px) saturate(1.08);
+}
+
+/* Native-only breathing room; browser pages deliberately retain their current layout. */
+html.capacitor-android .van-nav-bar {
+  margin-top: calc(var(--app-safe-area-top) + 12px);
+}
+
+html.capacitor-android .home-content {
+  padding-top: calc(var(--app-safe-area-top) + 18px);
+}
+
+html.capacitor-android .page > .van-nav-bar + .page-content,
+html.capacitor-android .page > .van-nav-bar + .message-content,
+html.capacitor-android .page > .van-nav-bar + .collector-layout {
+  padding-top: 32px;
+}
+
+html.capacitor-android #semester-settings {
+  margin-top: 12px;
+  scroll-margin-top: calc(var(--app-safe-area-top) + var(--nav-height, 58px) + 44px);
 }
 
 .van-nav-bar::after {
   display: none;
 }
 
+.van-nav-bar::before {
+  position: absolute;
+  right: 18px;
+  bottom: 0;
+  left: 18px;
+  height: 2px;
+  border-radius: var(--radius-pill);
+  background: linear-gradient(90deg, transparent, var(--fresh-leaf), transparent);
+  content: "";
+  opacity: 0.42;
+}
+
 .van-nav-bar__content {
-  height: 58px;
+  height: var(--nav-height);
 }
 
 .van-nav-bar__title {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
   color: var(--fresh-ink);
-  font-size: 16px;
-  font-weight: 750;
-  letter-spacing: 0.01em;
+  font-family: var(--font-serif);
+  font-size: 19px;
+  font-weight: 700;
+  letter-spacing: 0.025em;
+}
+
+.van-nav-bar__title::before {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 auto;
+  border-radius: 50% 50% 50% 22%;
+  background: var(--fresh-leaf);
+  box-shadow: 0 0 0 5px rgba(135, 168, 120, 0.12);
+  content: "";
+  transform: rotate(-18deg);
 }
 
 .van-nav-bar .van-icon,
@@ -149,21 +250,62 @@ body {
   color: var(--fresh-green-dark);
 }
 
-.route-page-enter-active,
-.route-page-leave-active {
+.van-nav-bar .van-icon-arrow-left {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border: 1px solid rgba(79, 125, 88, 0.11);
+  border-radius: 12px;
+  background: rgba(231, 240, 227, 0.76);
+  font-size: 18px;
   transition:
-    opacity 380ms ease,
-    transform 620ms var(--fresh-spring);
+    background 240ms var(--fresh-spring),
+    transform 240ms var(--fresh-spring);
 }
 
-.route-page-enter-from {
-  opacity: 0;
-  transform: translateY(16px) scale(0.985);
+.van-nav-bar__left {
+  padding: 0 11px;
 }
 
-.route-page-leave-to {
+.van-nav-bar__left:active .van-icon-arrow-left {
+  background: var(--fresh-mint);
+  transform: scale(0.92);
+}
+
+/* 路由转场：离场一律快出仅透明度；进层从右滑入、返回从左滑入，tab 互切/同层只淡入 */
+.route-fade-leave-active,
+.route-forward-leave-active,
+.route-back-leave-active {
+  transition: opacity 140ms ease;
+}
+
+.route-fade-enter-active {
+  transition: opacity 300ms ease;
+}
+
+.route-forward-enter-active,
+.route-back-enter-active {
+  transition:
+    opacity 300ms ease,
+    transform 300ms var(--fresh-spring);
+}
+
+.route-fade-enter-from,
+.route-fade-leave-to,
+.route-forward-leave-to,
+.route-back-leave-to {
   opacity: 0;
-  transform: translateY(-8px) scale(0.99);
+}
+
+.route-forward-enter-from {
+  opacity: 0;
+  transform: translateX(28px);
+}
+
+.route-back-enter-from {
+  opacity: 0;
+  transform: translateX(-28px);
 }
 
 .cm-reveal {
@@ -202,8 +344,7 @@ body {
 }
 
 .fresh-card,
-.surface-panel,
-.hero-panel {
+.surface-panel {
   border: 1px solid rgba(79, 125, 88, 0.11);
   border-radius: var(--fresh-radius);
   background: var(--fresh-paper);
@@ -215,9 +356,9 @@ body {
   align-items: center;
   gap: 7px;
   color: var(--fresh-green-dark);
-  font-size: 11px;
-  font-weight: 760;
-  letter-spacing: 0.06em;
+  font-size: var(--text-xs);
+  font-weight: 700;
+  letter-spacing: 0.04em;
 }
 
 .fresh-kicker::before {
@@ -232,56 +373,52 @@ body {
 .fresh-heading {
   margin: 7px 0 0;
   color: var(--fresh-ink);
-  font-family: "STKaiti", "KaiTi", "PingFang SC", sans-serif;
-  font-size: clamp(27px, 7.5vw, 39px);
-  font-weight: 760;
-  line-height: 1.16;
-  letter-spacing: -0.035em;
+  font-family: var(--font-serif);
+  font-size: clamp(24px, 6.5vw, 34px);
+  font-weight: 700;
+  line-height: 1.18;
+  letter-spacing: -0.03em;
 }
 
 .fresh-copy {
   margin: 9px 0 0;
   color: var(--fresh-text);
-  font-size: 13px;
-  line-height: 1.75;
+  font-size: var(--text-sm);
+  line-height: 1.7;
 }
 
-.fresh-section-heading,
-.section-heading {
+.fresh-section-heading {
   display: flex;
   align-items: flex-end;
   justify-content: space-between;
   gap: 12px;
 }
 
-.fresh-section-heading h2,
-.section-title {
+.fresh-section-heading h2 {
   margin: 0;
   color: var(--fresh-ink);
   font-size: 20px;
-  font-weight: 760;
+  font-weight: 700;
   letter-spacing: -0.02em;
 }
 
-.fresh-section-heading p,
-.section-subtitle,
-.muted-text {
+.fresh-section-heading p {
   margin: 5px 0 0;
   color: var(--fresh-muted);
-  font-size: 12px;
+  font-size: var(--text-sm);
   line-height: 1.65;
 }
 
 .fresh-primary-button,
 .van-button {
   isolation: isolate;
-  min-height: 45px;
+  min-height: var(--touch-min);
   overflow: hidden;
   border: 1px solid var(--fresh-line-strong);
   border-radius: 16px;
   background: #f8faf4;
   color: var(--fresh-text);
-  font-size: 13px;
+  font-size: var(--text-sm);
   font-weight: 700;
   box-shadow: none;
 }
@@ -333,8 +470,8 @@ body {
 .van-button:disabled {
   opacity: 1 !important;
   border-color: #d8ded4 !important;
-  background: #edf0e9 !important;
-  color: #839085 !important;
+  background: var(--disabled-surface) !important;
+  color: var(--disabled-text) !important;
   cursor: not-allowed;
   box-shadow: none !important;
 }
@@ -367,16 +504,20 @@ body {
 .van-cell__title,
 .van-field__label {
   color: var(--fresh-text);
-  font-size: 12px;
-  font-weight: 680;
+  font-size: var(--text-sm);
+  font-weight: 600;
 }
 
 .van-cell__value {
   color: var(--fresh-muted);
+  font-size: var(--text-sm);
 }
 
 .van-field__control {
   color: var(--fresh-ink);
+  font-size: 16px;
+  line-height: 1.4;
+
 }
 
 .van-field__control::placeholder {
@@ -416,6 +557,10 @@ body {
   min-height: 46px;
   background: transparent;
   padding: 0;
+}
+
+.van-search .van-field__control {
+  font-size: 16px;
 }
 
 .van-empty {
@@ -531,14 +676,20 @@ textarea {
   *::before,
   *::after {
     scroll-behavior: auto !important;
-    animation-duration: 0.01ms !important;
+    animation-duration: 1ms !important;
     animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
+    transition-duration: 1ms !important;
   }
 
   .cm-reveal,
   .cm-reveal-stagger > * {
     opacity: var(--cm-stagger-opacity, 1);
+    transform: none;
+  }
+
+  /* 路由转场退化为纯透明度（时长已被上方 1ms 规则压平） */
+  .route-forward-enter-from,
+  .route-back-enter-from {
     transform: none;
   }
 }

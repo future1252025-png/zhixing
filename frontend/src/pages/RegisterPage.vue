@@ -1,23 +1,28 @@
 <script setup lang="ts">
 import { reactive, ref } from 'vue'
-import { isAxiosError } from 'axios'
 import { showFailToast, showSuccessToast } from 'vant'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 
+import { getCourses } from '@/api/courses'
+import { extractBusinessError } from '@/api/errors'
+import { fetchSemester } from '@/api/semester'
 import TechIcon from '@/components/TechIcon.vue'
 import { useAuthStore } from '@/stores/auth'
+import { sanitizeInternalRedirect } from '@/router'
+import { useKeyboardAwarePage } from '@/utils/keyboardInset'
+import { prepareLoginIntro } from '@/utils/loginIntro'
+import { goBack } from '@/utils/navigation'
 
 const router = useRouter()
+const route = useRoute()
 const authStore = useAuthStore()
 const submitting = ref(false)
+const showPassword = ref(false)
+const showConfirmPassword = ref(false)
+// 确认密码只做本地一致性校验，不进入注册提交载荷
+const confirmPassword = ref('')
 const form = reactive({ username: '', password: '', nickname: '', student_id: '' })
-
-function getErrorMessage(error: unknown): string {
-  if (isAxiosError(error) && typeof error.response?.data?.detail === 'string') {
-    return error.response.data.detail
-  }
-  return '注册失败，请稍后重试'
-}
+const { pageStyle, onFieldFocus } = useKeyboardAwarePage({ basePaddingPx: 34 })
 
 async function handleSubmit() {
   submitting.value = true
@@ -28,10 +33,18 @@ async function handleSubmit() {
       nickname: form.nickname,
       student_id: form.student_id || null
     })
-    showSuccessToast('账号创建成功，请登录')
-    await router.replace('/login')
+    try {
+      await authStore.login({ username: form.username, password: form.password })
+      // 与登录页一致的乐观导航：欢迎卡数据后台预取，立即进入目标页
+      void prepareLoginIntro(getCourses, fetchSemester)
+      showSuccessToast('账号创建成功，欢迎来到智行')
+      await router.replace(sanitizeInternalRedirect(route.query.redirect))
+    } catch {
+      showSuccessToast('账号已创建，请登录')
+      await router.replace({ path: '/login', query: { redirect: route.query.redirect } })
+    }
   } catch (error) {
-    showFailToast(getErrorMessage(error))
+    showFailToast(extractBusinessError(error).message)
   } finally {
     submitting.value = false
   }
@@ -40,9 +53,9 @@ async function handleSubmit() {
 
 <template>
   <section class="page register-page">
-    <van-nav-bar title="创建账号" left-arrow @click-left="router.push('/login')" />
+    <van-nav-bar title="创建账号" left-arrow @click-left="goBack(router, { path: '/login', query: { redirect: route.query.redirect } })" />
 
-    <div class="page-content register-content">
+    <div class="page-content register-content" :style="pageStyle" @focusin="onFieldFocus">
       <header v-reveal="{ from: 'left', distance: 34 }" class="register-hero">
         <div>
           <span class="fresh-kicker">从今天开始记录</span>
@@ -98,16 +111,33 @@ async function handleSubmit() {
           />
           <van-field
             v-model="form.password"
-            type="password"
+            :type="showPassword ? 'text' : 'password'"
             name="password"
             label="密码"
             placeholder="至少 6 位"
             autocomplete="new-password"
             left-icon="shield-o"
+            :right-icon="showPassword ? 'eye-o' : 'closed-eye'"
             :rules="[
               { required: true, message: '请输入密码' },
               { validator: (value: string) => value.length >= 6, message: '密码至少 6 位' }
             ]"
+            @click-right-icon="showPassword = !showPassword"
+          />
+          <van-field
+            v-model="confirmPassword"
+            :type="showConfirmPassword ? 'text' : 'password'"
+            name="confirm_password"
+            label="确认密码"
+            placeholder="再输入一次"
+            autocomplete="new-password"
+            left-icon="shield-o"
+            :right-icon="showConfirmPassword ? 'eye-o' : 'closed-eye'"
+            :rules="[
+              { required: true, message: '请再次输入密码' },
+              { validator: (value: string) => value === form.password, message: '两次输入的密码不一致' }
+            ]"
+            @click-right-icon="showConfirmPassword = !showConfirmPassword"
           />
         </van-cell-group>
 
@@ -127,7 +157,7 @@ async function handleSubmit() {
             创建账号
             <TechIcon v-if="!submitting" name="arrow" :size="18" />
           </van-button>
-          <van-button plain block native-type="button" @click="router.push('/login')">
+          <van-button plain block native-type="button" @click="goBack(router, { path: '/login', query: { redirect: route.query.redirect } })">
             已有账号，返回登录
           </van-button>
         </div>
@@ -156,7 +186,7 @@ async function handleSubmit() {
   align-items: center;
   overflow: hidden;
   border-radius: 32px 32px 25px 32px;
-  background: #eef4e8;
+  background: var(--fresh-mint);
   padding: 25px 22px;
 }
 
@@ -206,7 +236,7 @@ async function handleSubmit() {
   left: 54px;
   width: 3px;
   height: 77px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: #638568;
   transform-origin: bottom;
   animation: stem-grow 1s 200ms var(--fresh-spring) both;
@@ -217,7 +247,7 @@ async function handleSubmit() {
   width: 34px;
   height: 48px;
   border-radius: 100% 0 100% 0;
-  background: #85a97e;
+  background: var(--fresh-leaf);
   transform-origin: 100% 100%;
   animation: leaf-open 720ms var(--fresh-spring) both;
 }
@@ -261,8 +291,8 @@ async function handleSubmit() {
 
 .form-heading span {
   color: var(--fresh-green);
-  font-size: 11px;
-  font-weight: 720;
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .form-heading h2 {
@@ -276,7 +306,23 @@ async function handleSubmit() {
 }
 
 .register-card :deep(.van-field__label) {
+  /* “确认密码”四字标签的最小宽度，保证不折行 */
+  width: 60px;
+}
+
+.register-card :deep(.van-field__control) {
+  font-size: 16px;
+}
+
+.register-card :deep(.van-field__right-icon) {
+  /* 明密文切换小眼睛：命中区 ≥44px，负边距抵消占位、不撑高单元格 */
+  display: inline-flex;
   width: 44px;
+  height: 44px;
+  align-items: center;
+  justify-content: center;
+  margin: -10px -12px -10px 0;
+  color: var(--fresh-muted);
 }
 
 .gentle-note {
@@ -309,7 +355,7 @@ async function handleSubmit() {
 .gentle-note p {
   margin: 0;
   color: var(--fresh-muted);
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1.55;
 }
 

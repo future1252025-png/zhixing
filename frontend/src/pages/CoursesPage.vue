@@ -1,73 +1,236 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
-import { isAxiosError } from 'axios'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { showConfirmDialog, showFailToast, showSuccessToast } from 'vant'
 import { useRouter } from 'vue-router'
 
-import { deleteCourse, getCourses } from '@/api/courses'
+import { deleteCourse } from '@/api/courses'
+import { extractBusinessError } from '@/api/errors'
 import TechIcon from '@/components/TechIcon.vue'
+import SemesterSettingsCard from '@/components/course/SemesterSettingsCard.vue'
+import { useAuthStore } from '@/stores/auth'
+import { useCoursesStore } from '@/stores/courses'
+import { useSemesterStore } from '@/stores/semester'
 import type { Course } from '@/types/course'
+import type { SemesterUpdate } from '@/types/semester'
 import {
   buildCourseCreateQuery,
   buildCourseColorMap,
+  courseUsesStandardSlotTime,
   filterCoursesByWeek,
+  formatCourseLocation,
+  formatTimetableCourseLocation,
+  getCourseDisplaySlot,
   getCourseTimeSlots,
+  getWeekdayLabel,
   getQuickWeekOptions,
   getTeachingWeekOptions,
-  readSelectedWeek,
-  WEEKDAYS,
-  writeSelectedWeek
+  WEEKDAYS
 } from '@/utils/course'
 
 const router = useRouter()
+const authStore = useAuthStore()
+const coursesStore = useCoursesStore()
+const semesterStore = useSemesterStore()
 const courses = ref<Course[]>([])
 const loading = ref(true)
 const deletingId = ref<number | null>(null)
 const activeCourse = ref<Course | null>(null)
 const actionSheetVisible = ref(false)
+const timetableGridRef = ref<HTMLElement | null>(null)
+const timetableTransitionFrameRef = ref<HTMLElement | null>(null)
+const courseCardHeight = ref(170)
+const weekStageLockedHeight = ref<number | null>(null)
+const weekTransitionName = ref<'week-forward' | 'week-backward'>('week-forward')
 const errorMessage = ref('')
-const selectedWeek = ref(
-  typeof window === 'undefined' ? 1 : readSelectedWeek(window.localStorage)
+const semesterErrorMessage = ref('')
+let weekScrollTop: number | null = null
+let weekScrollRestoreFrame: number | undefined
+const selectedWeek = computed({
+  get: () => semesterStore.browsingWeek,
+  set: (week: number) => {
+    if (week === semesterStore.browsingWeek) return
+    prepareWeekTransition()
+    weekTransitionName.value = week > semesterStore.browsingWeek
+      ? 'week-forward'
+      : 'week-backward'
+    semesterStore.setBrowsingWeek(week)
+    void nextTick().then(() => {
+      restoreWeekScrollPosition()
+      scheduleWeekScrollRestore()
+    })
+  }
+})
+const weekOptions = computed(() =>
+  getTeachingWeekOptions(semesterStore.totalWeeks ?? undefined)
 )
-const weekOptions = getTeachingWeekOptions()
 const timeSlots = getCourseTimeSlots()
 const courseActionOptions = [
+  { name: '查看地点', subname: '打开地图与地点频道' },
   { name: '编辑课程' },
   { name: '删除课程', color: '#b65f56' }
 ]
 const visibleCourses = computed(() => filterCoursesByWeek(courses.value, selectedWeek.value))
-const orderedVisibleCourses = computed(() =>
-  [...visibleCourses.value].sort((left, right) =>
-    left.weekday - right.weekday ||
-    left.start_time.localeCompare(right.start_time) ||
-    left.id - right.id
+const pendingScheduleCourses = computed(() =>
+  visibleCourses.value
+    .filter((course) => !course.start_time || !course.end_time)
+    .sort((left, right) => left.weekday - right.weekday || left.id - right.id)
+)
+const timetableCoursesByCell = computed(() => {
+  const coursesByCell = new Map<string, Course[]>()
+  for (const course of visibleCourses.value) {
+    const slot = getCourseDisplaySlot(course)
+    if (!slot) continue
+    const key = `${slot.section}-${course.weekday}`
+    const cellCourses = coursesByCell.get(key) ?? []
+    cellCourses.push(course)
+    cellCourses.sort((left, right) =>
+      (left.start_time ?? '').localeCompare(right.start_time ?? '') || left.id - right.id
+    )
+    coursesByCell.set(key, cellCourses)
+  }
+  return coursesByCell
+})
+const activeCourseDescription = computed(() => {
+  if (!activeCourse.value) return ''
+  return [
+    activeCourse.value.teacher ? `教师：${activeCourse.value.teacher}` : '',
+    formatCourseLocation(activeCourse.value)
+  ].filter(Boolean).join(' · ')
+})
+const quickWeekOptions = computed(() =>
+  getQuickWeekOptions(
+    selectedWeek.value,
+    5,
+    semesterStore.totalWeeks ?? undefined
   )
 )
-const quickWeekOptions = computed(() => getQuickWeekOptions(selectedWeek.value))
-const courseColorMap = computed(() => buildCourseColorMap(visibleCourses.value))
+const courseColorMap = computed(() => buildCourseColorMap(courses.value))
 const courseCountText = computed(() =>
   visibleCourses.value.length > 0 ? `${visibleCourses.value.length} 门课` : '本周暂无课'
 )
+const todayWeekday = computed(() => {
+  const day = new Date().getDay()
+  return day === 0 ? 7 : day
+})
+// 当前时刻（分钟精度），驱动"此刻正在上的节次"呼吸高亮
+const nowMinutes = ref(getMinutesOfDay())
+let nowTimer: ReturnType<typeof setInterval> | undefined
+let timetableResizeObserver: ResizeObserver | undefined
+let courseHeightFrame: number | undefined
+let observedGridWidth = 0
+
+function getMinutesOfDay(): number {
+  const now = new Date()
+  return now.getHours() * 60 + now.getMinutes()
+}
+
+function toMinutes(time: string): number {
+  const [hour, minute] = time.split(':').map(Number)
+  return (hour || 0) * 60 + (minute || 0)
+}
+
+function isNowSlot(weekday: number, slot: { start_time: string; end_time: string }): boolean {
+  return (
+    isTodayColumn(weekday) &&
+    nowMinutes.value >= toMinutes(slot.start_time) &&
+    nowMinutes.value < toMinutes(slot.end_time)
+  )
+}
+
+// 左右滑动切周：横向位移明显大于纵向才触发，避免与纵向滚动打架
+let touchStartX = 0
+let touchStartY = 0
+
+function handleWeekTouchStart(event: TouchEvent) {
+  touchStartX = event.touches[0]?.clientX ?? 0
+  touchStartY = event.touches[0]?.clientY ?? 0
+}
+
+function handleWeekTouchEnd(event: TouchEvent) {
+  const touch = event.changedTouches[0]
+  if (!touch) return
+  const deltaX = touch.clientX - touchStartX
+  const deltaY = touch.clientY - touchStartY
+  if (Math.abs(deltaX) < 64 || Math.abs(deltaX) < Math.abs(deltaY) * 1.4) return
+  const nextWeek = selectedWeek.value + (deltaX < 0 ? 1 : -1)
+  if (weekOptions.value.includes(nextWeek)) {
+    selectedWeek.value = nextWeek
+  }
+}
+const selectedWeekDates = computed(() => {
+  const startDate = semesterStore.semester?.start_date
+  if (!startDate) {
+    return WEEKDAYS.map((weekday) => ({
+      iso: '',
+      label: String(weekday.value)
+    }))
+  }
+
+  const [year, month, day] = startDate.split('-').map(Number)
+  const semesterStart = new Date(year, month - 1, day)
+  return WEEKDAYS.map((weekday) => {
+    const date = new Date(semesterStart)
+    date.setDate(date.getDate() + (selectedWeek.value - 1) * 7 + weekday.value - 1)
+    return {
+      iso: [
+        date.getFullYear(),
+        String(date.getMonth() + 1).padStart(2, '0'),
+        String(date.getDate()).padStart(2, '0')
+      ].join('-'),
+      label: `${date.getMonth() + 1}/${date.getDate()}`
+    }
+  })
+})
+const selectedWeekDateRange = computed(() => {
+  const first = selectedWeekDates.value[0]
+  const last = selectedWeekDates.value[6]
+  if (!first?.iso || !last?.iso) return '周一至周日'
+  return `${first.iso.replace(/-/g, '.')} — ${last.iso.replace(/-/g, '.')}`
+})
+
+function isTodayColumn(weekday: number): boolean {
+  return semesterStore.currentWeek === selectedWeek.value && weekday === todayWeekday.value
+}
 
 function getErrorMessage(error: unknown): string {
-  if (isAxiosError(error)) {
-    const detail = error.response?.data?.detail
-    if (typeof detail === 'string') {
-      return detail
-    }
-  }
-  return '课程请求失败，请稍后重试'
+  return extractBusinessError(error).message
 }
 
 async function loadCourses() {
   loading.value = true
   errorMessage.value = ''
   try {
-    courses.value = await getCourses()
+    courses.value = await coursesStore.ensureLoaded()
   } catch (error) {
     errorMessage.value = getErrorMessage(error)
   } finally {
     loading.value = false
+  }
+}
+
+async function loadSemester() {
+  const userId = authStore.currentUser?.id
+  if (!userId) {
+    semesterErrorMessage.value = '登录信息尚未加载完成'
+    return
+  }
+  semesterErrorMessage.value = ''
+  try {
+    await semesterStore.load(userId)
+  } catch (error) {
+    semesterErrorMessage.value = getErrorMessage(error)
+  }
+}
+
+async function saveSemesterSetting(payload: SemesterUpdate) {
+  semesterErrorMessage.value = ''
+  try {
+    await semesterStore.save(payload)
+    showSuccessToast('学期设置已保存')
+  } catch (error) {
+    const message = getErrorMessage(error)
+    semesterErrorMessage.value = message
+    showFailToast(message)
   }
 }
 
@@ -91,26 +254,77 @@ function openCreateForSlot(weekday: number, slot: { start_time: string; end_time
   openCreatePage(buildCourseCreateQuery(weekday, slot, selectedWeek.value))
 }
 
-function getCellCourses(weekday: number, slot: { start_time: string; end_time: string }) {
-  return visibleCourses.value
-    .filter(
-      (course) =>
-        course.weekday === weekday &&
-        course.start_time < slot.end_time &&
-        course.end_time > slot.start_time
-    )
-    .sort((left, right) => {
-      if (left.start_time === right.start_time) {
-        return left.id - right.id
-      }
-      return left.start_time.localeCompare(right.start_time)
-    })
+function getCellCourses(weekday: number, slot: { section: string }) {
+  return timetableCoursesByCell.value.get(`${slot.section}-${weekday}`) ?? []
 }
 
 function getCourseStyle(course: Course): Record<string, string> {
   return {
-    '--course-accent': courseColorMap.value[course.id] ?? '#678f70'
+    '--course-accent': courseColorMap.value[course.id] ?? 'var(--fresh-green)'
   }
+}
+
+async function syncCourseCardHeight() {
+  courseCardHeight.value = 170
+  await nextTick()
+  const contents = timetableGridRef.value?.querySelectorAll<HTMLElement>('.course-content')
+  if (!contents?.length) return
+
+  courseCardHeight.value = Math.max(
+    170,
+    ...Array.from(contents, (content) => Math.ceil(content.scrollHeight + 2))
+  )
+}
+
+function scheduleCourseCardHeightSync() {
+  if (courseHeightFrame !== undefined) return
+  courseHeightFrame = window.requestAnimationFrame(() => {
+    courseHeightFrame = undefined
+    void syncCourseCardHeight()
+  })
+}
+
+function prepareWeekTransition() {
+  weekScrollTop = window.scrollY
+  weekStageLockedHeight.value =
+    timetableTransitionFrameRef.value?.getBoundingClientRect().height ?? null
+  if (weekScrollRestoreFrame !== undefined) {
+    window.cancelAnimationFrame(weekScrollRestoreFrame)
+    weekScrollRestoreFrame = undefined
+  }
+}
+
+function restoreWeekScrollPosition() {
+  if (weekScrollTop === null) return
+  window.scrollTo({
+    left: window.scrollX,
+    top: weekScrollTop,
+    behavior: 'auto'
+  })
+}
+
+function scheduleWeekScrollRestore() {
+  if (weekScrollTop === null || weekScrollRestoreFrame !== undefined) return
+  weekScrollRestoreFrame = window.requestAnimationFrame(() => {
+    weekScrollRestoreFrame = undefined
+    restoreWeekScrollPosition()
+  })
+}
+
+function finishWeekTransition() {
+  restoreWeekScrollPosition()
+  weekStageLockedHeight.value = null
+  void nextTick().then(() => {
+    if (weekScrollTop === null) return
+    if (weekScrollRestoreFrame !== undefined) {
+      window.cancelAnimationFrame(weekScrollRestoreFrame)
+    }
+    weekScrollRestoreFrame = window.requestAnimationFrame(() => {
+      weekScrollRestoreFrame = undefined
+      restoreWeekScrollPosition()
+      weekScrollTop = null
+    })
+  })
 }
 
 function openCourseActions(course: Course) {
@@ -122,6 +336,14 @@ async function handleCourseAction(action: { name: string }) {
   const course = activeCourse.value
   actionSheetVisible.value = false
   if (!course) return
+  if (action.name === '查看地点') {
+    if (!course.building_id || !course.building) {
+      showFailToast('这个上课地点还未匹配校园地图，请先补全地点后再打开')
+      openEditPage(course.id)
+      return
+    }
+    router.push(`/buildings/${course.building_id}`)
+  }
   if (action.name === '编辑课程') {
     openEditPage(course.id)
   }
@@ -143,6 +365,7 @@ async function confirmDelete(course: Course) {
   deletingId.value = course.id
   try {
     await deleteCourse(course.id)
+    coursesStore.invalidate()
     showSuccessToast('课程已删除')
     await loadCourses()
   } catch (error) {
@@ -152,19 +375,77 @@ async function confirmDelete(course: Course) {
   }
 }
 
-watch(selectedWeek, (week) => {
-  if (typeof window !== 'undefined') {
-    writeSelectedWeek(window.localStorage, week)
+watch(
+  () => authStore.currentUser?.id,
+  (userId, previousUserId) => {
+    if (userId && userId !== previousUserId) {
+      void loadSemester()
+    }
   }
+)
+
+watch(visibleCourses, () => {
+  void syncCourseCardHeight()
+}, { flush: 'post' })
+
+watch(timetableGridRef, (grid) => {
+  timetableResizeObserver?.disconnect()
+  timetableResizeObserver = undefined
+  observedGridWidth = 0
+  if (!grid || typeof ResizeObserver === 'undefined') return
+
+  timetableResizeObserver = new ResizeObserver(([entry]) => {
+    const width = entry?.contentRect.width ?? 0
+    if (Math.abs(width - observedGridWidth) < 1) return
+    observedGridWidth = width
+    scheduleCourseCardHeightSync()
+  })
+  timetableResizeObserver.observe(grid)
+}, { flush: 'post' })
+
+onMounted(() => {
+  void Promise.all([loadCourses(), loadSemester()])
+  nowTimer = setInterval(() => {
+    nowMinutes.value = getMinutesOfDay()
+  }, 60_000)
 })
 
-onMounted(loadCourses)
+onBeforeUnmount(() => {
+  if (nowTimer) clearInterval(nowTimer)
+  timetableResizeObserver?.disconnect()
+  if (courseHeightFrame !== undefined) {
+    window.cancelAnimationFrame(courseHeightFrame)
+  }
+  if (weekScrollRestoreFrame !== undefined) {
+    window.cancelAnimationFrame(weekScrollRestoreFrame)
+  }
+})
 </script>
 
 <template>
   <section class="page courses-page">
     <van-nav-bar title="我的课表" />
     <div class="page-content courses-content">
+      <div v-if="semesterStore.loading" class="semester-loading fresh-card" aria-live="polite">
+        <i aria-hidden="true"></i>
+        <span>正在读取真实教学周...</span>
+      </div>
+      <van-empty
+        v-else-if="semesterErrorMessage && !semesterStore.semester"
+        image="error"
+        :description="semesterErrorMessage"
+      >
+        <van-button type="primary" size="small" @click="loadSemester">重新加载学期</van-button>
+      </van-empty>
+      <SemesterSettingsCard
+        v-else
+        id="semester-settings"
+        v-reveal="{ from: 'right', distance: 32 }"
+        :semester="semesterStore.semester"
+        :saving="semesterStore.saving"
+        @save="saveSemesterSetting"
+      />
+
       <header
         v-reveal="{ from: 'left', distance: 38, stagger: 55 }"
         class="course-hero"
@@ -174,9 +455,9 @@ onMounted(loadCourses)
           <span class="fresh-kicker">这一周，慢慢来</span>
           <div class="week-number">
             <strong>{{ String(selectedWeek).padStart(2, '0') }}</strong>
-            <span>第 {{ selectedWeek }} 周</span>
+            <span>浏览第 {{ selectedWeek }} 周</span>
           </div>
-          <p>{{ courseCountText }} · 点课程可以编辑，点空白格可以添加</p>
+          <p>{{ courseCountText }} · 点课程查看地点或编辑，点空白格添加</p>
         </div>
         <div class="course-actions">
           <button type="button" @click="openImportPage">
@@ -201,12 +482,16 @@ onMounted(loadCourses)
             <small>左右几周可以快速切换</small>
           </div>
           <label for="courseWeekSelect">
-            <select id="courseWeekSelect" v-model.number="selectedWeek">
+            <select
+              id="courseWeekSelect"
+              v-model.number="selectedWeek"
+              aria-label="选择浏览教学周"
+            >
               <option v-for="week in weekOptions" :key="week" :value="week">
                 第 {{ week }} 周
               </option>
             </select>
-            <van-icon name="arrow-down" />
+            <TechIcon name="chevron-down" :size="15" />
           </label>
         </div>
 
@@ -235,139 +520,195 @@ onMounted(loadCourses)
         <van-button type="primary" size="small" @click="loadCourses">重新加载</van-button>
       </van-empty>
 
-      <van-empty v-else-if="courses.length === 0" description="还没有课程安排">
-        <van-button type="primary" size="small" @click="openCreateForCurrentWeek">
-          添加第一门课程
-        </van-button>
-      </van-empty>
-
       <section
-        v-else
+        v-else-if="courses.length === 0"
         v-reveal="{ from: 'left', distance: 42 }"
-        class="timetable-shell fresh-card"
+        class="courses-empty fresh-card"
+        aria-label="课表为空"
       >
-        <header class="table-heading">
-          <div><h2>一周课表</h2><p>横向滑动，看看每天的安排</p></div>
-          <span><i></i> 第 {{ selectedWeek }} 周</span>
-        </header>
-
-        <div class="table-scroll-hint" aria-hidden="true">
-          <span>向左滑动查看更多</span>
-          <i></i>
+        <div class="courses-empty-art" aria-hidden="true">
+          <i class="art-page"></i>
+          <i class="art-leaf art-leaf-1"></i>
+          <i class="art-leaf art-leaf-2"></i>
+          <i class="art-dot"></i>
         </div>
-
-        <div class="timetable-viewport" tabindex="0" aria-label="可横向滚动的周课表">
-          <div class="timetable-grid" role="grid" aria-label="周课表">
-            <div class="time-head" role="columnheader">
-              <span>时间</span>
-            </div>
-            <div
-              v-for="weekday in WEEKDAYS"
-              :key="weekday.value"
-              class="weekday-head"
-              role="columnheader"
-            >
-              <small>{{ weekday.label.slice(-1) }}</small>
-              <span>{{ weekday.value }}</span>
-            </div>
-
-            <template v-for="slot in timeSlots" :key="slot.section">
-              <div class="time-cell" role="rowheader">
-                <strong>{{ slot.section }}</strong>
-                <time>{{ slot.start_time }}</time>
-                <i></i>
-                <time>{{ slot.end_time }}</time>
-              </div>
-
-              <div
-                v-for="weekday in WEEKDAYS"
-                :key="`${slot.section}-${weekday.value}`"
-                class="course-cell"
-                :class="{ 'has-course': getCellCourses(weekday.value, slot).length > 0 }"
-                role="gridcell"
-              >
-                <button
-                  v-if="getCellCourses(weekday.value, slot).length === 0"
-                  type="button"
-                  class="empty-cell-button"
-                  aria-label="在此时间添加课程"
-                  @click="openCreateForSlot(weekday.value, slot)"
-                >
-                  <span aria-hidden="true">＋</span>
-                </button>
-
-                <article
-                  v-for="course in getCellCourses(weekday.value, slot)"
-                  :key="course.id"
-                  class="timetable-course"
-                  :class="{ 'is-deleting': deletingId === course.id }"
-                  :style="getCourseStyle(course)"
-                >
-                  <button
-                    type="button"
-                    class="course-content"
-                    :disabled="deletingId === course.id"
-                    @click="openCourseActions(course)"
-                  >
-                    <strong>{{ course.course_name }}</strong>
-                    <span class="compact-location">
-                      <van-icon name="location-o" />
-                      <span>
-                        <b>{{ course.building.name }}</b>
-                        <small>{{ course.room_name }}</small>
-                      </span>
-                    </span>
-                    <time>{{ course.start_time }}—{{ course.end_time }}</time>
-                  </button>
-                </article>
-              </div>
-            </template>
-          </div>
-        </div>
-
-        <section v-if="orderedVisibleCourses.length" class="course-place-index">
-          <header>
-            <div>
-              <span>地点清单</span>
-              <h3>这周要去哪里上课</h3>
-            </div>
-            <small>建筑与教室完整显示</small>
-          </header>
-
-          <div class="place-course-list">
-            <button
-              v-for="course in orderedVisibleCourses"
-              :key="`place-${course.id}`"
-              type="button"
-              :disabled="deletingId === course.id"
-              @click="openCourseActions(course)"
-            >
-              <span class="place-day">{{ WEEKDAYS[course.weekday - 1]?.label || `周${course.weekday}` }}</span>
-              <span class="place-course-copy">
-                <strong>{{ course.course_name }}</strong>
-                <span>
-                  <van-icon name="location-o" />
-                  <b>{{ course.building.name }}</b>
-                </span>
-                <small>教室 {{ course.room_name }}</small>
-              </span>
-              <time>{{ course.start_time }}</time>
-            </button>
-          </div>
-        </section>
-
-        <div v-if="visibleCourses.length === 0" class="empty-week">
-          <span><TechIcon name="calendar" :size="22" /></span>
-          <div>
-            <strong>这一周还没有安排</strong>
-            <p>点课表里的空白位置，就能添加课程。</p>
-          </div>
-          <button type="button" @click="openCreateForCurrentWeek">添加课程</button>
+        <h2>课表还空着呢</h2>
+        <p>从教务系统文本一键导入整学期课表，<br />也可以先手动添加一门试试。</p>
+        <div class="courses-empty-actions">
+          <van-button type="primary" @click="openImportPage">
+            <TechIcon name="upload" :size="17" />
+            <span>导入课表</span>
+          </van-button>
+          <van-button plain @click="openCreateForCurrentWeek">手动添加</van-button>
         </div>
       </section>
 
+      <template v-else>
+        <section
+          v-if="pendingScheduleCourses.length"
+          class="pending-courses fresh-card"
+          aria-labelledby="pending-courses-title"
+        >
+          <header>
+            <div>
+              <span>暂不占用课表时段</span>
+              <h2 id="pending-courses-title">待补全课程</h2>
+            </div>
+            <b>{{ pendingScheduleCourses.length }} 门</b>
+          </header>
+          <article
+            v-for="course in pendingScheduleCourses"
+            :key="course.id"
+            :class="{ 'is-deleting': deletingId === course.id }"
+          >
+            <div>
+              <small>{{ getWeekdayLabel(course.weekday) }} · 时间待补充</small>
+              <strong>{{ course.course_name }}</strong>
+              <span v-if="course.teacher" class="pending-teacher">教师：{{ course.teacher }}</span>
+              <span>{{ formatCourseLocation(course) }}</span>
+            </div>
+            <footer>
+              <button type="button" @click="openEditPage(course.id)">补全</button>
+              <button
+                type="button"
+                class="pending-delete"
+                :disabled="deletingId === course.id"
+                @click="confirmDelete(course)"
+              >
+                删除
+              </button>
+            </footer>
+          </article>
+        </section>
+
+        <section
+          v-reveal="{ from: 'left', distance: 42 }"
+          class="timetable-shell fresh-card"
+        >
+        <header class="table-heading">
+          <div><h2>第 {{ selectedWeek }} 周课表</h2><p>{{ selectedWeekDateRange }}</p></div>
+          <span><i></i> {{ courseCountText }}</span>
+        </header>
+
+        <div
+          ref="timetableTransitionFrameRef"
+          class="timetable-transition-frame"
+          :style="weekStageLockedHeight === null
+            ? undefined
+            : { minHeight: `${weekStageLockedHeight}px` }"
+        >
+          <Transition
+            :name="weekTransitionName"
+            @after-enter="finishWeekTransition"
+            @enter-cancelled="finishWeekTransition"
+          >
+            <div
+              :key="selectedWeek"
+              class="timetable-week-stage"
+              :data-week="selectedWeek"
+              @touchstart.passive="handleWeekTouchStart"
+              @touchend.passive="handleWeekTouchEnd"
+            >
+              <div class="timetable-viewport" aria-label="完整展示周一到周日的周课表">
+              <div class="week-head" aria-hidden="true">
+                <div class="time-head"><span>时间</span></div>
+                <div
+                  v-for="weekday in WEEKDAYS"
+                  :key="weekday.value"
+                  class="weekday-head"
+                  :class="{ 'is-today': isTodayColumn(weekday.value) }"
+                >
+                  <small>{{ weekday.label.slice(-1) }}</small>
+                  <time
+                    v-if="selectedWeekDates[weekday.value - 1]?.iso"
+                    :datetime="selectedWeekDates[weekday.value - 1].iso"
+                  >
+                    {{ selectedWeekDates[weekday.value - 1].label }}
+                  </time>
+                  <span v-else>{{ weekday.value }}</span>
+                  <em v-if="isTodayColumn(weekday.value)">今</em>
+                </div>
+              </div>
+
+              <div
+                ref="timetableGridRef"
+                class="timetable-grid"
+                :style="{ '--course-card-height': `${courseCardHeight}px` }"
+              >
+                <section
+                  v-for="slot in timeSlots"
+                  :key="slot.section"
+                  class="timetable-slot"
+                >
+                  <header class="time-cell">
+                    <strong>{{ slot.section }}</strong>
+                    <span><time>{{ slot.start_time }}</time><i></i><time>{{ slot.end_time }}</time></span>
+                  </header>
+
+                  <div class="slot-days">
+                    <div
+                      v-for="weekday in WEEKDAYS"
+                      :key="`${slot.section}-${weekday.value}`"
+                      class="course-cell"
+                      :class="{
+                        'has-course': getCellCourses(weekday.value, slot).length > 0,
+                        'is-today': isTodayColumn(weekday.value),
+                        'is-now': isNowSlot(weekday.value, slot)
+                      }"
+                    >
+                      <button
+                        v-if="getCellCourses(weekday.value, slot).length === 0"
+                        type="button"
+                        class="empty-cell-button"
+                        :aria-label="`${weekday.label}${slot.label}添加课程`"
+                        @click="openCreateForSlot(weekday.value, slot)"
+                      >
+                        <span aria-hidden="true">＋</span>
+                      </button>
+
+                      <article
+                        v-for="course in getCellCourses(weekday.value, slot)"
+                        :key="course.id"
+                        class="timetable-course"
+                        :class="{ 'is-deleting': deletingId === course.id }"
+                        :style="getCourseStyle(course)"
+                      >
+                        <button
+                          type="button"
+                          class="course-content"
+                          :aria-label="`${weekday.label}${slot.label}，${course.course_name}${course.teacher ? `，教师${course.teacher}` : ''}，${formatCourseLocation(course)}，点击查看课程操作`"
+                          :disabled="deletingId === course.id"
+                          @click="openCourseActions(course)"
+                        >
+                          <strong>{{ course.course_name }}</strong>
+                          <span v-if="course.teacher" class="compact-teacher">
+                            {{ course.teacher }}
+                          </span>
+                          <span class="compact-location">
+                            <span class="location-mark" aria-hidden="true">@</span>
+                            <span>{{ formatTimetableCourseLocation(course) }}</span>
+                          </span>
+                          <time v-if="!courseUsesStandardSlotTime(course, slot)" class="exception-time">
+                            {{ course.start_time }}—{{ course.end_time }}
+                          </time>
+                        </button>
+                      </article>
+                    </div>
+                  </div>
+                </section>
+              </div>
+              </div>
+            </div>
+          </Transition>
+        </div>
+        </section>
+      </template>
+
       <van-action-sheet
         v-model:show="actionSheetVisible"
+        class="course-action-sheet"
+        :title="activeCourse?.course_name"
+        :description="activeCourseDescription"
         :actions="courseActionOptions"
         cancel-text="取消"
         close-on-click-action
@@ -379,9 +720,10 @@ onMounted(loadCourses)
 
 <style scoped>
 .courses-page {
+  overflow-anchor: none;
   background:
-    radial-gradient(circle at 105% 4%, rgba(183, 167, 200, 0.15), transparent 18rem),
-    radial-gradient(circle at -10% 48%, rgba(127, 168, 122, 0.12), transparent 19rem);
+    radial-gradient(circle at 100% 0%, rgba(153, 166, 215, 0.18), transparent 24rem),
+    linear-gradient(180deg, #f8f8f2 0%, #eef2f7 46%, #e7edf6 100%);
 }
 
 .courses-content {
@@ -389,18 +731,38 @@ onMounted(loadCourses)
   gap: 17px;
 }
 
+.semester-loading {
+  display: flex;
+  min-height: 74px;
+  align-items: center;
+  justify-content: center;
+  gap: 11px;
+  color: var(--fresh-green-dark);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.semester-loading i {
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgba(76, 119, 84, .24);
+  border-top-color: var(--fresh-green);
+  border-radius: 50%;
+  animation: semester-loading-spin 900ms linear infinite;
+}
+
 .course-hero {
   position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  min-height: 244px;
+  min-height: 168px;
   align-items: end;
   overflow: hidden;
-  border-radius: 33px 33px 25px 33px;
+  border-radius: 28px 28px 22px 28px;
   background:
     linear-gradient(155deg, rgba(255, 255, 255, 0.38), transparent 45%),
-    #e6eee0;
-  padding: 23px;
+    var(--fresh-mint);
+  padding: 18px;
   box-shadow: var(--fresh-shadow-soft);
 }
 
@@ -423,29 +785,29 @@ onMounted(loadCourses)
 .week-number {
   display: flex;
   align-items: flex-end;
-  gap: 13px;
-  margin-top: 16px;
+  gap: 10px;
+  margin-top: 10px;
 }
 
 .week-number strong {
   color: var(--fresh-ink);
-  font-family: "STKaiti", "KaiTi", "PingFang SC", sans-serif;
-  font-size: clamp(60px, 17vw, 83px);
-  font-weight: 690;
-  line-height: 0.78;
-  letter-spacing: -0.08em;
+  font-family: var(--font-serif);
+  font-size: clamp(40px, 12vw, 52px);
+  font-weight: 600;
+  line-height: 0.85;
+  letter-spacing: -0.06em;
 }
 
 .week-number span {
   color: var(--fresh-green-dark);
   font-size: 13px;
-  font-weight: 760;
+  font-weight: 700;
 }
 
 .course-hero-copy p {
-  margin: 18px 0 0;
+  margin: 12px 0 0;
   color: var(--fresh-text);
-  font-size: 11px;
+  font-size: 13px;
 }
 
 .course-actions {
@@ -458,17 +820,17 @@ onMounted(loadCourses)
 
 .course-actions button {
   display: flex;
-  min-height: 39px;
+  min-height: 44px;
   align-items: center;
   gap: 6px;
   border: 1px solid rgba(79, 125, 88, 0.17);
-  border-radius: 14px;
+  border-radius: var(--radius-sm);
   background: rgba(255, 255, 255, 0.56);
   color: var(--fresh-green-dark);
   cursor: pointer;
-  font-size: 10px;
-  font-weight: 720;
-  padding: 0 10px;
+  font-size: 13px;
+  font-weight: 700;
+  padding: 0 12px;
 }
 
 .course-actions button:last-child {
@@ -520,12 +882,12 @@ onMounted(loadCourses)
 .week-book-heading span {
   color: var(--fresh-ink);
   font-size: 15px;
-  font-weight: 750;
+  font-weight: 700;
 }
 
 .week-book-heading small {
   color: var(--fresh-muted);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .week-book-heading label {
@@ -545,8 +907,8 @@ onMounted(loadCourses)
   outline: none;
   background: transparent;
   color: inherit;
-  font-size: 11px;
-  font-weight: 720;
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .week-switcher {
@@ -564,21 +926,27 @@ onMounted(loadCourses)
   justify-items: center;
   overflow: hidden;
   border: 1px solid var(--fresh-line);
-  border-radius: 18px;
-  background: #fafbf6;
+  border-radius: var(--radius-md);
+  background: var(--fresh-paper-2);
   color: var(--fresh-muted);
   cursor: pointer;
+  transition:
+    background 320ms var(--fresh-spring),
+    border-color 320ms var(--fresh-spring),
+    box-shadow 320ms var(--fresh-spring),
+    color 320ms var(--fresh-spring),
+    transform 320ms var(--fresh-spring);
 }
 
 .week-switcher button > span {
   font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
   font-size: 16px;
-  font-weight: 680;
+  font-weight: 600;
 }
 
 .week-switcher button small {
   margin-top: 3px;
-  font-size: 9px;
+  font-size: 12px;
 }
 
 .week-switcher button i {
@@ -588,7 +956,7 @@ onMounted(loadCourses)
   width: 4px;
   height: 4px;
   border-radius: 50%;
-  background: #c2ccc0;
+  background: var(--fresh-line-strong);
 }
 
 .week-switcher button.active {
@@ -596,6 +964,7 @@ onMounted(loadCourses)
   background: var(--fresh-mint);
   color: var(--fresh-green-dark);
   box-shadow: inset 0 0 0 1px rgba(79, 125, 88, 0.06);
+  transform: translateY(-2px);
 }
 
 .week-switcher button.active i {
@@ -612,7 +981,7 @@ onMounted(loadCourses)
   border-radius: var(--fresh-radius);
   background: rgba(255, 253, 248, 0.62);
   color: var(--fresh-muted);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .course-loading > span {
@@ -625,7 +994,7 @@ onMounted(loadCourses)
 .course-loading i {
   width: 6px;
   height: 10px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--fresh-leaf);
   animation: course-load 850ms ease-in-out infinite alternate;
 }
@@ -634,9 +1003,196 @@ onMounted(loadCourses)
 .course-loading i:nth-child(3) { height: 15px; animation-delay: 300ms; }
 .course-loading p { margin: 0; }
 
+/* 零课程空状态：品牌插画 + 导入（主）/手动（次）双入口 */
+.courses-empty {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  padding: 34px 22px 30px;
+  text-align: center;
+}
+
+.courses-empty-art {
+  position: relative;
+  width: 96px;
+  height: 88px;
+  margin-bottom: 8px;
+}
+
+.courses-empty-art .art-page {
+  position: absolute;
+  inset: 6px 14px 0;
+  border: 1.5px solid var(--fresh-line-strong);
+  border-radius: 14px 14px 16px 16px;
+  background:
+    repeating-linear-gradient(
+      180deg,
+      transparent 0 15px,
+      var(--fresh-line) 15px 16.5px
+    ),
+    var(--fresh-paper);
+  transform: rotate(-3deg);
+}
+
+.courses-empty-art .art-leaf {
+  position: absolute;
+  width: 22px;
+  height: 22px;
+  border-radius: 70% 30% 62% 38%;
+  background: var(--fresh-leaf);
+  opacity: 0.85;
+}
+
+.courses-empty-art .art-leaf-1 {
+  top: -4px;
+  right: 2px;
+  transform: rotate(28deg);
+}
+
+.courses-empty-art .art-leaf-2 {
+  bottom: 2px;
+  left: -2px;
+  width: 16px;
+  height: 16px;
+  background: var(--fresh-sun);
+  transform: rotate(-18deg);
+}
+
+.courses-empty-art .art-dot {
+  position: absolute;
+  top: 30%;
+  left: 4px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--fresh-blue);
+  opacity: 0.7;
+}
+
+.courses-empty h2 {
+  margin: 0;
+  color: var(--fresh-ink);
+  font-family: var(--font-serif);
+  font-size: 22px;
+  font-weight: 700;
+}
+
+.courses-empty p {
+  margin: 0;
+  color: var(--fresh-muted);
+  font-size: var(--text-sm);
+  line-height: 1.7;
+}
+
+.courses-empty-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.courses-empty-actions .van-button {
+  min-width: 128px;
+}
+
+.courses-empty-actions .van-button span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pending-courses {
+  display: grid;
+  gap: 12px;
+  padding: 18px;
+}
+
+.pending-courses > header,
+.pending-courses article,
+.pending-courses article footer {
+  display: flex;
+  align-items: center;
+}
+
+.pending-courses > header {
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.pending-courses > header span,
+.pending-courses article small,
+.pending-courses article span {
+  color: var(--fresh-muted);
+  font-size: 12px;
+}
+
+.pending-courses h2 {
+  margin: 3px 0 0;
+  color: var(--fresh-ink);
+  font-size: 20px;
+}
+
+.pending-courses > header b {
+  border-radius: var(--radius-pill);
+  background: var(--cm-amber-soft);
+  color: #775424;
+  font-size: 12px;
+  padding: 7px 10px;
+}
+
+.pending-courses article {
+  justify-content: space-between;
+  gap: 14px;
+  min-width: 0;
+  border: 1px solid var(--fresh-line);
+  border-radius: var(--radius-sm);
+  background: var(--fresh-paper-2);
+  padding: 12px;
+}
+
+.pending-courses article.is-deleting {
+  opacity: .6;
+}
+
+.pending-courses article > div {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.pending-courses article strong,
+.pending-courses article span {
+  overflow-wrap: anywhere;
+}
+
+.pending-courses article footer {
+  flex: 0 0 auto;
+  gap: 7px;
+}
+
+.pending-courses article button {
+  min-height: 42px;
+  border: 1px solid var(--fresh-line-strong);
+  border-radius: 12px;
+  background: var(--fresh-paper);
+  color: var(--fresh-green-dark);
+  font-weight: 700;
+  padding: 0 13px;
+}
+
+.pending-courses article .pending-delete {
+  color: #9a4e47;
+}
+
 .timetable-shell {
-  overflow: hidden;
-  padding: 0 0 11px;
+  --time-rail: clamp(44px, 7vw, 58px);
+  --timetable-width: min(920px, calc(100vw - 12px));
+  position: relative;
+  width: var(--timetable-width);
+  justify-self: start;
+  margin-left: calc((100% - var(--timetable-width)) / 2);
+  overflow: clip;
+  border-radius: 24px;
+  padding: 0 0 8px;
 }
 
 .table-heading {
@@ -644,19 +1200,20 @@ onMounted(loadCourses)
   align-items: flex-end;
   justify-content: space-between;
   gap: 14px;
-  padding: 18px 18px 13px;
+  padding: 17px 18px 14px;
 }
 
 .table-heading h2 {
   margin: 0;
   color: var(--fresh-ink);
-  font-size: 20px;
+  font-size: clamp(20px, 3vw, 25px);
 }
 
 .table-heading p {
   margin: 4px 0 0;
   color: var(--fresh-muted);
-  font-size: 10px;
+  font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
+  font-size: 11px;
 }
 
 .table-heading > span {
@@ -664,8 +1221,8 @@ onMounted(loadCourses)
   align-items: center;
   gap: 6px;
   color: var(--fresh-green-dark);
-  font-size: 10px;
-  font-weight: 720;
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .table-heading > span i {
@@ -675,116 +1232,155 @@ onMounted(loadCourses)
   background: var(--fresh-leaf);
 }
 
-.table-scroll-hint {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 7px;
-  padding: 0 17px 8px;
-  color: var(--fresh-muted);
-  font-size: 8px;
-}
-
-.table-scroll-hint i {
-  width: 24px;
-  height: 1px;
-  background: var(--fresh-green);
-  animation: hint-slide 1.7s ease-in-out infinite;
-}
-
 .timetable-viewport {
-  overflow-x: auto;
-  overscroll-behavior-x: contain;
   border-top: 1px solid var(--fresh-line);
-  outline: none;
-  scroll-padding-left: 58px;
-  scrollbar-color: #aebca9 transparent;
-  scrollbar-width: thin;
-  scroll-snap-type: x proximity;
+  overflow: visible;
 }
 
-.timetable-viewport:focus-visible {
-  box-shadow: inset 0 0 0 3px rgba(79, 125, 88, 0.14);
+.timetable-transition-frame {
+  position: relative;
+  overflow-anchor: none;
 }
 
-.timetable-viewport::-webkit-scrollbar { height: 5px; }
-.timetable-viewport::-webkit-scrollbar-thumb { border-radius: 999px; background: #aebca9; }
+.timetable-week-stage {
+  min-width: 0;
+  transform-origin: center top;
+}
+
+.week-head {
+  position: sticky;
+  /* 导航栏 58px + 刘海安全区，吸顶表头正好贴住导航底边 */
+  top: calc(var(--nav-height, 58px) + var(--app-safe-area-top, env(safe-area-inset-top, 0px)));
+  z-index: 6;
+  display: grid;
+  grid-template-columns: var(--time-rail) repeat(7, minmax(0, 1fr));
+  width: 100%;
+  background: rgba(246, 247, 252, 0.96);
+  box-shadow: 0 6px 14px rgba(62, 76, 99, 0.08);
+  backdrop-filter: blur(12px);
+}
 
 .timetable-grid {
+  --course-card-height: 170px;
   display: grid;
-  grid-template-columns: 58px repeat(7, minmax(96px, 1fr));
-  min-width: 730px;
+  grid-auto-rows: minmax(var(--course-card-height), auto);
   width: 100%;
-  background: #fbfcf8;
+  background: #eef1f7;
+}
+
+.timetable-slot {
+  display: grid;
+  grid-template-columns: var(--time-rail) minmax(0, 1fr);
+  height: 100%;
+  width: 100%;
+  border-bottom: 1px solid rgba(111, 126, 151, 0.16);
+}
+
+.slot-days {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  min-width: 0;
+  align-items: stretch;
 }
 
 .time-head,
 .weekday-head,
 .time-cell,
 .course-cell {
-  border-right: 1px solid #e4e9e0;
-  border-bottom: 1px solid #e4e9e0;
+  border-right: 1px solid rgba(111, 126, 151, 0.14);
 }
 
 .time-head,
 .weekday-head {
-  min-height: 55px;
+  min-height: 62px;
 }
 
 .time-head {
-  position: sticky;
-  left: 0;
-  z-index: 4;
   display: grid;
   place-items: center;
-  background: #edf2e9;
+  background: #e5eaf2;
   color: var(--fresh-green-dark);
-  font-size: 9px;
-  font-weight: 720;
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .weekday-head {
-  display: flex;
+  position: relative;
+  display: grid;
   align-items: center;
   justify-content: center;
-  gap: 5px;
-  background: #f8faf4;
+  align-content: center;
+  gap: 3px;
+  background: #f6f7fb;
   color: var(--fresh-text);
+  text-align: center;
+}
+
+.weekday-head.is-today {
+  background: var(--fresh-mint);
+  color: var(--fresh-green-dark);
+  box-shadow: inset 0 -3px 0 var(--fresh-green);
 }
 
 .weekday-head small {
-  font-size: 11px;
-  font-weight: 720;
+  font-size: clamp(12px, 2vw, 15px);
+  font-weight: 700;
 }
 
-.weekday-head span {
-  color: #a3ada2;
+.weekday-head span,
+.weekday-head time {
+  color: #536158;
   font-family: ui-monospace, monospace;
-  font-size: 8px;
+  font-size: clamp(9px, 1.45vw, 11px);
+}
+
+.weekday-head.is-today span,
+.weekday-head.is-today time {
+  color: var(--fresh-green-dark);
+}
+
+.weekday-head em {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: grid;
+  width: 16px;
+  height: 16px;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--fresh-green);
+  color: #fff;
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 700;
 }
 
 .time-cell {
-  position: sticky;
-  left: 0;
-  z-index: 3;
   display: grid;
-  min-height: 136px;
+  min-height: var(--course-card-height);
   align-content: center;
   justify-items: center;
-  background: #edf2e9;
+  background: #e5eaf2;
   color: var(--fresh-muted);
-  padding: 8px 2px;
+  padding: 8px 1px;
 }
 
 .time-cell strong {
   margin-bottom: 7px;
   color: var(--fresh-green-dark);
   font-family: ui-monospace, monospace;
-  font-size: 17px;
+  font-size: clamp(14px, 2.5vw, 18px);
 }
 
 .time-cell time {
-  font-size: 7px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--fresh-text);
+}
+
+.time-cell > span {
+  display: grid;
+  justify-items: center;
 }
 
 .time-cell i {
@@ -797,16 +1393,51 @@ onMounted(loadCourses)
 .course-cell {
   position: relative;
   display: grid;
-  min-height: 136px;
-  align-content: start;
-  gap: 5px;
-  background: #fbfcf8;
-  padding: 5px;
-  scroll-snap-align: start;
+  min-height: var(--course-card-height);
+  align-content: stretch;
+  grid-auto-rows: var(--course-card-height);
+  gap: 3px;
+  background: rgba(249, 250, 253, 0.78);
+  padding: clamp(2px, 0.7vw, 5px);
+  min-width: 0;
 }
 
 .course-cell.has-course {
-  background: #f8faf5;
+  background: rgba(240, 244, 249, 0.92);
+}
+
+.course-cell.is-today {
+  background: rgba(229, 239, 230, 0.86);
+}
+
+/* 此刻正在上的节次：柔和呼吸描边，只描今日列当前格 */
+.course-cell.is-now::after {
+  position: absolute;
+  inset: 3px;
+  z-index: 2;
+  border: 2px solid color-mix(in srgb, var(--fresh-green) 62%, transparent);
+  border-radius: 12px;
+  content: "";
+  pointer-events: none;
+  animation: now-breathe 2.6s var(--fresh-spring) infinite;
+}
+
+@keyframes now-breathe {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+
+  50% {
+    opacity: 0.85;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .course-cell.is-now::after {
+    opacity: 0.6;
+    animation: none;
+  }
 }
 
 .empty-cell-button {
@@ -823,220 +1454,129 @@ onMounted(loadCourses)
 
 .empty-cell-button span {
   display: grid;
-  width: 24px;
-  height: 24px;
+  width: 28px;
+  height: 28px;
   place-items: center;
   border-radius: 50%;
-  background: #edf4e8;
+  background: #e2e9f0;
   color: #728d70;
-  font-size: 15px;
+  font-size: 16px;
+  opacity: 0;
   transition:
     background 220ms var(--fresh-spring),
     color 220ms var(--fresh-spring),
+    opacity 220ms var(--fresh-spring),
     transform 220ms var(--fresh-spring);
+}
+
+/* 触屏没有 hover，"＋"完全不可见等于没有入口：常驻低透明度，今日列稍亮 */
+@media (hover: none) {
+  .empty-cell-button span {
+    opacity: 0.32;
+  }
+
+  .course-cell.is-today .empty-cell-button span {
+    opacity: 0.55;
+  }
 }
 
 .timetable-course {
   --course-accent: var(--fresh-green);
+  position: relative;
+  box-sizing: border-box;
+  height: 100%;
   min-width: 0;
-  overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--course-accent) 28%, #d8e1d5);
-  border-radius: 14px 14px 11px 14px;
+  border: 1px solid color-mix(in srgb, var(--course-accent) 84%, #dbe3ee);
+  border-radius: clamp(7px, 1.5vw, 12px);
   background:
-    linear-gradient(145deg, color-mix(in srgb, var(--course-accent) 13%, #fffdf8), #fffdf8);
-  box-shadow: 0 6px 16px rgba(49, 72, 49, 0.07);
+    linear-gradient(
+      155deg,
+      color-mix(in srgb, var(--course-accent) 66%, #ffffff),
+      color-mix(in srgb, var(--course-accent) 50%, #f4f7fb)
+    );
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.42),
+    0 4px 10px color-mix(in srgb, var(--course-accent) 22%, transparent);
+  transition:
+    box-shadow 280ms var(--fresh-spring),
+    transform 280ms var(--fresh-spring);
 }
 
 .course-content {
   display: flex;
+  box-sizing: border-box;
   width: 100%;
-  min-height: 124px;
+  height: 100%;
   scroll-margin-block: 76px 108px;
   flex-direction: column;
-  align-items: stretch;
+  align-items: center;
   border: 0;
   background: transparent;
   color: var(--fresh-ink);
   cursor: pointer;
-  padding: 11px 9px;
-  text-align: left;
+  padding: clamp(6px, 1.2vw, 11px) clamp(3px, 1vw, 8px);
+  text-align: center;
 }
 
 .course-content::before {
-  width: 24px;
-  height: 4px;
-  margin-bottom: 9px;
-  border-radius: 999px;
-  background: var(--course-accent);
-  content: "";
+  content: none;
 }
 
 .course-content strong {
-  display: -webkit-box;
-  overflow: hidden;
-  font-size: 11px;
+  color: color-mix(in srgb, var(--course-accent) 18%, #172b21);
+  font-size: clamp(10px, 1.8vw, 14px);
+  line-height: 1.4;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+  text-wrap: balance;
+}
+
+.compact-teacher {
+  display: block;
+  width: 100%;
+  margin-top: 5px;
+  color: color-mix(in srgb, var(--course-accent) 30%, #34483b);
+  font-size: clamp(9px, 1.35vw, 11px);
+  font-weight: 650;
   line-height: 1.35;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+  overflow-wrap: anywhere;
+  text-align: center;
 }
 
 .compact-location {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  align-items: start;
-  gap: 3px;
-  margin-top: 5px;
-  color: var(--fresh-muted);
-  font-size: 8px;
-}
-
-.compact-location > i {
-  margin-top: 1px;
-  color: color-mix(in srgb, var(--course-accent) 76%, var(--fresh-ink));
-}
-
-.compact-location > span {
-  display: grid;
+  display: block;
+  width: 100%;
   min-width: 0;
-  gap: 2px;
-}
-
-.compact-location b {
-  display: -webkit-box;
-  overflow: hidden;
-  font-size: 8px;
-  font-weight: 650;
-  line-height: 1.25;
-  overflow-wrap: anywhere;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-}
-
-.compact-location small {
-  overflow: hidden;
-  color: var(--fresh-ink);
-  font-size: 8px;
-  font-weight: 760;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.course-content time {
   margin-top: auto;
+  color: color-mix(in srgb, var(--course-accent) 38%, #21362a);
+  font-size: clamp(9px, 1.4vw, 12px);
+  line-height: 1.35;
+  text-align: center;
+  text-wrap: pretty;
+}
+
+.location-mark {
+  margin-right: 1px;
+  font-weight: 800;
+}
+
+.compact-location > span:last-child {
+  font-size: inherit;
+  font-weight: 600;
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+
+.course-content .exception-time {
+  margin-top: 5px;
   color: color-mix(in srgb, var(--course-accent) 72%, var(--fresh-ink));
-  font-size: 7px;
-  font-weight: 720;
-}
-
-.course-place-index {
-  margin: 13px 12px 2px;
-  border: 1px solid rgba(83, 119, 82, 0.13);
-  border-radius: 21px;
-  background: #f2f7ed;
-  padding: 14px;
-}
-
-.course-place-index > header {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 10px;
-}
-
-.course-place-index > header span {
-  color: var(--fresh-green);
-  font-size: 9px;
-  font-weight: 760;
-}
-
-.course-place-index h3 {
-  margin: 3px 0 0;
-  color: var(--fresh-ink);
-  font-size: 15px;
-}
-
-.course-place-index > header > small {
-  color: var(--fresh-muted);
-  font-size: 8px;
-}
-
-.place-course-list {
-  display: grid;
-  gap: 8px;
-}
-
-.place-course-list > button {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 10px;
-  border: 1px solid #dfe8dc;
-  border-radius: 16px;
-  background: #fffdf8;
-  color: var(--fresh-ink);
-  cursor: pointer;
-  padding: 10px;
-  text-align: left;
-}
-
-.place-day {
-  display: grid;
-  min-width: 42px;
-  min-height: 35px;
-  place-items: center;
-  border-radius: 12px;
-  background: var(--fresh-mint);
-  color: var(--fresh-green-dark);
-  font-size: 9px;
-  font-weight: 760;
-  padding: 0 7px;
-}
-
-.place-course-copy {
-  display: grid;
-  min-width: 0;
-  gap: 3px;
-}
-
-.place-course-copy > strong {
-  color: var(--fresh-ink);
-  font-size: 11px;
-}
-
-.place-course-copy > span {
-  display: flex;
-  align-items: flex-start;
-  gap: 4px;
-  color: var(--fresh-green-dark);
-  font-size: 10px;
-  line-height: 1.4;
-}
-
-.place-course-copy b {
+  font-size: clamp(9px, 1.4vw, 11px);
   font-weight: 700;
-  overflow-wrap: anywhere;
-}
-
-.place-course-copy small {
-  color: var(--fresh-text);
-  font-size: 9px;
-  font-weight: 700;
-}
-
-.place-course-list time {
-  align-self: start;
-  border-radius: 9px;
-  background: #eef3e9;
-  color: var(--fresh-text);
-  font-size: 9px;
-  font-weight: 720;
-  padding: 6px 7px;
 }
 
 .timetable-course.is-deleting {
-  border-color: #d7ddd3;
-  background: #eef0eb;
+  border-color: var(--fresh-line);
+  background: var(--disabled-surface);
   filter: grayscale(0.5);
 }
 
@@ -1045,46 +1585,59 @@ onMounted(loadCourses)
   cursor: wait;
 }
 
-.empty-week {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  gap: 10px;
-  align-items: center;
-  margin: 12px;
-  border-radius: 18px;
-  background: var(--fresh-mint);
-  padding: 12px;
+:global(.course-action-sheet) {
+  --van-action-sheet-description-color: var(--text-secondary);
+  --van-action-sheet-subname-color: var(--text-secondary);
 }
 
-.empty-week > span {
-  display: grid;
-  width: 38px;
-  height: 38px;
-  place-items: center;
-  border-radius: 14px;
-  background: #fff;
-  color: var(--fresh-green-dark);
+:global(.course-action-sheet .van-action-sheet__header) {
+  min-height: var(--van-action-sheet-header-height);
+  padding: 13px 46px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
 }
 
-.empty-week strong { color: var(--fresh-ink); font-size: 12px; }
-.empty-week p { margin: 3px 0 0; color: var(--fresh-muted); font-size: 9px; }
+:global(.course-action-sheet .van-action-sheet__description) {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
 
-.empty-week button {
-  min-height: 34px;
-  border: 1px solid #9eb79f;
-  border-radius: 12px;
-  background: #fff;
-  color: var(--fresh-green-dark);
-  cursor: pointer;
-  font-size: 10px;
-  font-weight: 720;
-  padding: 0 10px;
+.week-forward-enter-active,
+.week-forward-leave-active,
+.week-backward-enter-active,
+.week-backward-leave-active {
+  transition:
+    opacity 900ms ease,
+    transform 1150ms var(--fresh-spring);
+}
+
+.week-forward-leave-active,
+.week-backward-leave-active {
+  position: absolute;
+  top: 0;
+  z-index: 1;
+  right: 0;
+  left: 0;
+}
+
+/* 不用 blur：低端 Android 上是掉帧源，位移+透明度已足够表达方向 */
+.week-forward-enter-from,
+.week-backward-leave-to {
+  opacity: 0;
+  transform: translateX(32px) scale(0.985);
+}
+
+.week-forward-leave-to,
+.week-backward-enter-from {
+  opacity: 0;
+  transform: translateX(-32px) scale(0.985);
 }
 
 @media (hover: hover) {
   .empty-cell-button:hover span {
     background: var(--fresh-mint);
     color: var(--fresh-green-dark);
+    opacity: 0.8;
     transform: scale(1.08);
   }
 
@@ -1102,8 +1655,37 @@ onMounted(loadCourses)
   to { transform: scaleY(1.4); }
 }
 
-@keyframes hint-slide {
-  50% { transform: translateX(5px); }
+@keyframes semester-loading-spin {
+  to { transform: rotate(360deg); }
+}
+
+.empty-cell-button:focus-visible span {
+  opacity: 1;
+}
+
+@media (max-width: 500px) {
+  .table-heading {
+    align-items: flex-start;
+    padding: 15px 13px 12px;
+  }
+
+  .table-heading > span {
+    flex: 0 0 auto;
+    padding-top: 5px;
+    font-size: 10px;
+  }
+
+  .weekday-head em {
+    top: 2px;
+    right: 2px;
+    width: 13px;
+    height: 13px;
+    font-size: 8px;
+  }
+
+  .course-cell {
+    padding: 0;
+  }
 }
 
 @media (max-width: 370px) {
@@ -1111,15 +1693,28 @@ onMounted(loadCourses)
   .course-actions button { padding: 0 8px; }
   .week-switcher { gap: 5px; }
   .week-switcher button { min-height: 59px; border-radius: 16px; }
-  .empty-week { grid-template-columns: auto minmax(0, 1fr); }
-  .empty-week button { grid-column: 1 / -1; width: 100%; }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .hero-leaves i,
   .course-loading i,
-  .table-scroll-hint i {
+  .semester-loading i {
     animation: none;
+  }
+
+  .week-forward-enter-active,
+  .week-forward-leave-active,
+  .week-backward-enter-active,
+  .week-backward-leave-active {
+    transition-duration: 1ms;
+  }
+
+  .week-forward-enter-from,
+  .week-forward-leave-to,
+  .week-backward-enter-from,
+  .week-backward-leave-to {
+    filter: none;
+    transform: none;
   }
 }
 </style>

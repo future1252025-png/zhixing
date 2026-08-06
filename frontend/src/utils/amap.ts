@@ -5,12 +5,14 @@ declare global {
   interface Window {
     _AMapSecurityConfig?: {
       securityJsCode?: string
+      serviceHost?: string
     }
   }
 }
 
 const amapKey = import.meta.env.VITE_AMAP_KEY?.trim()
 const amapSecurityCode = import.meta.env.VITE_AMAP_SECURITY_CODE?.trim()
+const amapServiceHost = import.meta.env.VITE_AMAP_SERVICE_HOST?.trim()
 
 let amapPromise: Promise<any> | null = null
 const pluginPromises = new Map<string, Promise<void>>()
@@ -24,16 +26,28 @@ const pluginConstructors: Record<string, string> = {
 }
 
 export function isAMapConfigured(): boolean {
-  return Boolean(amapKey && amapSecurityCode)
+  return Boolean(amapKey && (amapServiceHost || amapSecurityCode))
 }
 
 export async function loadAMapSdk(): Promise<any> {
-  if (!amapKey || !amapSecurityCode) {
+  if (!amapKey || (!amapServiceHost && !amapSecurityCode)) {
     throw new Error('AMap key or security code is missing')
   }
 
-  window._AMapSecurityConfig = {
-    securityJsCode: amapSecurityCode
+  if (amapServiceHost) {
+    // 生产推荐：安全密钥由 Nginx 代理附加，前端不暴露明文密钥。
+    window._AMapSecurityConfig = {
+      serviceHost: amapServiceHost
+    }
+  } else {
+    if (import.meta.env.PROD) {
+      console.warn(
+        '生产环境建议配置 VITE_AMAP_SERVICE_HOST 代理模式，避免明文暴露安全密钥'
+      )
+    }
+    window._AMapSecurityConfig = {
+      securityJsCode: amapSecurityCode
+    }
   }
 
   amapPromise ??= loadAMap({

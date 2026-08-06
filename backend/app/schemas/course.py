@@ -1,12 +1,21 @@
 from datetime import datetime, time
+from typing import Literal
 import re
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    computed_field,
+    field_validator,
+    model_validator,
+)
+
+from app.services.course_policy import location_requires_review
+from app.services.week_rule import normalize_weeks
 
 
 TIME_PATTERN = re.compile(r"^\d{2}:\d{2}$")
-
-
 def parse_course_time(value: str) -> time:
     if not TIME_PATTERN.match(value):
         raise ValueError("Time must use HH:MM format")
@@ -51,34 +60,51 @@ class CourseBase(BaseModel):
     start_time: str
     end_time: str
     building_id: int
-    room_name: str = Field(min_length=1, max_length=64)
+    room_name: str = Field(min_length=1, max_length=120)
     teacher: str | None = Field(default=None, max_length=64)
-    weeks: str | None = Field(default=None, max_length=64)
+    weeks: str = Field(min_length=1, max_length=64)
 
     @field_validator("course_name", "room_name")
     @classmethod
     def normalize_required_fields(cls, value: str) -> str:
         return normalize_required_text(value)
 
-    @field_validator("teacher", "weeks")
+    @field_validator("teacher")
     @classmethod
     def normalize_optional_fields(cls, value: str | None) -> str | None:
         return normalize_optional_text(value)
 
+    @field_validator("weeks")
+    @classmethod
+    def normalize_weeks_field(cls, value: str) -> str:
+        return normalize_weeks(value, max_week=30)
+
     @field_validator("start_time", "end_time")
     @classmethod
-    def validate_time_fields(cls, value: str) -> str:
-        parse_course_time(value)
+    def validate_time_fields(cls, value: str | None) -> str | None:
+        if value is not None:
+            parse_course_time(value)
         return value
 
     @model_validator(mode="after")
     def validate_time_range(self) -> "CourseBase":
-        ensure_end_after_start(self.start_time, self.end_time)
+        if (self.start_time is None) != (self.end_time is None):
+            raise ValueError("start_time and end_time must both be set or both be empty")
+        if self.start_time is not None and self.end_time is not None:
+            ensure_end_after_start(self.start_time, self.end_time)
         return self
 
 
 class CourseCreate(CourseBase):
     pass
+
+
+class CourseImportCreate(CourseBase):
+    """Internal write model for imports whose map building is not known yet."""
+
+    start_time: str | None = None
+    end_time: str | None = None
+    building_id: int | None = Field(default=None, gt=0)
 
 
 class CourseUpdate(BaseModel):
@@ -87,7 +113,7 @@ class CourseUpdate(BaseModel):
     start_time: str | None = None
     end_time: str | None = None
     building_id: int | None = None
-    room_name: str | None = Field(default=None, min_length=1, max_length=64)
+    room_name: str | None = Field(default=None, min_length=1, max_length=120)
     teacher: str | None = Field(default=None, max_length=64)
     weeks: str | None = Field(default=None, max_length=64)
 
@@ -112,10 +138,24 @@ class CourseUpdate(BaseModel):
             return None
         return normalize_required_text(value)
 
-    @field_validator("teacher", "weeks")
+    @field_validator("teacher")
     @classmethod
     def normalize_optional_fields(cls, value: str | None) -> str | None:
         return normalize_optional_text(value)
+
+    @field_validator("weeks", mode="before")
+    @classmethod
+    def reject_null_weeks(cls, value: object) -> object:
+        if value is None:
+            raise ValueError("Field cannot be null")
+        return value
+
+    @field_validator("weeks")
+    @classmethod
+    def normalize_weeks_field(cls, value: str | None) -> str:
+        if value is None:
+            raise ValueError("Field cannot be null")
+        return normalize_weeks(value, max_week=30)
 
     @field_validator("start_time", "end_time")
     @classmethod
@@ -137,11 +177,23 @@ class CourseRead(BaseModel):
     id: int
     course_name: str
     weekday: int
-    start_time: str
-    end_time: str
-    building_id: int
+    start_time: str | None
+    end_time: str | None
+    building_id: int | None
     room_name: str
     teacher: str | None = None
-    weeks: str | None = None
+    weeks: str
+    source_kind: Literal["manual", "import"]
     created_at: datetime
-    building: CourseBuildingRead
+    building: CourseBuildingRead | None
+    source_location: str | None = None
+
+    @computed_field(return_type=bool)
+    @property
+    def needs_location_review(self) -> bool:
+        return (
+            self.building_id is None
+            or self.building is None
+            or not self.room_name.strip()
+            or location_requires_review(self.room_name)
+        )

@@ -1,10 +1,13 @@
 import request from './request'
 import type {
   Course,
-  CourseImportPreviewResponse,
   CoursePayload,
   CourseUpdatePayload
 } from '@/types/course'
+import type {
+  ImportCommitResponse,
+  ImportPreviewResponse
+} from '@/types/courseImport'
 
 export async function getCourses(): Promise<Course[]> {
   const response = await request.get<Course[]>('/api/courses')
@@ -30,11 +33,32 @@ export async function deleteCourse(courseId: number): Promise<void> {
 
 export async function previewCourseImport(
   file: File
-): Promise<CourseImportPreviewResponse> {
+): Promise<ImportPreviewResponse> {
   const formData = new FormData()
   formData.append('file', file)
-  const response = await request.post<CourseImportPreviewResponse>(
+  const response = await request.post<ImportPreviewResponse>(
     '/api/courses/import/preview',
+    formData,
+    {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    }
+  )
+  return response.data
+}
+
+export async function commitCourseImport(
+  file: File,
+  sha256: string,
+  excludedRowRefs: string[] = []
+): Promise<ImportCommitResponse> {
+  const formData = new FormData()
+  formData.append('file', file)
+  formData.append('manifest', JSON.stringify({
+    sha256,
+    ...(excludedRowRefs.length ? { excluded_row_refs: excludedRowRefs } : {})
+  }))
+  const response = await request.post<ImportCommitResponse>(
+    '/api/courses/import',
     formData,
     {
       headers: { 'Content-Type': 'multipart/form-data' }

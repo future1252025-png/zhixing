@@ -4,31 +4,56 @@
   "private": true,
   "type": "module",
   "engines": {
-    "node": ">=20",
+    "node": ">=22",
     "npm": ">=10"
   },
   "scripts": {
     "dev": "vite --host 127.0.0.1",
+    "dev:e2e": "cross-env VITE_API_BASE_URL=http://127.0.0.1:8010 vite --host 127.0.0.1 --port 5179",
+    "build:e2e": "cross-env VITE_API_BASE_URL=http://127.0.0.1:8010 npm run build",
+    "serve:e2e": "npm run build:e2e && vite preview --host 127.0.0.1 --port 5179",
     "build": "vue-tsc --noEmit && vite build",
     "preview": "vite preview --host 127.0.0.1",
-    "test": "vitest run --environment jsdom"
+    "test": "vitest run",
+    "test:e2e": "playwright test",
+    "test:e2e:wide": "cross-env E2E_VIEWPORT_WIDTH=430 E2E_VIEWPORT_HEIGHT=932 playwright test",
+    "build:android": "vue-tsc --noEmit && vite build --mode android",
+    "android:sync": "npm run build:android && cross-env CAPACITOR_ALLOW_MIXED_CONTENT=true cap sync android",
+    "android:test": "cd android && gradlew.bat test",
+    "android:open": "cap open android"
   },
   "dependencies": {
     "@amap/amap-jsapi-loader": "^1.0.1",
-    "animejs": "^4.4.1",
-    "axios": "^1.7.9",
+    "@capacitor/android": "^8.4.2",
+    "@capacitor/core": "^8.4.2",
+    "@capacitor/geolocation": "^8.2.0",
+    "axios": "^1.18.1",
+    "lxgw-wenkai-screen-webfont": "^1.7.0",
     "pinia": "^3.0.0",
-    "vant": "^4.9.0",
-    "vue": "^3.5.13",
+    "vant": "^4.10.0",
+    "vue": "^3.5.40",
     "vue-router": "^4.5.0"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.12.1",
+    "@capacitor/cli": "^8.4.2",
+    "@playwright/test": "^1.62.0",
     "@types/node": "^22.10.2",
+    "@vant/auto-import-resolver": "^1.3.0",
     "@vitejs/plugin-vue": "^5.2.1",
+    "@vue/test-utils": "^2.4.11",
+    "cross-env": "^10.1.0",
     "jsdom": "^25.0.1",
     "typescript": "^5.7.2",
-    "vite": "^6.0.5",
-    "vitest": "^4.1.7",
-    "vue-tsc": "^2.2.0"
+    "unplugin-vue-components": "^32.1.0",
+    "vite": "^6.4.3",
+    "vitest": "^4.1.10",
+    "vue-tsc": "^3.3.8"
+  },
+  "overrides": {
+    "@vue/test-utils": {
+      "js-beautify": "^2.0.3"
+    },
+    "postcss": "^8.5.23"
   }
 }

@@ -1,0 +1,76 @@
+apply plugin: 'com.android.application'
+
+android {
+    namespace = "com.campusmind.zhixing"
+    compileSdk = rootProject.ext.compileSdkVersion
+    defaultConfig {
+        applicationId "com.campusmind.zhixing"
+        minSdkVersion rootProject.ext.minSdkVersion
+        targetSdkVersion rootProject.ext.targetSdkVersion
+        versionCode 1
+        versionName "1.0"
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        aaptOptions {
+             // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
+             // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
+            ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
+        }
+    }
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+        }
+    }
+}
+
+repositories {
+    flatDir{
+        dirs '../capacitor-cordova-android-plugins/src/main/libs', 'libs'
+    }
+}
+
+dependencies {
+    implementation fileTree(include: ['*.jar'], dir: 'libs')
+    implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
+    implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
+    implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
+    implementation project(':capacitor-android')
+    testImplementation "junit:junit:$junitVersion"
+    androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
+    androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
+    implementation project(':capacitor-cordova-android-plugins')
+}
+
+apply from: 'capacitor.build.gradle'
+
+// Gradle's Windows test worker can lose classes when its runtime classpath
+// contains non-ASCII project segments. APK compilation is unaffected, but the
+// worker then reports ClassNotFoundException for an already compiled test.
+// Mirror the compiled test and app classes to the system temp directory so the
+// standard Gradle test task remains usable without moving the repository.
+tasks.withType(Test).configureEach {
+    def safeTestClasses = file("${System.getProperty('java.io.tmpdir')}/campusmind-gradle-tests/${project.name}/${name}")
+    doFirst {
+        def variant = name.substring('test'.length(), name.length() - 'UnitTest'.length())
+        def variantPath = variant.substring(0, 1).toLowerCase() + variant.substring(1)
+        delete safeTestClasses
+        copy {
+            from testClassesDirs
+            from file("${buildDir}/intermediates/javac/${variantPath}/compile${variant}JavaWithJavac/classes")
+            from file("${buildDir}/tmp/kotlin-classes/${variantPath}")
+            into safeTestClasses
+        }
+        testClassesDirs = files(safeTestClasses)
+        classpath = files(safeTestClasses) + classpath
+    }
+}
+
+try {
+    def servicesJSON = file('google-services.json')
+    if (servicesJSON.text) {
+        apply plugin: 'com.google.gms.google-services'
+    }
+} catch(Exception e) {
+    logger.info("google-services.json not found, google-services plugin not applied. Push Notifications won't work")
+}

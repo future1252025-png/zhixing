@@ -1,63 +1,42 @@
 # 智行 CampusMind
 
-智行 CampusMind 是一个面向湖北大学学生的手机端 H5/PWA 智慧校园系统。项目把真实校园地图、建筑/教室会话、课程表管理、课表导入、出发建议和定位约束留言串成一个可运行、可演示、可写进简历的完整 MVP。
+智行 CampusMind 是一款面向湖北大学校园场景的 Android/H5 智慧校园应用。它把校园地图、地点频道、课程表、教务系统导入、定位校验和出发建议整合成一条完整的移动端使用链路。
 
-GitHub 仓库：[future1252025-png/zhixing](https://github.com/future1252025-png/zhixing.git)
+GitHub 仓库：[future1252025-png/zhixing](https://github.com/future1252025-png/zhixing)
 
-## 项目亮点
+## 当前能力
 
-- **真实校园地图体验**：接入高德地图 JS API，围绕湖北大学武昌校区展示校园点位、搜索、缩放分层和路线预览。
-- **建筑会话是核心特色**：从地图选择建筑后进入聊天室选择页，可进入建筑总频道或教室频道，留言统一匿名展示。
-- **定位约束发言**：留言页支持浏览器/高德定位，用户距离目标建筑过远时直接禁用输入，避免发出后才被拦截。
-- **课程表完整闭环**：支持课程 CRUD、周次筛选、HTML/Excel 课表导入预览和自动建筑匹配。
-- **出发建议与路线预览**：根据当前用户课程、起点/终点和校园地图生成出发建议，展示状态、时间和地图路线。
-- **前后端测试覆盖**：后端 pytest 61 个用例通过，前端 Vitest 81 个用例通过，前端生产构建通过。
+- **Android 与网页双端**：Vue 3 前端通过 Capacitor 打包为 Android App，同时保留浏览器运行方式。
+- **校园地图与地点频道**：接入高德地图，支持湖北大学武昌校区地点搜索、点位分层、路线预览和地点/教室频道。
+- **原生定位**：Android 使用系统融合定位能力，网页端使用浏览器定位；界面统一只展示“定位”。
+- **课程表闭环**：支持课程增删改查、教学周切换、单双周规则、教师与地点信息展示。
+- **教务系统导入**：Android 内置湖北大学教务系统导入流程；整批导入覆盖旧课表，个别无法识别的条目不会阻断其余课程。
+- **出发建议**：结合当前位置、课程地点和时间生成出发状态与步行路线参考。
+- **自动化验证**：覆盖后端、前端、端到端核心流程和 Android 构建。
 
 ## 技术栈
 
 | 层级 | 技术 |
 | --- | --- |
-| 前端 | Vue 3, Vite, TypeScript, Vant UI, Pinia, Vue Router, Axios, animejs |
-| 地图 | 高德地图 JS API, Walking 路线规划, 浏览器 Geolocation 兜底 |
-| 后端 | FastAPI, SQLAlchemy, Pydantic, JWT |
+| 前端 | Vue 3、Vite、TypeScript、Vant、Pinia、Vue Router、Axios |
+| Android | Capacitor 8、Android Gradle Plugin、原生 Geolocation、教务导入插件 |
+| 地图 | 高德地图 JS API、Walking 路线规划 |
+| 后端 | FastAPI、SQLAlchemy、Alembic、Pydantic、JWT |
 | 数据库 | SQLite |
-| 测试 | pytest, Vitest, vue-tsc |
-
-## 已实现功能
-
-- 用户注册、登录、JWT 鉴权、当前用户读取和个人资料编辑。
-- 首页真实地图、校园地点搜索、地图点位分层、地图采点辅助页。
-- 建筑详情、建筑总聊天室、教室聊天室、匿名留言列表和留言发布。
-- 留言定位检查：未定位或距离建筑过远时禁用输入，并给出中文提示。
-- 课程表增删改查、周次筛选、整周课表视图、HTML/Excel 课表导入预览。
-- 课程建筑自动匹配，减少用户手动选择建筑的成本。
-- 出发建议页面，支持手动搜索起终点、浏览器定位、下一节课终点兜底。
-- 高德地图路线预览，路线失败时保留可理解的兜底提示。
-- 登录后动效和整体移动端 UI 优化。
+| 测试 | pytest、Vitest、Playwright、JUnit、vue-tsc |
 
 ## 项目结构
 
 ```text
 campusmind/
-├── backend/                 FastAPI 后端
-│   ├── app/
-│   │   ├── api/             auth/buildings/messages/courses/schedule 路由
-│   │   ├── core/            配置与安全工具
-│   │   ├── db/              SQLite 连接、种子数据、校园点位数据
-│   │   ├── models/          SQLAlchemy 数据模型
-│   │   ├── schemas/         Pydantic 请求/响应模型
-│   │   └── services/        业务服务与规则算法
-│   └── tests/               后端测试
-├── frontend/                Vue 3 手机端 H5/PWA
-│   ├── src/api/             HTTP 请求封装
-│   ├── src/components/      地图、启动动画、底部导航等组件
-│   ├── src/pages/           登录、首页、课程、留言、出发建议、我的
-│   ├── src/stores/          认证与定位状态
-│   ├── src/types/           前端类型
-│   └── src/utils/           地图、课程、周次、定位和建议工具函数
-├── docs/                    设计、运行、演示、测试和简历材料
-├── deliverables/            交付材料存放区
-└── tools/                   辅助脚本
+├── backend/                 FastAPI API、迁移与测试
+├── frontend/
+│   ├── src/                 Vue 应用
+│   ├── e2e/                 Playwright 核心流程
+│   └── android/             Capacitor Android 工程
+├── docs/                    当前运行、架构、测试与演示文档
+├── deliverables/            课程设计交付材料
+└── tools/                   交付材料辅助脚本
 ```
 
 ## 快速启动
@@ -66,90 +45,68 @@ campusmind/
 
 ```powershell
 cd backend
-python -m pip install -r requirements.txt
-python -m app.db.seed
-python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe -m alembic upgrade head
+.\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
-健康检查：
+健康检查：`http://127.0.0.1:8000/health`
 
-```text
-http://127.0.0.1:8000/health
-```
+开发环境建议设置稳定的 `JWT_SECRET_KEY`，否则后端重启后旧登录状态会失效。
 
-### 前端
-
-复制环境变量模板并填写高德 Key：
+### 网页前端
 
 ```powershell
 cd frontend
 Copy-Item .env.example .env.local
-```
-
-`.env.local` 示例：
-
-```env
-VITE_API_BASE_URL=http://127.0.0.1:8000
-VITE_AMAP_KEY=你的高德Web端JS API Key
-VITE_AMAP_SECURITY_CODE=你的高德安全密钥
-```
-
-启动前端：
-
-```powershell
-npm install
+npm ci
 npm run dev
 ```
 
-默认访问：
+默认地址：`http://127.0.0.1:5173`
 
-```text
-http://127.0.0.1:5173
-```
+### Android
 
-更完整的运行说明见 [docs/RUNNING_GUIDE.md](docs/RUNNING_GUIDE.md)。
-
-## 测试
-
-后端：
-
-```powershell
-cd backend
-python -m pytest
-```
-
-前端：
+实体手机必须使用手机能够访问的后端地址，不能把 `127.0.0.1` 当作电脑：
 
 ```powershell
 cd frontend
-npm test
-npm run build
+Copy-Item .env.android.example .env.android.local
+# 编辑 .env.android.local 中的 VITE_API_BASE_URL
+npm ci
+npm run android:sync
+cd android
+.\gradlew.bat test assembleDebug
 ```
 
-最近一次整理验证结果：
+调试 APK：`frontend/android/app/build/outputs/apk/debug/app-debug.apk`
 
-```text
-后端：61 passed
-前端：81 passed
-前端构建：通过
-```
+完整说明见 [Android 教务导入](docs/ANDROID_COURSE_IMPORT.md) 和 [运行指南](docs/RUNNING_GUIDE.md)。
 
-## 简历阅读入口
+## 当前验证基线
 
-- [docs/RESUME_PROJECT.md](docs/RESUME_PROJECT.md)：简历项目描述、亮点话术和面试讲解版本。
-- [docs/TECHNICAL_HIGHLIGHTS.md](docs/TECHNICAL_HIGHLIGHTS.md)：架构、接口、算法、地图、导入和测试亮点。
-- [docs/REPOSITORY_GUIDE.md](docs/REPOSITORY_GUIDE.md)：面试官快速阅读路径和代码入口。
-- [docs/DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md)：演示流程。
-- [docs/TEST_REPORT.md](docs/TEST_REPORT.md)：测试记录。
+截至 2026-08-06：
 
-## MVP 边界
+- 后端：`379 passed, 2 skipped`
+- 前端：`46` 个测试文件、`312 passed`
+- Playwright：桌面与手机视口核心用户流程通过
+- Android：JUnit、Debug/Release 单元测试任务和 Debug APK 构建通过
 
-当前版本已经接入高德地图 JS API 和路线预览，但仍保持课程设计 MVP 的边界：
+## 文档入口
 
-- 统一身份认证仍为后续扩展，当前使用项目内账号 + JWT。
-- 留言为 HTTP 模式，不是 WebSocket 实时聊天。
-- 不做完整管理员后台、推送通知、室内定位和真实 AI 自动决策。
-- 高德地图能力依赖有效 Web 端 JS API Key、安全密钥和浏览器网络环境。
+- [文档索引](docs/README_DESIGN_DOCS.md)
+- [架构概览](docs/ARCHITECTURE_OVERVIEW.md)
+- [运行指南](docs/RUNNING_GUIDE.md)
+- [测试报告](docs/TEST_REPORT.md)
+- [演示脚本](docs/DEMO_SCRIPT.md)
+- [技术亮点](docs/TECHNICAL_HIGHLIGHTS.md)
+
+## 配置安全
+
+- 不提交 `.env.local`、`.env.android.local`、数据库、日志、APK 和构建目录。
+- Android 发布包应连接 HTTPS 后端。
+- 高德生产环境推荐使用 `VITE_AMAP_SERVICE_HOST` 代理安全密钥，不把安全密钥写入客户端。
 
 ## License
 

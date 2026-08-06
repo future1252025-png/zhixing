@@ -67,6 +67,16 @@ describe('message api', () => {
     })
   })
 
+  it('fetches older messages with the before_id cursor', async () => {
+    vi.mocked(request.get).mockResolvedValue({ data: [message] })
+
+    await getBuildingMessages(1, { roomName: '教4-203', limit: 50, before_id: 120 })
+
+    expect(request.get).toHaveBeenCalledWith('/api/buildings/1/messages', {
+      params: { room_name: '教4-203', limit: 50, before_id: 120 }
+    })
+  })
+
   it('fetches building chatrooms', async () => {
     vi.mocked(request.get).mockResolvedValue({
       data: [{ name: '教4-203', room_name: '教4-203', message_count: 2, is_general: false }]

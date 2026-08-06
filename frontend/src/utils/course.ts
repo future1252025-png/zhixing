@@ -32,12 +32,6 @@ export type WeeksRangePickerValue = {
   endWeek: number
 }
 
-type StorageLike = {
-  getItem(key: string): string | null
-  setItem(key: string, value: string): void
-}
-
-export const SELECTED_WEEK_STORAGE_KEY = 'campusmind-selected-week'
 export const MAX_TEACHING_WEEK = 20
 
 const COURSE_TIME_SLOTS: CourseTimeSlot[] = [
@@ -52,8 +46,124 @@ export function getCourseTimeSlots(): CourseTimeSlot[] {
   return [...COURSE_TIME_SLOTS]
 }
 
-export function getTeachingWeekOptions(): number[] {
-  return Array.from({ length: MAX_TEACHING_WEEK }, (_, index) => index + 1)
+export function formatCourseLocation(
+  course: {
+    building: { name: string } | null
+    room_name: string
+    source_location?: string | null
+  }
+): string {
+  const sourceLocation = course.source_location?.trim()
+  if (sourceLocation) return sourceLocation
+
+  const building = course.building?.name.trim() ?? ''
+  const room = course.room_name.trim()
+  if (building && room) return `${building} · ${room}`
+  return building || room || '地点待补充'
+}
+
+function compactBuildingName(name: string): string {
+  const compact = name
+    .trim()
+    .replace(/^湖北大学(?:[（(][^）)]+[）)]|武昌主校区|武昌校区|阳逻校区)?\s*[-—·]?\s*/u, '')
+  return compact || name.trim()
+}
+
+function normalizeLocationPart(value: string): string {
+  return value.replace(/[\s·()（）\-—_]/g, '').toLocaleLowerCase('zh-Hans-CN')
+}
+
+function formatTimetableRoomName(room: string): string {
+  return room
+    .trim()
+    .replace(/([\p{Script=Han}])(?=\d{2,4}\s*[-—]\s*\d{2,4})/gu, '$1 ')
+    .replace(/(\d{2,4}\s*[-—]\s*\d{2,4})(?=\p{Script=Han})/gu, '$1 · ')
+    .replace(/(实验室|教室|体育馆|体育场|球场)(?=\d)/gu, '$1 ')
+    .replace(/\s{2,}/g, ' ')
+}
+
+function roomNamesTeachingBuilding(building: string, room: string): boolean {
+  const buildingNumber = building.match(/(?:^|\D)(\d+)\s*号?\s*教学楼/u)?.[1]
+  if (!buildingNumber) return false
+
+  const roomBuildingPattern = new RegExp(
+    `^教\\s*${buildingNumber}(?:\\s*[-—·]\\s*|\\s+|\\s*$)`,
+    'u'
+  )
+  return roomBuildingPattern.test(room)
+}
+
+export function formatTimetableCourseLocation(
+  course: {
+    building: { name: string } | null
+    room_name: string
+    source_location?: string | null
+  }
+): string {
+  const sourceLocation = course.source_location?.trim()
+  if (sourceLocation) return sourceLocation
+
+  if (!course.building) return course.room_name.trim() || '地点待补充'
+  const building = compactBuildingName(course.building.name)
+  const rawRoom = course.room_name.trim()
+  const room = formatTimetableRoomName(rawRoom)
+  const normalizedBuilding = normalizeLocationPart(building)
+  const normalizedRoom = normalizeLocationPart(rawRoom)
+  const normalizedBuildingWithoutGeneralPrefix = normalizeLocationPart(
+    building.replace(/^综合(?=.{4,}$)/u, '')
+  )
+
+  if (
+    (normalizedBuilding && normalizedRoom.includes(normalizedBuilding)) ||
+    (
+      normalizedBuildingWithoutGeneralPrefix &&
+      normalizedBuildingWithoutGeneralPrefix !== normalizedBuilding &&
+      normalizedRoom.includes(normalizedBuildingWithoutGeneralPrefix)
+    ) ||
+    roomNamesTeachingBuilding(building, rawRoom)
+  ) {
+    return room
+  }
+  return `${building} · ${room}`
+}
+
+export function getCourseDisplaySlot(
+  course: Pick<Course, 'start_time' | 'end_time'>
+): CourseTimeSlot | null {
+  const start = parseTimeValue(course.start_time)
+  if (start === null) {
+    return null
+  }
+
+  const containingSlot = COURSE_TIME_SLOTS.find((slot) => {
+    const slotStart = parseTimeValue(slot.start_time)
+    const slotEnd = parseTimeValue(slot.end_time)
+    return slotStart !== null && slotEnd !== null && start >= slotStart && start < slotEnd
+  })
+  if (containingSlot) {
+    return { ...containingSlot }
+  }
+
+  const nearestSlot = [...COURSE_TIME_SLOTS].sort((left, right) => {
+    const leftStart = parseTimeValue(left.start_time) ?? 0
+    const rightStart = parseTimeValue(right.start_time) ?? 0
+    return Math.abs(leftStart - start) - Math.abs(rightStart - start)
+  })[0]
+  return nearestSlot ? { ...nearestSlot } : null
+}
+
+export function courseUsesStandardSlotTime(
+  course: Pick<Course, 'start_time' | 'end_time'>,
+  slot: Pick<CourseTimeSlot, 'start_time' | 'end_time'>
+): boolean {
+  return course.start_time === slot.start_time && course.end_time === slot.end_time
+}
+
+export function getTeachingWeekOptions(maxWeek = MAX_TEACHING_WEEK): number[] {
+  const safeMaxWeek = Number.isInteger(maxWeek)
+    ? Math.min(Math.max(maxWeek, 1), 30)
+    : MAX_TEACHING_WEEK
+  return Array.from({ length: safeMaxWeek }, (_, index) => index + 1)
 }
 
 export function getQuickWeekOptions(
@@ -138,42 +248,64 @@ export function buildCourseCreateQuery(
   return query
 }
 
+/**
+ * 课程色策展调色板：保留自然感，同时拉开蓝、绿、橙、紫、红等色相。
+ * 色值需要有足够饱和度，经过课表卡片的白色混合后仍可快速区分科目。
+ */
+export const COURSE_ACCENT_PALETTE = [
+  '#2f78d0', // 湖蓝
+  '#249b75', // 翡翠
+  '#d38a24', // 琥珀
+  '#9a5bc4', // 紫藤
+  '#d15f68', // 山茶红
+  '#258ca6', // 青蓝
+  '#72a33c', // 新叶绿
+  '#c44f8a', // 木槿
+  '#665fc2', // 鸢尾蓝
+  '#d06e3f', // 陶橙
+  '#4f6dad', // 远山蓝
+  '#3d9250' // 森林绿
+] as const
+
+function hashSubjectName(subject: string): number {
+  let hash = 5381
+  for (const ch of subject) {
+    hash = ((hash << 5) + hash + (ch.codePointAt(0) ?? 0)) >>> 0
+  }
+  return hash
+}
+
+/**
+ * 按课程名哈希取色：同名课程跨周、跨会话、跨增删稳定拿到同一个色，
+ * 保住「颜色=科目」的记忆。哈希撞车时在调色板内线性探测，
+ * 科目数不超过调色板长度时保证互不相同。
+ */
 export function buildCourseColorMap(
   courses: Pick<Course, 'id' | 'course_name'>[]
 ): Record<number, string> {
   const subjectNames = Array.from(
     new Set(courses.map((course) => course.course_name.trim() || `课程 ${course.id}`))
   ).sort((left, right) => left.localeCompare(right, 'zh-Hans-CN'))
-  const total = Math.max(subjectNames.length, 1)
-  const subjectColors = subjectNames.reduce<Record<string, string>>((colorMap, subject, index) => {
-    const hue = Math.round((index * 360) / total)
-    const saturation = 45 + (index % 3) * 7
-    const lightness = 40 + (index % 4) * 4
-    colorMap[subject] = `hsl(${hue} ${saturation}% ${lightness}%)`
-    return colorMap
-  }, {})
+
+  const taken = new Set<number>()
+  const subjectColors: Record<string, string> = {}
+  for (const subject of subjectNames) {
+    const start = hashSubjectName(subject) % COURSE_ACCENT_PALETTE.length
+    let slot = start
+    if (taken.size < COURSE_ACCENT_PALETTE.length) {
+      while (taken.has(slot)) {
+        slot = (slot + 1) % COURSE_ACCENT_PALETTE.length
+      }
+      taken.add(slot)
+    }
+    subjectColors[subject] = COURSE_ACCENT_PALETTE[slot]
+  }
 
   return courses.reduce<Record<number, string>>((colorMap, course) => {
     const subject = course.course_name.trim() || `课程 ${course.id}`
     colorMap[course.id] = subjectColors[subject]
     return colorMap
   }, {})
-}
-
-export function readSelectedWeek(storage: StorageLike): number {
-  const value = Number(storage.getItem(SELECTED_WEEK_STORAGE_KEY))
-  if (Number.isInteger(value) && value >= 1 && value <= MAX_TEACHING_WEEK) {
-    return value
-  }
-  return 1
-}
-
-export function writeSelectedWeek(storage: StorageLike, week: number): void {
-  if (Number.isInteger(week) && week >= 1 && week <= MAX_TEACHING_WEEK) {
-    storage.setItem(SELECTED_WEEK_STORAGE_KEY, String(week))
-  } else {
-    storage.setItem(SELECTED_WEEK_STORAGE_KEY, '1')
-  }
 }
 
 export function buildEmptyCourseForm(): CourseForm {
@@ -193,12 +325,12 @@ export function courseToForm(course: Course): CourseForm {
   return {
     course_name: course.course_name,
     weekday: course.weekday,
-    start_time: course.start_time,
-    end_time: course.end_time,
-    building_id: course.building_id,
+    start_time: course.start_time ?? '',
+    end_time: course.end_time ?? '',
+    building_id: course.building_id ?? 0,
     room_name: course.room_name,
     teacher: course.teacher ?? '',
-    weeks: course.weeks ?? ''
+    weeks: course.weeks
   }
 }
 
@@ -211,12 +343,12 @@ export function formToPayload(form: CourseForm): CoursePayload {
     building_id: Number(form.building_id),
     room_name: form.room_name.trim(),
     teacher: form.teacher.trim() || null,
-    weeks: form.weeks.trim() || null
+    weeks: form.weeks.trim()
   }
 }
 
-function parseTimeValue(value: string): number | null {
-  if (!/^\d{2}:\d{2}$/.test(value)) {
+function parseTimeValue(value: string | null | undefined): number | null {
+  if (!value || !/^\d{2}:\d{2}$/.test(value)) {
     return null
   }
   const [hourText, minuteText] = value.split(':')
@@ -257,16 +389,19 @@ export function validateCourseForm(form: CourseForm | CoursePayload): string | n
     return '请选择上课建筑'
   }
   if (!roomName) {
-    return '教室不能为空'
+    return '请输入完整教室'
   }
-  if (roomName.length > 64) {
-    return '教室不能超过 64 字'
+  if (roomName.length > 120) {
+    return '教室不能超过 120 字'
   }
   if (teacher.length > 64) {
     return '教师不能超过 64 字'
   }
   if (weeks.length > 64) {
     return '周次不能超过 64 字'
+  }
+  if (!weeks) {
+    return '请输入上课周次'
   }
   return null
 }
@@ -386,7 +521,7 @@ export function groupCoursesByWeekday(
         if (left.start_time === right.start_time) {
           return left.id - right.id
         }
-        return left.start_time.localeCompare(right.start_time)
+        return (left.start_time ?? '').localeCompare(right.start_time ?? '')
       })
   }))
 

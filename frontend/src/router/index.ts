@@ -5,6 +5,7 @@ import {
 } from 'vue-router'
 
 import { useAuthStore } from '@/stores/auth'
+import { extractBusinessError } from '@/api/errors'
 
 const LoginPage = () => import('@/pages/LoginPage.vue')
 const RegisterPage = () => import('@/pages/RegisterPage.vue')
@@ -60,9 +61,25 @@ export function shouldLoadCurrentUser(
 }
 
 export function resolveRouteScrollPosition(
-  savedPosition: { left: number; top: number } | null
-): { left: number; top: number } {
+  savedPosition: { left: number; top: number } | null,
+  hash = ''
+): { left: number; top: number } | { el: string; top: number; behavior: 'smooth' } {
+  if (hash) return { el: hash, top: 12, behavior: 'smooth' }
   return savedPosition ?? { left: 0, top: 0 }
+}
+
+export function sanitizeInternalRedirect(value: unknown, fallback = '/home'): string {
+  if (typeof value !== 'string') return fallback
+  const redirect = value.trim()
+  if (
+    !redirect.startsWith('/') ||
+    redirect.startsWith('//') ||
+    redirect.includes('\\') ||
+    /[\u0000-\u001f\u007f]/.test(redirect)
+  ) {
+    return fallback
+  }
+  return redirect
 }
 
 const routes: RouteRecordRaw[] = [
@@ -78,7 +95,8 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/map-collector',
     name: 'map-collector',
-    component: MapCollectorPage
+    component: MapCollectorPage,
+    meta: { requiresAuth: true }
   },
   {
     path: '/buildings/:id',
@@ -139,8 +157,8 @@ const routes: RouteRecordRaw[] = [
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes,
-  scrollBehavior(_to, _from, savedPosition) {
-    return resolveRouteScrollPosition(savedPosition)
+  scrollBehavior(to, _from, savedPosition) {
+    return resolveRouteScrollPosition(savedPosition, to.hash)
   }
 })
 
@@ -155,12 +173,15 @@ router.beforeEach(async (to) => {
   if (shouldLoadCurrentUser(target, Boolean(authStore.token), Boolean(authStore.currentUser))) {
     try {
       await authStore.loadCurrentUser()
-    } catch {
-      authStore.logout()
-      return {
-        path: '/login',
-        query: { redirect: to.fullPath }
+    } catch (error) {
+      if (extractBusinessError(error).status === 401) {
+        authStore.clearSession()
+        return {
+          path: '/login',
+          query: { redirect: to.fullPath, reason: 'expired' }
+        }
       }
+      return true
     }
   }
 

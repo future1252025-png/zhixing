@@ -1,22 +1,22 @@
 import json
+import os
 from collections import Counter
 from pathlib import Path
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.core.config import DEFAULT_DATABASE_PATH, settings
-from app.db.database import create_sqlite_engine, init_db
+from app.core.config import settings
+from app.core.security import hash_password
+from app.db.database import create_sqlite_engine, upgrade_database
 from app.models import Building, Course, LocationPreset, Message, User
 
 
-DEMO_USER = {
-    "student_id": "20240001",
-    "username": "demo",
-    "password_hash": "demo-password-hash-placeholder",
-    "nickname": "演示同学",
-    "role": "student",
-}
+DEMO_USERNAME = "demo"
+DEMO_PASSWORD = "demo123"
+DEMO_STUDENT_ID = "20240001"
+DEMO_NICKNAME = "演示同学"
+LEGACY_DEMO_PASSWORD_PLACEHOLDER = "demo-password-hash-placeholder"
 
 
 MAP_POINTS_SEED_FILE = Path(__file__).with_name("map_points_seed.json")
@@ -144,65 +144,57 @@ DEMO_MESSAGES = [
     {"building": "求索广场", "content": "晚上附近比较安静，适合自习"},
 ]
 
-def _get_or_create_demo_user(session: Session) -> User:
-    user = session.scalar(select(User).where(User.username == DEMO_USER["username"]))
+def _get_or_create_demo_user(session: Session) -> tuple[User, bool]:
+    user = session.scalar(select(User).where(User.username == DEMO_USERNAME))
     if user is not None:
-        return user
+        # Repair the one known pre-hashing placeholder only. Any other value may
+        # be a real user-selected password and must never be reset by seeding.
+        if user.password_hash == LEGACY_DEMO_PASSWORD_PLACEHOLDER:
+            user.password_hash = hash_password(DEMO_PASSWORD)
+            session.add(user)
+            session.flush()
+            return user, True
+        return user, False
 
-    user = User(**DEMO_USER)
+    user = User(
+        student_id=DEMO_STUDENT_ID,
+        username=DEMO_USERNAME,
+        password_hash=hash_password(DEMO_PASSWORD),
+        nickname=DEMO_NICKNAME,
+        role="student",
+    )
     session.add(user)
     session.flush()
-    return user
+    return user, True
 
 
 def _seed_buildings(session: Session) -> dict[str, Building]:
+    """Upsert buildings by stable name only — never by sequential id."""
     existing = {
         building.name: building
         for building in session.scalars(select(Building)).all()
     }
-    for index, item in enumerate(DEMO_BUILDINGS, start=1):
-        building = session.get(Building, index) or existing.get(item["name"])
+    for item in DEMO_BUILDINGS:
+        building = existing.get(item["name"])
         if building is None:
             building = Building(**item)
             session.add(building)
             session.flush()
         else:
-            old_name = building.name
             for field, value in item.items():
+                if field == "name":
+                    continue
                 setattr(building, field, value)
-            if old_name != building.name:
-                existing.pop(old_name, None)
             session.flush()
         existing[building.name] = building
     return existing
 
 
-def seed_demo_data(session: Session) -> dict[str, int]:
-    user = _get_or_create_demo_user(session)
-    buildings = _seed_buildings(session)
-
-    for index, item in enumerate(DEMO_LOCATION_PRESETS, start=1):
-        building = buildings[item["building"]]
-        preset = session.get(LocationPreset, index) or session.scalar(
-            select(LocationPreset).where(LocationPreset.name == item["name"])
-        )
-        if preset is None:
-            session.add(
-                LocationPreset(
-                    name=item["name"],
-                    building_id=building.id,
-                    latitude=building.latitude,
-                    longitude=building.longitude,
-                    description=item["description"],
-                )
-            )
-        else:
-            preset.name = item["name"]
-            preset.building_id = building.id
-            preset.latitude = building.latitude
-            preset.longitude = building.longitude
-            preset.description = item["description"]
-
+def _seed_user_demo_courses(
+    session: Session,
+    user: User,
+    buildings: dict[str, Building],
+) -> None:
     for item in DEMO_COURSES:
         building = buildings[item["building"]]
         exists = session.scalar(
@@ -234,6 +226,12 @@ def seed_demo_data(session: Session) -> dict[str, int]:
             exists.teacher = item["teacher"]
             exists.weeks = item["weeks"]
 
+
+def _seed_user_demo_messages(
+    session: Session,
+    user: User,
+    buildings: dict[str, Building],
+) -> None:
     for item in DEMO_MESSAGES:
         building = buildings[item["building"]]
         exists = session.scalar(
@@ -252,6 +250,47 @@ def seed_demo_data(session: Session) -> dict[str, int]:
                 )
             )
 
+
+def _demo_seed_allowed_in_production() -> bool:
+    return os.environ.get("SEED_ALLOW_DEMO") == "1"
+
+
+def seed_demo_data(session: Session) -> dict[str, int]:
+    # Demo credentials are public knowledge; never create or repair them in a
+    # production database unless explicitly requested via SEED_ALLOW_DEMO=1.
+    if settings.is_production and not _demo_seed_allowed_in_production():
+        raise RuntimeError(
+            "Refusing to seed demo data in production. "
+            "Set SEED_ALLOW_DEMO=1 to explicitly allow it."
+        )
+    user, seed_owned_user = _get_or_create_demo_user(session)
+    buildings = _seed_buildings(session)
+
+    for item in DEMO_LOCATION_PRESETS:
+        building = buildings[item["building"]]
+        preset = session.scalar(
+            select(LocationPreset).where(LocationPreset.name == item["name"])
+        )
+        if preset is None:
+            session.add(
+                LocationPreset(
+                    name=item["name"],
+                    building_id=building.id,
+                    latitude=building.latitude,
+                    longitude=building.longitude,
+                    description=item["description"],
+                )
+            )
+        else:
+            preset.building_id = building.id
+            preset.latitude = building.latitude
+            preset.longitude = building.longitude
+            preset.description = item["description"]
+
+    if seed_owned_user:
+        _seed_user_demo_courses(session, user, buildings)
+        _seed_user_demo_messages(session, user, buildings)
+
     session.commit()
     return {
         "users": len(session.scalars(select(User)).all()),
@@ -263,9 +302,8 @@ def seed_demo_data(session: Session) -> dict[str, int]:
 
 
 def initialize_database(database_url: str = settings.database_url) -> dict[str, int]:
-    DEFAULT_DATABASE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    upgrade_database(database_url)
     engine = create_sqlite_engine(database_url)
-    init_db(engine)
     SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
     try:
         with SessionLocal() as session:

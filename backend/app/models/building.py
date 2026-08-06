@@ -1,9 +1,10 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, Float, String, Text
+from sqlalchemy import Float, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.database import Base
+from app.db.types import TZDateTime
 
 
 class Building(Base):
@@ -19,7 +20,7 @@ class Building(Base):
     map_y: Mapped[float] = mapped_column(Float)
     walk_hint: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
+        TZDateTime(),
         default=lambda: datetime.now(timezone.utc),
     )
 

@@ -1,65 +1,56 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { isAxiosError } from 'axios'
 import { showFailToast, showToast } from 'vant'
 import { useRoute, useRouter } from 'vue-router'
 
-import { getBuildings, type Building } from '@/api/buildings'
-import { getCourses } from '@/api/courses'
+import type { Building } from '@/api/buildings'
+import { extractBusinessError } from '@/api/errors'
 import { getScheduleSuggestion } from '@/api/schedule'
+import BuildingPicker from '@/components/BuildingPicker.vue'
 import RealCampusMap from '@/components/RealCampusMap.vue'
 import TechIcon from '@/components/TechIcon.vue'
+import SemesterGate from '@/components/course/SemesterGate.vue'
+import { useAuthStore } from '@/stores/auth'
+import { useBuildingsStore } from '@/stores/buildings'
 import { useLocationStore } from '@/stores/location'
-import type { Course } from '@/types/course'
+import { useSemesterStore } from '@/stores/semester'
 import type { CampusMapPoint } from '@/types/map'
-import type { ScheduleSuggestion } from '@/types/schedule'
+import type { SchedulePageError, ScheduleSuggestion } from '@/types/schedule'
 import {
   filterScheduleLocations,
   formatDistance,
   getLocationDisplayInfo,
   getStatusMeta,
+  toSchedulePageError,
   type SearchableScheduleLocation
 } from '@/utils/schedule'
 
-type ScheduleLocationOption = SearchableScheduleLocation & {
-  source: 'building'
-  building_id: number | null
-  description?: string | null
-}
-
 const router = useRouter()
 const route = useRoute()
+const authStore = useAuthStore()
+const buildingsStore = useBuildingsStore()
 const locationStore = useLocationStore()
+const semesterStore = useSemesterStore()
 const buildings = ref<Building[]>([])
-const courses = ref<Course[]>([])
-const selectedOption = ref('')
-const startQuery = ref('')
-const destinationQuery = ref('')
 const selectedDestination = ref<Building | null>(null)
 const suggestion = ref<ScheduleSuggestion | null>(null)
+const scheduleError = ref<SchedulePageError | null>(null)
 const loading = ref(true)
 const generating = ref(false)
-const errorMessage = ref('')
+const loadErrorMessage = ref('')
+/** Route map is secondary to the departure card; start collapsed after a suggestion. */
+const mapExpanded = ref(true)
 
-const hasCourses = computed(() => courses.value.length > 0)
-const startLocations = computed<ScheduleLocationOption[]>(() =>
-  buildings.value.map((building) => ({
-    id: building.id,
-    source: 'building' as const,
-    name: building.name,
-    type: building.type,
-    building_id: building.id,
-    latitude: building.latitude,
-    longitude: building.longitude,
-    description: building.walk_hint
-  }))
-)
-const startSearchResults = computed(() =>
-  filterScheduleLocations(startLocations.value, startQuery.value, 10)
-)
-const destinationSearchResults = computed(() =>
-  filterScheduleLocations(buildings.value, destinationQuery.value, 10)
-)
+const semesterLabel = computed(() => {
+  const semester = semesterStore.semester
+  if (!semester || semester.status === 'unconfigured') return '未设置'
+  if (semester.status === 'before_term') return '未开始'
+  if (semester.status === 'after_term') return '已结束'
+  return `第 ${semester.current_week} 周`
+})
+// 起点选中态只在选中校园建筑时有值；当前位置/校园中心的 building_id 为 null
+const startBuildingId = computed(() => locationStore.selectedLocation?.building_id ?? null)
+const destinationBuildingId = computed(() => selectedDestination.value?.id ?? null)
 const statusMeta = computed(() =>
   suggestion.value ? getStatusMeta(suggestion.value.status) : null
 )
@@ -91,35 +82,28 @@ const suggestionRouteToPoint = computed<CampusMapPoint | null>(() => {
 })
 const routeReady = computed(() => Boolean(routeFromPoint.value && suggestionRouteToPoint.value))
 
-function getErrorMessage(error: unknown): string {
-  if (isAxiosError(error)) {
-    const detail = error.response?.data?.detail
-    if (detail === 'No upcoming course found') return '暂无后续课程，请先添加课程'
-    if (typeof detail === 'string') return detail
-  }
-  return '出发建议生成失败，请稍后重试'
-}
-
-function applySelectedOption(value: string) {
-  selectedOption.value = value
+function clearGeneratedState() {
   suggestion.value = null
-  if (value.startsWith('building:')) {
-    const id = Number(value.replace('building:', ''))
-    const building = buildings.value.find((item) => item.id === id)
-    if (building) {
-      locationStore.selectBuilding(building)
-      startQuery.value = building.name
-    }
-  }
+  scheduleError.value = null
 }
 
-function selectStartLocation(location: ScheduleLocationOption) {
-  applySelectedOption(`${location.source}:${location.id}`)
+function selectStartBuilding(buildingId: number | null) {
+  if (buildingId === null) return
+  const building = buildings.value.find((item) => item.id === buildingId)
+  if (!building) return
+  clearGeneratedState()
+  locationStore.selectBuilding(building)
 }
 
 function selectDestination(building: Building) {
+  clearGeneratedState()
   selectedDestination.value = building
-  destinationQuery.value = building.name
+}
+
+function selectDestinationById(buildingId: number | null) {
+  if (buildingId === null) return
+  const building = buildings.value.find((item) => item.id === buildingId)
+  if (building) selectDestination(building)
 }
 
 function locationTitle(location: Pick<SearchableScheduleLocation, 'name' | 'type'>): string {
@@ -132,19 +116,27 @@ function locationSubtitle(location: Pick<SearchableScheduleLocation, 'name' | 't
 
 function clearDestination() {
   selectedDestination.value = null
-  destinationQuery.value = ''
 }
 
 async function loadScheduleData() {
   loading.value = true
-  errorMessage.value = ''
+  loadErrorMessage.value = ''
+  scheduleError.value = null
+  const userId = authStore.currentUser?.id
+  if (!userId) {
+    loadErrorMessage.value = '登录信息尚未加载完成，请重新进入页面'
+    loading.value = false
+    return
+  }
   try {
-    const [buildingResult, courseResult] = await Promise.all([getBuildings(), getCourses()])
+    const [buildingResult] = await Promise.all([
+      buildingsStore.ensureLoaded(),
+      semesterStore.load(userId)
+    ])
     buildings.value = buildingResult
-    courses.value = courseResult
 
     if (!locationStore.selectedLocation && buildingResult.length > 0) {
-      applySelectedOption(`building:${buildingResult[0].id}`)
+      selectStartBuilding(buildingResult[0].id)
     }
     const destinationId = Number(route.query.destination)
     if (Number.isFinite(destinationId)) {
@@ -152,7 +144,7 @@ async function loadScheduleData() {
       if (destination) selectDestination(destination)
     }
   } catch (error) {
-    errorMessage.value = getErrorMessage(error)
+    loadErrorMessage.value = extractBusinessError(error).message
   } finally {
     loading.value = false
   }
@@ -161,24 +153,17 @@ async function loadScheduleData() {
 async function useBrowserLocation() {
   try {
     const location = await locationStore.requestBrowserLocation()
-    selectedOption.value = location.source
-    startQuery.value = location.source === 'fallback'
-      ? '校园中心'
-      : '浏览器定位：当前位置'
-    suggestion.value = null
+    clearGeneratedState()
     showToast(location.source === 'fallback'
       ? '定位超时，已使用校园中心，可搜索调整'
       : '已使用当前位置')
   } catch {
-    showFailToast(locationStore.browserError || '浏览器定位失败，请手动选择当前位置')
+    showFailToast(locationStore.browserError || '定位失败，请手动选择当前位置')
   }
 }
 
 async function generateSuggestion() {
-  if (!hasCourses.value) {
-    errorMessage.value = '暂无后续课程，请先添加课程'
-    return
-  }
+  if (semesterStore.semester?.status !== 'active') return
   const payload = locationStore.suggestionPayload
   if (!payload) {
     showFailToast('请先选择当前位置')
@@ -186,15 +171,50 @@ async function generateSuggestion() {
   }
 
   generating.value = true
-  errorMessage.value = ''
+  scheduleError.value = null
+  clearDestination()
   try {
     suggestion.value = await getScheduleSuggestion(payload)
+    mapExpanded.value = false
   } catch (error) {
     suggestion.value = null
-    errorMessage.value = getErrorMessage(error)
+    scheduleError.value = toSchedulePageError(extractBusinessError(error))
   } finally {
     generating.value = false
   }
+}
+
+function openScheduleRecovery() {
+  const error = scheduleError.value
+  if (!error) return
+  if (error.courseId && ['course_location_incomplete', 'course_data_invalid'].includes(error.code)) {
+    router.push(`/courses/${error.courseId}/edit`)
+    return
+  }
+  if (['semester_unconfigured', 'semester_not_active'].includes(error.code)) {
+    router.push('/courses#semester-settings')
+    return
+  }
+  if (error.code === 'schedule_conflict') {
+    router.push('/courses')
+    return
+  }
+  void generateSuggestion()
+}
+
+function recoveryActionLabel(error: SchedulePageError): string {
+  if (error.courseId && ['course_location_incomplete', 'course_data_invalid'].includes(error.code)) {
+    return '编辑这门课程'
+  }
+  if (['semester_unconfigured', 'semester_not_active'].includes(error.code)) {
+    return '检查学期设置'
+  }
+  if (error.code === 'schedule_conflict') return '查看课表冲突'
+  return '重新生成'
+}
+
+function toggleRouteMap() {
+  mapExpanded.value = !mapExpanded.value
 }
 
 onMounted(loadScheduleData)
@@ -224,12 +244,28 @@ onMounted(loadScheduleData)
         </div>
 
         <div class="journey-meta">
-          <div><span>已保存课程</span><strong>{{ courses.length }}</strong></div>
+          <div><span>真实教学周</span><strong>{{ semesterLabel }}</strong></div>
           <div><span>校园地点</span><strong>{{ buildings.length }}</strong></div>
           <div><span>当前位置</span><strong>{{ locationStore.selectedLocation ? '已选择' : '待选择' }}</strong></div>
         </div>
       </header>
 
+      <section v-if="loading" class="route-planner fresh-card">
+        <div class="planner-loading" aria-live="polite">
+          <span><i></i><i></i><i></i></span>
+          <p>正在读取学期和校园地点...</p>
+        </div>
+      </section>
+
+      <van-empty v-else-if="loadErrorMessage || !semesterStore.semester" image="error" :description="loadErrorMessage || '学期状态暂时不可用'">
+        <van-button type="primary" size="small" @click="loadScheduleData">重新加载</van-button>
+      </van-empty>
+
+      <SemesterGate
+        v-else
+        :status="semesterStore.semester.status"
+        :current-week="semesterStore.currentWeek"
+      >
       <section
         v-reveal="{ from: 'right', distance: 38, stagger: 48 }"
         class="route-planner fresh-card"
@@ -238,80 +274,44 @@ onMounted(loadScheduleData)
           <div>
             <span>路线安排</span>
             <h2>你现在在哪里？</h2>
-            <p>终点可以不选，我们会使用下一节课的地点。</p>
+            <p>出发时间始终按下一节课计算；手动终点只用于预览地图。</p>
           </div>
-          <button type="button" aria-label="刷新地点和课程" @click="loadScheduleData">
-            <van-icon name="replay" />
+          <button type="button" aria-label="刷新学期和地点" @click="loadScheduleData">
+            <TechIcon name="refresh" :size="18" />
           </button>
         </header>
 
-        <div v-if="loading" class="planner-loading" aria-live="polite">
-          <span><i></i><i></i><i></i></span>
-          <p>正在整理地点和课程...</p>
-        </div>
-
-        <van-empty v-else-if="errorMessage && !suggestion" image="error" :description="errorMessage">
-          <div class="page-actions">
-            <van-button
-              v-if="!hasCourses"
-              type="primary"
-              size="small"
-              @click="router.push('/courses/new')"
-            >
-              添加课程
-            </van-button>
-            <van-button plain size="small" @click="loadScheduleData">重新加载</van-button>
-          </div>
-        </van-empty>
-
-        <template v-else>
           <div class="route-node start-node">
             <span class="node-pin"><i></i></span>
             <div class="node-body">
               <div class="node-label">
                 <span>起点</span>
                 <button type="button" :disabled="locationStore.browserLoading" @click="useBrowserLocation">
-                  <van-icon name="aim" />
+                  <TechIcon name="aim" :size="15" />
                   {{ locationStore.browserLoading ? '定位中' : '用当前位置' }}
                 </button>
               </div>
 
-              <van-search
-                id="locationSearch"
-                v-model="startQuery"
-                shape="round"
+              <BuildingPicker
+                :model-value="startBuildingId"
+                :buildings="buildings"
                 placeholder="搜索图书馆、教学楼、食堂..."
+                :filter="filterScheduleLocations"
+                @update:model-value="selectStartBuilding"
               />
 
-              <div class="location-result-list">
-                <button
-                  v-for="location in startSearchResults"
-                  :key="`${location.source}-${location.id}`"
-                  type="button"
-                  :class="{ active: selectedOption === `${location.source}:${location.id}` }"
-                  :aria-pressed="selectedOption === `${location.source}:${location.id}`"
-                  @click="selectStartLocation(location)"
-                >
-                  <i></i>
-                  <span>
-                    <strong>{{ locationTitle(location) }}</strong>
-                    <small>{{ locationSubtitle(location) }}</small>
-                  </span>
-                </button>
-              </div>
-
               <div v-if="locationStore.selectedLocation" class="selected-place">
-                <span><van-icon name="success" /></span>
+                <span><TechIcon name="check" :size="17" /></span>
                 <div>
                   <small>起点已选择</small>
                   <strong>
-                    {{ locationTitle({
+                    {{ locationStore.selectedLocation.source === 'browser'
+                      ? '当前位置'
+                      : locationTitle({
                       name: locationStore.selectedLocation.name,
-                      type: locationStore.selectedLocation.source === 'browser'
-                        ? '浏览器定位'
-                        : locationStore.selectedLocation.source === 'fallback'
-                          ? '校园中心'
-                          : '校园地点'
+                      type: locationStore.selectedLocation.source === 'fallback'
+                        ? '校园中心'
+                        : '校园地点'
                     }) }}
                   </strong>
                   <p>{{ locationStore.selectedLocation.description || '从这里出发' }}</p>
@@ -329,42 +329,26 @@ onMounted(loadScheduleData)
             <div class="node-body">
               <div class="node-label">
                 <span>终点</span>
-                <small>选填 · 默认下一节课</small>
+                <small>选填 · 只预览地图</small>
               </div>
 
-              <van-search
-                id="destinationSearch"
-                v-model="destinationQuery"
-                shape="round"
+              <BuildingPicker
+                :model-value="destinationBuildingId"
+                :buildings="buildings"
                 placeholder="想先预览其他终点？"
+                :filter="filterScheduleLocations"
+                @update:model-value="selectDestinationById"
               />
 
-              <div class="location-result-list">
-                <button
-                  v-for="building in destinationSearchResults"
-                  :key="building.id"
-                  type="button"
-                  :class="{ active: selectedDestination?.id === building.id }"
-                  :aria-pressed="selectedDestination?.id === building.id"
-                  @click="selectDestination(building)"
-                >
-                  <i></i>
-                  <span>
-                    <strong>{{ locationTitle(building) }}</strong>
-                    <small>{{ locationSubtitle(building) }}</small>
-                  </span>
-                </button>
-              </div>
-
               <div v-if="selectedDestination" class="selected-place selected-destination">
-                <span><van-icon name="flag-o" /></span>
+                <span><TechIcon name="flag" :size="17" /></span>
                 <div>
                   <small>预览终点</small>
                   <strong>{{ locationTitle(selectedDestination) }}</strong>
                   <p>{{ locationSubtitle(selectedDestination) }}</p>
                 </div>
                 <button type="button" aria-label="改回下一节课终点" @click="clearDestination">
-                  <van-icon name="cross" />
+                  <TechIcon name="close" :size="15" />
                 </button>
               </div>
             </div>
@@ -384,25 +368,23 @@ onMounted(loadScheduleData)
             <TechIcon v-if="!generating" name="arrow" :size="20" />
             <span v-else class="soft-loader"></span>
           </button>
-        </template>
       </section>
 
       <section
-        v-if="routeReady"
-        v-reveal="{ from: 'left', distance: 42 }"
-        class="map-card fresh-card"
+        v-if="scheduleError"
+        class="schedule-recovery fresh-card"
+        :data-error-code="scheduleError.code"
+        role="status"
       >
-        <div class="fresh-section-heading">
-          <div><h2>沿着这条路走</h2><p>校园步行路线仅供参考</p></div>
+        <span class="recovery-mark" aria-hidden="true">!</span>
+        <div>
+          <small>这次没有生成路线</small>
+          <h2>{{ scheduleError.title }}</h2>
+          <p>{{ scheduleError.message }}</p>
         </div>
-        <RealCampusMap
-          title=""
-          subtitle=""
-          :from-point="routeFromPoint"
-          :to-point="suggestionRouteToPoint"
-          :walking-route="true"
-          height="300px"
-        />
+        <button type="button" data-testid="schedule-recovery-action" @click="openScheduleRecovery">
+          {{ recoveryActionLabel(scheduleError) }}
+        </button>
       </section>
 
       <section
@@ -422,7 +404,7 @@ onMounted(loadScheduleData)
           <h2>{{ suggestion.next_course.course_name }}</h2>
           <p>
             {{ suggestion.next_course.start_time }}—{{ suggestion.next_course.end_time }}
-            · {{ suggestion.target_building.name }} {{ suggestion.next_course.room_name }}
+            · {{ locationTitle(suggestion.target_building) }} · {{ suggestion.next_course.room_name }}
           </p>
           <span v-if="suggestion.next_course.teacher">{{ suggestion.next_course.teacher }}</span>
           <span v-if="suggestion.next_course.weeks">{{ suggestion.next_course.weeks }} 周</span>
@@ -431,12 +413,12 @@ onMounted(loadScheduleData)
         <div class="route-summary">
           <article>
             <span>从</span>
-            <strong>{{ suggestion.from_location.name }}</strong>
+            <strong>{{ locationTitle(suggestion.from_location) }}</strong>
           </article>
           <i><TechIcon name="arrow" :size="18" /></i>
           <article>
             <span>到</span>
-            <strong>{{ suggestion.target_building.name }}</strong>
+            <strong>{{ locationTitle(suggestion.target_building) }}</strong>
           </article>
         </div>
 
@@ -449,6 +431,42 @@ onMounted(loadScheduleData)
         <p class="suggestion-text">{{ suggestion.text }}</p>
         <p v-if="suggestion.warning" class="warning-text">{{ suggestion.warning }}</p>
       </section>
+
+      <section
+        v-if="routeReady"
+        v-reveal="{ from: 'left', distance: 42 }"
+        class="map-card fresh-card"
+        :class="{ collapsed: !mapExpanded }"
+      >
+        <button
+          type="button"
+          class="map-toggle"
+          :aria-expanded="mapExpanded"
+          @click="toggleRouteMap"
+        >
+          <div class="fresh-section-heading">
+            <div>
+              <h2>沿着这条路走</h2>
+              <p>{{ mapExpanded ? '校园步行路线仅供参考' : '点开查看路线预览' }}</p>
+            </div>
+          </div>
+          <span class="map-toggle-action">
+            {{ mapExpanded ? '收起地图' : '展开地图' }}
+            <TechIcon name="arrow" :size="16" />
+          </span>
+        </button>
+        <div v-if="mapExpanded" class="map-body">
+          <RealCampusMap
+            title=""
+            subtitle=""
+            :from-point="routeFromPoint"
+            :to-point="suggestionRouteToPoint"
+            :walking-route="true"
+            height="300px"
+          />
+        </div>
+      </section>
+      </SemesterGate>
     </div>
   </section>
 </template>
@@ -472,7 +490,7 @@ onMounted(loadScheduleData)
   border-radius: 34px 34px 26px 34px;
   background:
     linear-gradient(145deg, rgba(255, 255, 255, 0.5), transparent 44%),
-    #dfecee;
+    var(--fresh-sky);
   padding: 25px 22px 18px;
   box-shadow: var(--fresh-shadow-soft);
 }
@@ -565,7 +583,7 @@ onMounted(loadScheduleData)
   width: 13px;
   height: 13px;
   place-items: center;
-  border: 4px solid #dfecee;
+  border: 4px solid var(--fresh-sky);
   border-radius: 50%;
   background: var(--fresh-green);
   box-sizing: content-box;
@@ -585,7 +603,7 @@ onMounted(loadScheduleData)
   height: 34px;
   border-width: 5px;
   background: var(--fresh-paper);
-  color: #5b8992;
+  color: var(--cm-chat-dark);
   animation-delay: 1.1s;
 }
 
@@ -597,7 +615,7 @@ onMounted(loadScheduleData)
   z-index: 4;
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  border-radius: 18px;
+  border-radius: var(--radius-md);
   background: rgba(255, 255, 255, 0.57);
   padding: 10px 4px;
 }
@@ -614,13 +632,13 @@ onMounted(loadScheduleData)
 
 .journey-meta span {
   color: var(--fresh-muted);
-  font-size: 8px;
+  font-size: 12px;
 }
 
 .journey-meta strong {
   overflow: hidden;
   color: var(--fresh-ink);
-  font-size: 11px;
+  font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -639,8 +657,8 @@ onMounted(loadScheduleData)
 
 .planner-heading > div > span {
   color: var(--fresh-green);
-  font-size: 10px;
-  font-weight: 720;
+  font-size: 12px;
+  font-weight: 700;
 }
 
 .planner-heading h2 {
@@ -652,18 +670,18 @@ onMounted(loadScheduleData)
 .planner-heading p {
   margin: 5px 0 0;
   color: var(--fresh-muted);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .planner-heading > button {
   display: grid;
   flex: 0 0 auto;
-  width: 39px;
-  height: 39px;
+  width: 44px;
+  height: 44px;
   place-items: center;
   border: 1px solid var(--fresh-line);
-  border-radius: 14px;
-  background: #f8faf4;
+  border-radius: var(--radius-sm);
+  background: var(--fresh-paper-2);
   color: var(--fresh-green-dark);
   cursor: pointer;
 }
@@ -675,7 +693,7 @@ onMounted(loadScheduleData)
   justify-items: center;
   gap: 12px;
   color: var(--fresh-muted);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .planner-loading > span {
@@ -688,7 +706,7 @@ onMounted(loadScheduleData)
 .planner-loading i {
   width: 6px;
   height: 10px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--fresh-blue);
   animation: planner-load 850ms ease-in-out infinite alternate;
 }
@@ -746,19 +764,19 @@ onMounted(loadScheduleData)
 .node-label > span {
   color: var(--fresh-ink);
   font-size: 12px;
-  font-weight: 750;
+  font-weight: 700;
 }
 
 .node-label > button {
   display: flex;
-  min-height: 30px;
+  min-height: 44px;
   align-items: center;
   gap: 5px;
   border: 0;
   background: transparent;
   color: var(--fresh-green-dark);
   cursor: pointer;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
   padding: 0 3px;
 }
@@ -771,75 +789,7 @@ onMounted(loadScheduleData)
 
 .node-label > small {
   color: var(--fresh-muted);
-  font-size: 9px;
-}
-
-.location-result-list {
-  display: flex;
-  gap: 7px;
-  overflow-x: auto;
-  margin-top: 9px;
-  padding: 1px 1px 5px;
-  scrollbar-width: none;
-}
-
-.location-result-list::-webkit-scrollbar { display: none; }
-
-.location-result-list > button {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
-  flex: 0 0 155px;
-  gap: 8px;
-  align-items: center;
-  min-height: 57px;
-  border: 1px solid var(--fresh-line);
-  border-radius: 17px;
-  background: #fafbf6;
-  color: var(--fresh-ink);
-  cursor: pointer;
-  padding: 9px 10px;
-  text-align: left;
-}
-
-.location-result-list > button > i {
-  width: 8px;
-  height: 8px;
-  border: 2px solid #b8c4b7;
-  border-radius: 50%;
-}
-
-.location-result-list > button > span {
-  display: grid;
-  min-width: 0;
-  gap: 3px;
-}
-
-.location-result-list strong,
-.location-result-list small {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.location-result-list strong { font-size: 10px; }
-.location-result-list small { color: var(--fresh-muted); font-size: 8px; }
-
-.location-result-list > button.active {
-  border-color: #96b39a;
-  background: var(--fresh-mint);
-  color: var(--fresh-green-dark);
-}
-
-.end-node .location-result-list > button.active {
-  border-color: #a6c1c6;
-  background: var(--fresh-sky);
-  color: #4e7c85;
-}
-
-.location-result-list > button.active > i {
-  border-color: var(--fresh-green);
-  background: var(--fresh-green);
-  box-shadow: 0 0 0 4px rgba(79, 125, 88, 0.1);
+  font-size: 12px;
 }
 
 .selected-place {
@@ -848,8 +798,8 @@ onMounted(loadScheduleData)
   gap: 9px;
   align-items: center;
   margin-top: 9px;
-  border-radius: 17px;
-  background: #eef4ea;
+  border-radius: var(--fresh-radius-sm);
+  background: var(--fresh-mint);
   padding: 10px;
 }
 
@@ -869,16 +819,17 @@ onMounted(loadScheduleData)
   gap: 2px;
 }
 
-.selected-place small { color: var(--fresh-green); font-size: 8px; }
-.selected-place strong { overflow: hidden; color: var(--fresh-ink); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
-.selected-place p { overflow: hidden; margin: 0; color: var(--fresh-muted); font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+.selected-place small { color: var(--fresh-green-dark); font-size: 12px; font-weight: 700; }
+.selected-place strong { overflow: hidden; color: var(--fresh-ink); font-size: 15px; text-overflow: ellipsis; white-space: nowrap; }
+.selected-place p { overflow: hidden; margin: 0; color: var(--fresh-muted); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
 
 .selected-destination {
   grid-template-columns: auto minmax(0, 1fr) auto;
-  background: #eaf2f3;
+  background: var(--fresh-sky);
 }
 
 .selected-destination > span { color: var(--fresh-blue); }
+.selected-destination small { color: #466e76; }
 
 .selected-destination > button {
   display: grid;
@@ -888,7 +839,7 @@ onMounted(loadScheduleData)
   border: 1px solid #c5d7d9;
   border-radius: 11px;
   background: #fff;
-  color: #628791;
+  color: var(--cm-chat-dark);
   cursor: pointer;
 }
 
@@ -919,7 +870,7 @@ onMounted(loadScheduleData)
   gap: 11px;
   align-items: center;
   width: 100%;
-  min-height: 64px;
+  min-height: 68px;
   margin-top: 17px;
   overflow: hidden;
   border: 0;
@@ -927,7 +878,7 @@ onMounted(loadScheduleData)
   background: var(--fresh-green-dark);
   color: #fff;
   cursor: pointer;
-  padding: 9px 15px 9px 10px;
+  padding: 12px 15px 12px 10px;
   text-align: left;
   box-shadow: 0 13px 28px rgba(49, 91, 59, 0.2);
 }
@@ -946,8 +897,8 @@ onMounted(loadScheduleData)
   gap: 3px;
 }
 
-.generate-button strong { font-size: 13px; }
-.generate-button small { color: rgba(255, 255, 255, 0.7); font-size: 9px; }
+.generate-button strong { font-size: 16px; font-weight: 700; }
+.generate-button small { color: rgba(255, 255, 255, 0.82); font-size: 13px; }
 
 .generate-button:disabled {
   background: #86988a;
@@ -966,13 +917,111 @@ onMounted(loadScheduleData)
   animation: loader-spin 780ms linear infinite;
 }
 
-.map-card {
-  overflow: hidden;
+.schedule-recovery {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+  border-color: #ead4ae;
+  background: #fffaf0;
   padding: 18px;
 }
 
-.map-card .fresh-section-heading {
-  margin-bottom: 13px;
+.recovery-mark {
+  display: grid;
+  width: 35px;
+  height: 35px;
+  place-items: center;
+  border-radius: 50%;
+  background: #f1d8a9;
+  color: #704f20;
+  font-size: 18px;
+  font-weight: 900;
+}
+
+.schedule-recovery > div { min-width: 0; }
+.schedule-recovery small { color: #76664e; font-size: 12px; font-weight: 700; }
+.schedule-recovery h2 {
+  margin: 4px 0 0;
+  color: #40382c;
+  font-size: 19px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.schedule-recovery p {
+  margin: 6px 0 0;
+  color: #655c4d;
+  font-size: 13px;
+  line-height: 1.7;
+}
+.schedule-recovery > button {
+  grid-column: 2;
+  justify-self: start;
+  min-height: 44px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--fresh-green);
+  color: #fff;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 800;
+  padding: 0 17px;
+}
+
+.map-card {
+  overflow: hidden;
+  padding: 14px 16px 16px;
+}
+
+.map-card.collapsed {
+  padding-bottom: 12px;
+}
+
+.map-toggle {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  width: 100%;
+  min-height: 52px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  padding: 4px 2px 10px;
+  text-align: left;
+}
+
+.map-toggle .fresh-section-heading {
+  margin: 0;
+}
+
+.map-toggle-action {
+  display: inline-flex;
+  min-height: 36px;
+  align-items: center;
+  gap: 4px;
+  border-radius: var(--radius-pill);
+  background: var(--fresh-mint);
+  color: var(--fresh-green-dark);
+  font-size: 13px;
+  font-weight: 700;
+  padding: 0 12px;
+  white-space: nowrap;
+}
+
+.map-card.collapsed .map-toggle-action :deep(svg) {
+  transform: rotate(90deg);
+}
+
+.map-card:not(.collapsed) .map-toggle-action :deep(svg) {
+  transform: rotate(-90deg);
+}
+
+.map-body {
+  margin-top: 2px;
+  overflow: hidden;
+  border-radius: var(--radius-md);
 }
 
 .departure-card {
@@ -981,7 +1030,7 @@ onMounted(loadScheduleData)
   border-radius: 32px 32px 25px 32px;
   background:
     linear-gradient(145deg, rgba(255, 255, 255, 0.45), transparent 40%),
-    #e5eedf;
+    var(--fresh-mint);
   padding: 23px 19px 19px;
   box-shadow: var(--fresh-shadow);
 }
@@ -1004,11 +1053,11 @@ onMounted(loadScheduleData)
 
 .departure-time > span {
   display: inline-flex;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: rgba(255, 255, 255, 0.65);
   color: var(--fresh-green-dark);
-  font-size: 9px;
-  font-weight: 720;
+  font-size: 12px;
+  font-weight: 700;
   padding: 5px 9px;
 }
 
@@ -1016,19 +1065,20 @@ onMounted(loadScheduleData)
 .departure-time > span.late { color: #ad5e56; }
 
 .departure-time p {
-  margin: 15px 0 0;
+  margin: 12px 0 0;
   color: var(--fresh-text);
-  font-size: 11px;
+  font-size: 14px;
+  font-weight: 600;
 }
 
 .departure-time > strong {
   display: block;
-  margin-top: 2px;
+  margin-top: 4px;
   color: var(--fresh-ink);
-  font-family: "STKaiti", "KaiTi", sans-serif;
-  font-size: clamp(51px, 14vw, 70px);
+  font-family: var(--font-serif);
+  font-size: clamp(44px, 12vw, 58px);
   line-height: 1;
-  letter-spacing: -0.06em;
+  letter-spacing: -0.04em;
 }
 
 .course-destination {
@@ -1038,10 +1088,10 @@ onMounted(loadScheduleData)
   padding: 14px;
 }
 
-.course-destination small { color: var(--fresh-green); font-size: 9px; font-weight: 720; }
+.course-destination small { color: var(--fresh-green); font-size: 12px; font-weight: 700; }
 .course-destination h2 { margin: 4px 0 0; color: var(--fresh-ink); font-size: 18px; }
-.course-destination p { margin: 6px 0 0; color: var(--fresh-text); font-size: 10px; line-height: 1.55; }
-.course-destination > span { display: inline-block; margin-top: 7px; margin-right: 6px; border-radius: 999px; background: #fff; color: var(--fresh-muted); font-size: 8px; padding: 4px 7px; }
+.course-destination p { margin: 6px 0 0; color: var(--fresh-text); font-size: 14px; line-height: 1.55; }
+.course-destination > span { display: inline-block; margin-top: 7px; margin-right: 6px; border-radius: var(--radius-pill); background: #fff; color: var(--fresh-muted); font-size: 12px; padding: 5px 9px; }
 
 .route-summary {
   display: grid;
@@ -1060,8 +1110,8 @@ onMounted(loadScheduleData)
   padding: 11px;
 }
 
-.route-summary article span { color: var(--fresh-muted); font-size: 8px; }
-.route-summary article strong { overflow: hidden; color: var(--fresh-ink); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.route-summary article span { color: var(--fresh-muted); font-size: 12px; }
+.route-summary article strong { overflow: hidden; color: var(--fresh-ink); font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
 .route-summary > i { color: var(--fresh-green); }
 
 .walking-metrics {
@@ -1079,24 +1129,24 @@ onMounted(loadScheduleData)
 }
 
 .walking-metrics div + div { border-left: 1px solid rgba(79, 125, 88, 0.13); }
-.walking-metrics span { color: var(--fresh-muted); font-size: 8px; }
-.walking-metrics strong { color: var(--fresh-ink); font-size: 12px; }
+.walking-metrics span { color: var(--fresh-muted); font-size: 12px; }
+.walking-metrics strong { color: var(--fresh-ink); font-size: 15px; font-weight: 700; }
 
 .suggestion-text {
   margin: 14px 0 0;
   color: var(--fresh-text);
-  font-size: 11px;
+  font-size: 14px;
   line-height: 1.65;
 }
 
 .warning-text {
   margin: 10px 0 0;
-  border-radius: 14px;
-  background: #fae8df;
+  border-radius: var(--radius-sm);
+  background: var(--cm-red-soft);
   color: #9e5f55;
-  font-size: 10px;
+  font-size: 13px;
   line-height: 1.55;
-  padding: 10px;
+  padding: 12px;
 }
 
 @keyframes journey-grow {

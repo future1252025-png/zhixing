@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { TOKEN_STORAGE_KEY } from '@/api/request'
 import * as authApi from '@/api/auth'
+import * as apiErrors from '@/api/errors'
 import { useAuthStore } from './auth'
 
 vi.mock('@/api/auth', () => ({
@@ -10,6 +11,17 @@ vi.mock('@/api/auth', () => ({
   login: vi.fn(),
   register: vi.fn(),
   updateProfile: vi.fn()
+}))
+
+vi.mock('@/api/errors', () => ({
+  resetUnauthorizedState: vi.fn(),
+  extractBusinessError: vi.fn((error: { response?: { status?: number } }) => ({
+    status: error.response?.status ?? 0,
+    code: 'test_error',
+    message: 'test',
+    fields: [],
+    details: {}
+  }))
 }))
 
 const user = {
@@ -45,6 +57,7 @@ describe('auth store', () => {
     expect(store.currentUser?.username).toBe('alice')
     expect(localStorage.getItem(TOKEN_STORAGE_KEY)).toBe('token-123')
     expect(store.isAuthenticated).toBe(true)
+    expect(apiErrors.resetUnauthorizedState).toHaveBeenCalledTimes(1)
   })
 
   it('loads current user when token exists', async () => {
@@ -58,12 +71,38 @@ describe('auth store', () => {
     expect(store.currentUser?.nickname).toBe('Alice')
   })
 
+  it('keeps the saved session on a transient profile load failure', async () => {
+    localStorage.setItem(TOKEN_STORAGE_KEY, 'saved-token')
+    vi.mocked(authApi.getCurrentUser).mockRejectedValue({
+      response: { status: 503 }
+    })
+    const store = useAuthStore()
+
+    await expect(store.loadCurrentUser()).rejects.toBeTruthy()
+
+    expect(store.token).toBe('saved-token')
+    expect(localStorage.getItem(TOKEN_STORAGE_KEY)).toBe('saved-token')
+  })
+
+  it('clears the saved session when the profile request is unauthorized', async () => {
+    localStorage.setItem(TOKEN_STORAGE_KEY, 'expired-token')
+    vi.mocked(authApi.getCurrentUser).mockRejectedValue({
+      response: { status: 401 }
+    })
+    const store = useAuthStore()
+
+    await expect(store.loadCurrentUser()).rejects.toBeTruthy()
+
+    expect(store.token).toBeNull()
+    expect(localStorage.getItem(TOKEN_STORAGE_KEY)).toBeNull()
+  })
+
   it('clears token and user on logout', () => {
     const store = useAuthStore()
 
     store.setToken('token-123')
     store.setCurrentUser(user)
-    store.logout()
+    store.clearSession()
 
     expect(store.token).toBeNull()
     expect(store.currentUser).toBeNull()

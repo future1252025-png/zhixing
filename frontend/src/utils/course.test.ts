@@ -1,9 +1,15 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  COURSE_ACCENT_PALETTE,
   buildEmptyCourseForm,
   buildCourseCreateQuery,
   buildCourseColorMap,
+  courseToForm,
+  courseUsesStandardSlotTime,
+  formatCourseLocation,
+  formatTimetableCourseLocation,
+  getCourseDisplaySlot,
   parseWeeksRangeToPicker,
   buildWeeksRange,
   filterCoursesByWeek,
@@ -14,8 +20,6 @@ import {
   getTeachingWeekOptions,
   groupCoursesByWeekday,
   isCourseActiveInWeek,
-  readSelectedWeek,
-  writeSelectedWeek,
   validateCourseForm
 } from './course'
 import type { Course } from '@/types/course'
@@ -44,8 +48,11 @@ const baseCourse: Course = {
     type: '学习'
   },
   room_name: 'A101',
+  source_location: null,
   teacher: '李老师',
   weeks: '1-16',
+  source_kind: 'manual',
+  needs_location_review: false,
   created_at: '2026-05-29T08:00:00'
 }
 
@@ -63,7 +70,11 @@ describe('course helpers', () => {
       '课程名称不能为空'
     )
     expect(validateCourseForm({ ...baseForm, room_name: '' })).toBe(
-      '教室不能为空'
+      '请输入完整教室'
+    )
+    expect(validateCourseForm({ ...baseForm, room_name: '教'.repeat(120) })).toBeNull()
+    expect(validateCourseForm({ ...baseForm, room_name: '教'.repeat(121) })).toBe(
+      '教室不能超过 120 字'
     )
     expect(validateCourseForm({ ...baseForm, teacher: 'a'.repeat(65) })).toBe(
       '教师不能超过 64 字'
@@ -131,22 +142,6 @@ describe('course helpers', () => {
     expect(filtered.map((course) => course.id)).toEqual([1, 2])
   })
 
-  it('reads and writes selected teaching week safely', () => {
-    const storage = new Map<string, string>()
-    const localStorageLike = {
-      getItem: (key: string) => storage.get(key) ?? null,
-      setItem: (key: string, value: string) => storage.set(key, value)
-    }
-
-    expect(readSelectedWeek(localStorageLike)).toBe(1)
-    writeSelectedWeek(localStorageLike, 13)
-    expect(readSelectedWeek(localStorageLike)).toBe(13)
-    writeSelectedWeek(localStorageLike, 16)
-    expect(readSelectedWeek(localStorageLike)).toBe(16)
-    writeSelectedWeek(localStorageLike, 99)
-    expect(readSelectedWeek(localStorageLike)).toBe(1)
-  })
-
   it('provides all teaching week options including week 16', () => {
     const options = getTeachingWeekOptions()
 
@@ -154,6 +149,7 @@ describe('course helpers', () => {
     expect(options[0]).toBe(1)
     expect(options[15]).toBe(16)
     expect(options[19]).toBe(20)
+    expect(getTeachingWeekOptions(8)).toEqual([1, 2, 3, 4, 5, 6, 7, 8])
   })
 
   it('provides compact quick week options around the selected week', () => {
@@ -173,8 +169,8 @@ describe('course helpers', () => {
     expect(colorMap[1]).not.toBe(colorMap[3])
   })
 
-  it('assigns a unique color to each subject name', () => {
-    const courses = Array.from({ length: 12 }, (_, index) => ({
+  it('assigns a unique curated color to each subject name up to the palette size', () => {
+    const courses = Array.from({ length: COURSE_ACCENT_PALETTE.length }, (_, index) => ({
       ...baseCourse,
       course_name: `课程 ${index + 1}`,
       id: index + 1
@@ -183,6 +179,18 @@ describe('course helpers', () => {
     const colors = [...new Set(Object.values(colorMap))]
 
     expect(colors).toHaveLength(courses.length)
+    expect(colors.every((color) => COURSE_ACCENT_PALETTE.includes(color as never))).toBe(true)
+  })
+
+  it('keeps a subject color stable across sessions and unrelated set changes', () => {
+    const alone = buildCourseColorMap([{ ...baseCourse, id: 1, course_name: '数据结构' }])
+    const withOthers = buildCourseColorMap([
+      { ...baseCourse, id: 1, course_name: '数据结构' },
+      { ...baseCourse, id: 2, course_name: '大学英语' },
+      { ...baseCourse, id: 3, course_name: '高等数学' }
+    ])
+
+    expect(withOthers[1]).toBe(alone[1])
   })
 
   it('builds teaching week ranges from picker values', () => {
@@ -223,6 +231,90 @@ describe('course helpers', () => {
     expect(slots).toHaveLength(5)
   })
 
+  it('assigns every course to one display slot and preserves exceptional times', () => {
+    const standardSlot = getCourseDisplaySlot(baseCourse)
+    const exceptionalCourse = { ...baseCourse, start_time: '09:00', end_time: '10:40' }
+    const exceptionalSlot = getCourseDisplaySlot(exceptionalCourse)
+
+    expect(standardSlot?.section).toBe('1-2')
+    expect(courseUsesStandardSlotTime(baseCourse, standardSlot!)).toBe(true)
+    expect(exceptionalSlot?.section).toBe('1-2')
+    expect(courseUsesStandardSlotTime(exceptionalCourse, exceptionalSlot!)).toBe(false)
+  })
+
+  it('keeps an imported course without a time editable instead of forcing it into a slot', () => {
+    const pendingCourse: Course = {
+      ...baseCourse,
+      source_kind: 'import',
+      start_time: null,
+      end_time: null
+    }
+
+    expect(getCourseDisplaySlot(pendingCourse)).toBeNull()
+    expect(courseToForm(pendingCourse)).toMatchObject({ start_time: '', end_time: '' })
+  })
+
+  it('keeps full locations while removing timetable-only campus and building repetition', () => {
+    const course = {
+      ...baseCourse,
+      building: { ...baseCourse.building, name: '湖北大学(武昌主校区)-教4' },
+      room_name: '教4-211'
+    }
+    const detailedCourse = {
+      ...baseCourse,
+      building: { ...baseCourse.building, name: '湖北大学武昌校区国际教育学院' },
+      room_name: '东区三层 A101 交互设计实验室'
+    }
+    const numberedTeachingBuildingCourse = {
+      ...course,
+      building: { ...baseCourse.building, name: '3号教学楼' },
+      room_name: '教3-205'
+    }
+    const mismatchedTeachingBuildingCourse = {
+      ...numberedTeachingBuildingCourse,
+      building: { ...baseCourse.building, name: '4号教学楼' }
+    }
+    const longTrainingRoomCourse = {
+      ...baseCourse,
+      building: { ...baseCourse.building, name: '综合实训大楼' },
+      room_name: '实训大楼413-418数据中国实验室2-3'
+    }
+
+    expect(formatCourseLocation(course)).toBe('湖北大学(武昌主校区)-教4 · 教4-211')
+    expect(formatTimetableCourseLocation(course)).toBe('教4-211')
+    expect(formatTimetableCourseLocation(detailedCourse)).toBe(
+      '国际教育学院 · 东区三层 A101 交互设计实验室'
+    )
+    expect(formatTimetableCourseLocation(numberedTeachingBuildingCourse)).toBe('教3-205')
+    expect(formatTimetableCourseLocation(mismatchedTeachingBuildingCourse)).toBe(
+      '4号教学楼 · 教3-205'
+    )
+    expect(formatTimetableCourseLocation(longTrainingRoomCourse)).toBe(
+      '实训大楼 413-418 · 数据中国实验室 2-3'
+    )
+  })
+
+  it('prefers the exact imported location and stays safe without a mapped building', () => {
+    const importedLocation = {
+      building: { name: '系统猜测的教学楼' },
+      room_name: '待确认教室',
+      source_location: '教务原文：创新创业中心西区 302'
+    }
+
+    expect(formatCourseLocation(importedLocation)).toBe('教务原文：创新创业中心西区 302')
+    expect(formatTimetableCourseLocation(importedLocation)).toBe('教务原文：创新创业中心西区 302')
+    expect(formatCourseLocation({
+      building: null,
+      room_name: '未知场地 101',
+      source_location: null
+    })).toBe('未知场地 101')
+    expect(formatTimetableCourseLocation({
+      building: null,
+      room_name: '',
+      source_location: null
+    })).toBe('地点待补充')
+  })
+
   it('finds same-day time overlaps without blocking save', () => {
     const overlap = findCourseTimeOverlap(
       {
@@ -249,5 +341,18 @@ describe('course helpers', () => {
     )
 
     expect(result?.id).toBe(4)
+  })
+
+  it('ignores pending-time imports when looking for the next departure', () => {
+    const now = new Date('2026-06-15T10:00:00')
+    const result = findNextCourse(
+      [
+        { ...baseCourse, id: 2, start_time: null, end_time: null, source_kind: 'import' },
+        { ...baseCourse, id: 3, start_time: '14:00', end_time: '15:40' }
+      ],
+      now
+    )
+
+    expect(result?.id).toBe(3)
   })
 })

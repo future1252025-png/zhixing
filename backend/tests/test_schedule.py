@@ -1,20 +1,25 @@
 from collections.abc import Generator
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
+from app.core.clock import SHANGHAI_TZ, get_current_time
+from app.core.errors import BusinessError
 from app.db.database import Base, create_sqlite_engine, get_session, init_db
 from app.db.seed import seed_demo_data
 from app.main import app
-from app.models import Building, Course, User
+from app.models import Building, Course, SemesterSetting, User
 from app.schemas.schedule import ScheduleSuggestionRequest
 from app.services.location_service import (
     estimate_walk_minutes,
     haversine_distance_meters,
 )
+from app.services import schedule_service
 from app.services.schedule_service import (
     build_schedule_suggestion,
     find_next_course,
@@ -53,8 +58,8 @@ def client_and_session(
         engine.dispose()
 
 
-def auth_headers(client: TestClient, username: str = "schedule_user") -> dict[str, str]:
-    client.post(
+def auth_headers(client: TestClient, username: str, *, configure: bool = True) -> dict[str, str]:
+    register = client.post(
         "/api/auth/register",
         json={
             "username": username,
@@ -63,35 +68,55 @@ def auth_headers(client: TestClient, username: str = "schedule_user") -> dict[st
             "student_id": f"{username}-2026",
         },
     )
+    assert register.status_code == 201
     login = client.post(
         "/api/auth/login",
         json={"username": username, "password": "secret123"},
     )
     assert login.status_code == 200
-    return {"Authorization": f"Bearer {login.json()['access_token']}"}
+    headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+    if configure:
+        response = client.put(
+            "/api/semester",
+            json={"start_date": "2026-08-31", "total_weeks": 20},
+            headers=headers,
+        )
+        assert response.status_code == 200
+    return headers
 
 
-def first_two_building_ids(client: TestClient) -> tuple[int, int]:
-    response = client.get("/api/buildings")
-    assert response.status_code == 200
-    buildings = response.json()
-    return buildings[0]["id"], buildings[1]["id"]
+def first_two_buildings(session: Session) -> tuple[Building, Building]:
+    buildings = list(session.scalars(select(Building).order_by(Building.id).limit(2)))
+    assert len(buildings) == 2
+    return buildings[0], buildings[1]
 
 
-def create_course_payload(building_id: int, **overrides: object) -> dict[str, object]:
-    tomorrow_weekday = (datetime.now() + timedelta(days=1)).isoweekday()
-    payload: dict[str, object] = {
-        "course_name": "Schedule Design",
-        "weekday": tomorrow_weekday,
-        "start_time": "10:00",
-        "end_time": "11:40",
-        "building_id": building_id,
-        "room_name": "A101",
-        "teacher": "Teacher Wang",
-        "weeks": "1-16",
-    }
-    payload.update(overrides)
-    return payload
+def create_service_user(
+    session: Session,
+    username: str,
+    *,
+    start_date: date | None = date(2026, 8, 31),
+    total_weeks: int = 20,
+) -> User:
+    user = User(
+        username=username,
+        password_hash="test-hash",
+        nickname=username.title(),
+        student_id=f"{username}-2026",
+    )
+    session.add(user)
+    session.flush()
+    if start_date is not None:
+        session.add(
+            SemesterSetting(
+                user_id=user.id,
+                start_date=start_date,
+                total_weeks=total_weeks,
+            )
+        )
+    session.commit()
+    session.refresh(user)
+    return user
 
 
 def add_course(
@@ -99,10 +124,12 @@ def add_course(
     user: User,
     building: Building,
     *,
-    course_name: str,
-    weekday: int,
-    start_time: str,
+    course_name: str = "数据库原理",
+    weekday: int = 1,
+    start_time: str = "10:00",
     end_time: str = "11:40",
+    weeks: str = "1-20",
+    room_name: str = "A101",
 ) -> Course:
     course = Course(
         user_id=user.id,
@@ -111,7 +138,8 @@ def add_course(
         start_time=start_time,
         end_time=end_time,
         building_id=building.id,
-        room_name="A101",
+        room_name=room_name,
+        weeks=weeks,
     )
     session.add(course)
     session.commit()
@@ -119,17 +147,885 @@ def add_course(
     return course
 
 
-def create_service_user(session: Session, username: str) -> User:
-    user = User(
-        username=username,
-        password_hash="test-hash",
-        nickname=username.title(),
-        student_id=f"{username}-2026",
+def add_api_course(
+    SessionLocal: sessionmaker,
+    *,
+    username: str,
+    building_id: int,
+    weekday: int,
+    start_time: str,
+    end_time: str = "11:40",
+    weeks: str = "1-20",
+    room_name: str = "A101",
+) -> int:
+    with SessionLocal() as session:
+        user = session.scalar(select(User).where(User.username == username))
+        assert user is not None
+        building = session.get(Building, building_id)
+        assert building is not None
+        return add_course(
+            session,
+            user,
+            building,
+            weekday=weekday,
+            start_time=start_time,
+            end_time=end_time,
+            weeks=weeks,
+            room_name=room_name,
+        ).id
+
+
+def assert_business_error(error: pytest.ExceptionInfo[BusinessError], code: str) -> None:
+    assert error.value.code == code
+
+
+@pytest.mark.parametrize(
+    ("weeks", "teaching_week", "expected"),
+    [
+        ("2", 2, True),
+        ("1-4", 2, True),
+        ("1,2,4", 2, True),
+        ("1-19(单)", 2, False),
+        ("2-20(双)", 2, True),
+    ],
+)
+def test_course_occurs_on_uses_strict_week_rule(
+    weeks: str,
+    teaching_week: int,
+    expected: bool,
+) -> None:
+    course = SimpleNamespace(weekday=1, weeks=weeks)
+    target_date = date(2026, 8, 31) + timedelta(weeks=teaching_week - 1)
+
+    assert schedule_service.course_occurs_on(
+        course,
+        target_date=target_date,
+        start_date=date(2026, 8, 31),
+        total_weeks=20,
+    ) is expected
+
+
+def test_find_next_course_requires_semester_configuration(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    _, SessionLocal = client_and_session
+    with SessionLocal() as session:
+        user = create_service_user(session, "unconfigured_service", start_date=None)
+        with pytest.raises(BusinessError) as raised:
+            find_next_course(
+                session,
+                user.id,
+                now=datetime(2026, 9, 7, 8, 0, tzinfo=SHANGHAI_TZ),
+            )
+
+    assert_business_error(raised, "semester_unconfigured")
+
+
+@pytest.mark.parametrize(
+    "now",
+    [
+        datetime(2026, 8, 30, 8, 0, tzinfo=SHANGHAI_TZ),
+        datetime(2027, 1, 18, 8, 0, tzinfo=SHANGHAI_TZ),
+    ],
+)
+def test_find_next_course_rejects_dates_outside_semester(
+    client_and_session: tuple[TestClient, sessionmaker],
+    now: datetime,
+) -> None:
+    _, SessionLocal = client_and_session
+    with SessionLocal() as session:
+        user = create_service_user(session, f"inactive_{now:%m%d}")
+        with pytest.raises(BusinessError) as raised:
+            find_next_course(session, user.id, now=now)
+
+    assert_business_error(raised, "semester_not_active")
+
+
+def test_find_next_course_can_find_later_day_in_current_teaching_week(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    _, SessionLocal = client_and_session
+    now = datetime(2026, 9, 7, 8, 0, tzinfo=SHANGHAI_TZ)  # week 2, Monday
+    with SessionLocal() as session:
+        user = create_service_user(session, "later_day")
+        _, building = first_two_buildings(session)
+        course = add_course(
+            session,
+            user,
+            building,
+            weekday=3,
+            start_time="09:00",
+            weeks="2",
+        )
+
+        result = find_next_course(session, user.id, now=now)
+
+    assert result is not None
+    assert result.course.id == course.id
+    assert result.starts_at == datetime(2026, 9, 9, 9, 0, tzinfo=SHANGHAI_TZ)
+    assert result.teaching_week == 2
+
+
+def test_find_next_course_filters_out_courses_not_active_this_week(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    _, SessionLocal = client_and_session
+    with SessionLocal() as session:
+        user = create_service_user(session, "week_filter")
+        _, building = first_two_buildings(session)
+        add_course(session, user, building, weekday=1, start_time="09:00", weeks="3-20")
+
+        result = find_next_course(
+            session,
+            user.id,
+            now=datetime(2026, 9, 7, 8, 0, tzinfo=SHANGHAI_TZ),
+        )
+
+    assert result is None
+
+
+def test_find_next_course_skips_imported_course_waiting_for_a_time(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    _, SessionLocal = client_and_session
+    with SessionLocal() as session:
+        user = create_service_user(session, "pending_time")
+        _, building = first_two_buildings(session)
+        session.add(
+            Course(
+                user_id=user.id,
+                course_name="待补全时间课程",
+                weekday=1,
+                start_time=None,
+                end_time=None,
+                building_id=building.id,
+                room_name="A101",
+                weeks="2",
+                source_kind="import",
+            )
+        )
+        upcoming = add_course(
+            session,
+            user,
+            building,
+            course_name="下一节完整课程",
+            weekday=1,
+            start_time="10:00",
+            end_time="11:40",
+            weeks="2",
+        )
+
+        result = find_next_course(
+            session,
+            user.id,
+            now=datetime(2026, 9, 7, 8, 0, tzinfo=SHANGHAI_TZ),
+        )
+
+    assert result is not None
+    assert result.course.id == upcoming.id
+
+
+def test_find_next_course_does_not_cross_from_sunday_into_next_week(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    _, SessionLocal = client_and_session
+    with SessionLocal() as session:
+        user = create_service_user(session, "sunday_boundary")
+        _, building = first_two_buildings(session)
+        add_course(session, user, building, weekday=1, start_time="09:00", weeks="3")
+
+        result = find_next_course(
+            session,
+            user.id,
+            now=datetime(2026, 9, 13, 20, 0, tzinfo=SHANGHAI_TZ),
+        )
+
+    assert result is None
+
+
+def test_find_next_course_does_not_look_at_next_week_when_this_week_is_empty(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    _, SessionLocal = client_and_session
+    with SessionLocal() as session:
+        user = create_service_user(session, "no_cross_week")
+        _, building = first_two_buildings(session)
+        add_course(session, user, building, weekday=3, start_time="09:00", weeks="3")
+
+        result = find_next_course(
+            session,
+            user.id,
+            now=datetime(2026, 9, 7, 8, 0, tzinfo=SHANGHAI_TZ),
+        )
+
+    assert result is None
+
+
+def test_same_earliest_start_time_is_reported_as_schedule_conflict(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    _, SessionLocal = client_and_session
+    with SessionLocal() as session:
+        user = create_service_user(session, "dirty_conflict")
+        _, building = first_two_buildings(session)
+        first = add_course(session, user, building, course_name="课程 A", weeks="2")
+        second = add_course(session, user, building, course_name="课程 B", weeks="2")
+
+        with pytest.raises(BusinessError) as raised:
+            find_next_course(
+                session,
+                user.id,
+                now=datetime(2026, 9, 7, 8, 0, tzinfo=SHANGHAI_TZ),
+            )
+
+    assert_business_error(raised, "schedule_conflict")
+    assert raised.value.details["course_ids"] == [first.id, second.id]
+
+
+@pytest.mark.parametrize(
+    ("end_time", "issues"),
+    [
+        ("not-a-time", ["end_time"]),
+        ("09:00", ["start_time", "end_time"]),
+        ("08:00", ["start_time", "end_time"]),
+    ],
+)
+def test_next_course_rejects_invalid_legacy_end_time(
+    client_and_session: tuple[TestClient, sessionmaker],
+    end_time: str,
+    issues: list[str],
+) -> None:
+    _, SessionLocal = client_and_session
+    with SessionLocal() as session:
+        user = create_service_user(session, f"invalid_end_{end_time.replace(':', '_')}")
+        _, building = first_two_buildings(session)
+        course = add_course(
+            session,
+            user,
+            building,
+            weekday=1,
+            start_time="09:00",
+            end_time=end_time,
+            weeks="2",
+        )
+
+        with pytest.raises(BusinessError) as raised:
+            find_next_course(
+                session,
+                user.id,
+                now=datetime(2026, 9, 7, 8, 0, tzinfo=SHANGHAI_TZ),
+            )
+
+    assert_business_error(raised, "course_data_invalid")
+    assert raised.value.details["course_id"] == course.id
+    assert raised.value.details["issues"] == issues
+
+
+def test_next_course_rejects_invalid_legacy_start_time(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    _, SessionLocal = client_and_session
+    with SessionLocal() as session:
+        user = create_service_user(session, "invalid_start")
+        _, building = first_two_buildings(session)
+        course = add_course(
+            session,
+            user,
+            building,
+            weekday=1,
+            start_time="not-a-time",
+            end_time="10:00",
+            weeks="2",
+        )
+
+        with pytest.raises(BusinessError) as raised:
+            find_next_course(
+                session,
+                user.id,
+                now=datetime(2026, 9, 7, 8, 0, tzinfo=SHANGHAI_TZ),
+            )
+
+    assert_business_error(raised, "course_data_invalid")
+    assert raised.value.details == {"course_id": course.id, "issues": ["start_time"]}
+
+
+@pytest.mark.parametrize("end_time", ["not-a-time", "06:00"])
+def test_past_course_with_invalid_end_does_not_block_next_valid_course(
+    client_and_session: tuple[TestClient, sessionmaker],
+    end_time: str,
+) -> None:
+    _, SessionLocal = client_and_session
+    with SessionLocal() as session:
+        user = create_service_user(session, f"past_invalid_{end_time.replace(':', '_')}")
+        _, building = first_two_buildings(session)
+        add_course(
+            session,
+            user,
+            building,
+            course_name="已经开始的旧脏课程",
+            weekday=1,
+            start_time="07:00",
+            end_time=end_time,
+            weeks="2",
+        )
+        upcoming = add_course(
+            session,
+            user,
+            building,
+            course_name="下一节有效课程",
+            weekday=1,
+            start_time="09:00",
+            end_time="10:00",
+            weeks="2",
+        )
+
+        result = find_next_course(
+            session,
+            user.id,
+            now=datetime(2026, 9, 7, 8, 0, tzinfo=SHANGHAI_TZ),
+        )
+
+    assert result is not None
+    assert result.course.id == upcoming.id
+
+
+def test_later_invalid_future_course_does_not_preempt_earliest_valid_course(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    _, SessionLocal = client_and_session
+    with SessionLocal() as session:
+        user = create_service_user(session, "later_invalid_future")
+        _, building = first_two_buildings(session)
+        upcoming = add_course(
+            session,
+            user,
+            building,
+            course_name="最早有效课程",
+            weekday=1,
+            start_time="09:00",
+            end_time="10:00",
+            weeks="2",
+        )
+        add_course(
+            session,
+            user,
+            building,
+            course_name="稍后旧脏课程",
+            weekday=1,
+            start_time="11:00",
+            end_time="oops",
+            weeks="2",
+        )
+
+        result = find_next_course(
+            session,
+            user.id,
+            now=datetime(2026, 9, 7, 8, 0, tzinfo=SHANGHAI_TZ),
+        )
+
+    assert result is not None
+    assert result.course.id == upcoming.id
+
+
+def test_incomplete_course_at_same_time_does_not_conflict_with_complete_course(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    _, SessionLocal = client_and_session
+    with SessionLocal() as session:
+        user = create_service_user(session, "mixed_same_time")
+        _, building = first_two_buildings(session)
+        complete = add_course(
+            session,
+            user,
+            building,
+            course_name="地点完整",
+            start_time="09:00",
+            weeks="2",
+            room_name="A101",
+        )
+        add_course(
+            session,
+            user,
+            building,
+            course_name="地点待确认",
+            start_time="09:00",
+            weeks="2",
+            room_name="待确认教室",
+        )
+
+        result = find_next_course(
+            session,
+            user.id,
+            now=datetime(2026, 9, 7, 8, 0, tzinfo=SHANGHAI_TZ),
+        )
+
+    assert result is not None
+    assert result.course.id == complete.id
+
+
+def test_same_time_incomplete_courses_report_location_not_schedule_conflict(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    _, SessionLocal = client_and_session
+    with SessionLocal() as session:
+        user = create_service_user(session, "two_incomplete")
+        _, building = first_two_buildings(session)
+        first = add_course(
+            session,
+            user,
+            building,
+            course_name="待确认 A",
+            start_time="09:00",
+            weeks="2",
+            room_name="待确认教室",
+        )
+        second = add_course(
+            session,
+            user,
+            building,
+            course_name="待确认 B",
+            start_time="09:00",
+            weeks="2",
+            room_name="未知",
+        )
+
+        with pytest.raises(BusinessError) as raised:
+            find_next_course(
+                session,
+                user.id,
+                now=datetime(2026, 9, 7, 8, 0, tzinfo=SHANGHAI_TZ),
+            )
+
+    assert_business_error(raised, "course_location_incomplete")
+    assert raised.value.details["course_id"] == first.id
+    assert raised.value.details["course_name"] == "待确认 A"
+    assert raised.value.details["course_ids"] == [first.id, second.id]
+
+
+def test_unmapped_imported_course_is_reported_only_when_route_is_requested(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    _, SessionLocal = client_and_session
+    with SessionLocal() as session:
+        user = create_service_user(session, "unmapped_import")
+        course = Course(
+            user_id=user.id,
+            course_name="校外创新实践",
+            weekday=1,
+            start_time="09:00",
+            end_time="10:40",
+            building_id=None,
+            room_name="校外创新基地 C 座 501",
+            weeks="2",
+            source_kind="import",
+        )
+        session.add(course)
+        session.commit()
+        course_id = course.id
+
+        with pytest.raises(BusinessError) as raised:
+            find_next_course(
+                session,
+                user.id,
+                now=datetime(2026, 9, 7, 8, 0, tzinfo=SHANGHAI_TZ),
+            )
+
+    assert_business_error(raised, "course_location_incomplete")
+    assert raised.value.fields == ["building_id"]
+    assert raised.value.details["course_id"] == course_id
+    assert raised.value.details["missing_fields"] == ["building_id"]
+
+
+@pytest.mark.parametrize("room_name", ["待确认教室", " 未知 ", "暂无"])
+def test_earliest_course_with_incomplete_room_is_not_skipped(
+    client_and_session: tuple[TestClient, sessionmaker],
+    room_name: str,
+) -> None:
+    _, SessionLocal = client_and_session
+    with SessionLocal() as session:
+        user = create_service_user(session, f"bad_room_{len(room_name)}_{ord(room_name[0])}")
+        _, building = first_two_buildings(session)
+        incomplete = add_course(
+            session,
+            user,
+            building,
+            course_name="待修复地点课程",
+            weekday=1,
+            start_time="09:00",
+            weeks="2",
+            room_name=room_name,
+        )
+        add_course(
+            session,
+            user,
+            building,
+            course_name="稍后完整课程",
+            weekday=1,
+            start_time="10:00",
+            weeks="2",
+        )
+
+        with pytest.raises(BusinessError) as raised:
+            find_next_course(
+                session,
+                user.id,
+                now=datetime(2026, 9, 7, 8, 0, tzinfo=SHANGHAI_TZ),
+            )
+
+    assert_business_error(raised, "course_location_incomplete")
+    assert raised.value.details["course_id"] == incomplete.id
+
+
+def test_earliest_course_requires_a_nonempty_building_name(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    _, SessionLocal = client_and_session
+    with SessionLocal() as session:
+        user = create_service_user(session, "bad_building_name")
+        _, building = first_two_buildings(session)
+        course = add_course(session, user, building, weeks="2")
+        building.name = "   "
+        session.commit()
+
+        with pytest.raises(BusinessError) as raised:
+            find_next_course(
+                session,
+                user.id,
+                now=datetime(2026, 9, 7, 8, 0, tzinfo=SHANGHAI_TZ),
+            )
+
+    assert_business_error(raised, "course_location_incomplete")
+    assert raised.value.details["course_id"] == course.id
+
+
+def test_complete_suggestion_exposes_real_week_location_and_aware_start(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    _, SessionLocal = client_and_session
+    with SessionLocal() as session:
+        user = create_service_user(session, "complete_suggestion")
+        from_building, target_building = first_two_buildings(session)
+        course = add_course(
+            session,
+            user,
+            target_building,
+            weekday=3,
+            start_time="09:00",
+            weeks="2",
+            room_name="A101",
+        )
+
+        suggestion = build_schedule_suggestion(
+            session,
+            user.id,
+            ScheduleSuggestionRequest(current_building_id=from_building.id),
+            now=datetime(2026, 9, 7, 8, 0, tzinfo=timezone.utc),
+        )
+
+    assert suggestion.next_course.id == course.id
+    assert suggestion.next_course.room_name == "A101"
+    assert suggestion.next_course.teaching_week == 2
+    assert suggestion.next_course.start_at.isoformat() == "2026-09-09T09:00:00+08:00"
+    assert suggestion.target_building.name.strip()
+    assert suggestion.warning is None
+
+
+def test_same_day_suggestion_keeps_minutes_text_and_plain_departure_time(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    _, SessionLocal = client_and_session
+    with SessionLocal() as session:
+        user = create_service_user(session, "same_day_text")
+        building, _ = first_two_buildings(session)
+        add_course(session, user, building, weekday=1, start_time="09:00", weeks="2")
+        building_name = building.name
+
+        suggestion = build_schedule_suggestion(
+            session,
+            user.id,
+            ScheduleSuggestionRequest(current_building_id=building.id),
+            now=datetime(2026, 9, 7, 8, 0, tzinfo=SHANGHAI_TZ),
+        )
+
+    assert suggestion.suggest_departure_time == "08:50"
+    assert suggestion.text == (
+        f"距离上课还有 60 分钟，建议 08:50 从{building_name}出发，"
+        "预计步行 0 分钟，预留 10 分钟缓冲。"
     )
-    session.add(user)
-    session.commit()
-    session.refresh(user)
-    return user
+
+
+def test_next_day_suggestion_uses_tomorrow_text_without_minutes(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    _, SessionLocal = client_and_session
+    with SessionLocal() as session:
+        user = create_service_user(session, "next_day_text")
+        building, _ = first_two_buildings(session)
+        add_course(session, user, building, weekday=2, start_time="09:00", weeks="2")
+        building_name = building.name
+
+        suggestion = build_schedule_suggestion(
+            session,
+            user.id,
+            ScheduleSuggestionRequest(current_building_id=building.id),
+            now=datetime(2026, 9, 7, 20, 0, tzinfo=SHANGHAI_TZ),
+        )
+
+    assert suggestion.next_course.start_at.isoformat() == "2026-09-08T09:00:00+08:00"
+    assert suggestion.suggest_departure_time == "明天 08:50"
+    assert "还有" not in suggestion.text
+    assert suggestion.text == (
+        f"下节课在明天 09:00，建议 08:50 从{building_name}出发，"
+        "预计步行 0 分钟，预留 10 分钟缓冲。"
+    )
+
+
+def test_multi_day_suggestion_uses_days_ahead_weekday_text_without_minutes(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    _, SessionLocal = client_and_session
+    with SessionLocal() as session:
+        user = create_service_user(session, "multi_day_text")
+        building, _ = first_two_buildings(session)
+        add_course(session, user, building, weekday=3, start_time="09:00", weeks="2")
+        building_name = building.name
+
+        suggestion = build_schedule_suggestion(
+            session,
+            user.id,
+            ScheduleSuggestionRequest(current_building_id=building.id),
+            now=datetime(2026, 9, 7, 8, 0, tzinfo=SHANGHAI_TZ),
+        )
+
+    assert suggestion.next_course.start_at.isoformat() == "2026-09-09T09:00:00+08:00"
+    assert suggestion.suggest_departure_time == "周三 08:50"
+    assert "还有" not in suggestion.text
+    assert suggestion.text == (
+        f"下节课在 2 天后（周三）09:00，建议 08:50 从{building_name}出发，"
+        "预计步行 0 分钟，预留 10 分钟缓冲。"
+    )
+
+
+def test_schedule_api_uses_injected_current_time_and_business_error_contract(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    client, SessionLocal = client_and_session
+    username = "schedule_api"
+    headers = auth_headers(client, username)
+    with SessionLocal() as session:
+        from_building, target_building = first_two_buildings(session)
+    course_id = add_api_course(
+        SessionLocal,
+        username=username,
+        building_id=target_building.id,
+        weekday=3,
+        start_time="09:00",
+        weeks="2",
+    )
+    app.dependency_overrides[get_current_time] = lambda: datetime(
+        2026, 9, 7, 8, 0, tzinfo=SHANGHAI_TZ
+    )
+
+    response = client.post(
+        "/api/schedule/suggestion",
+        json={"current_building_id": from_building.id},
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["next_course"]["id"] == course_id
+    assert data["next_course"]["teaching_week"] == 2
+    assert data["next_course"]["start_at"] == "2026-09-09T09:00:00+08:00"
+    assert "current_week" not in data
+
+
+def test_schedule_api_rejects_invalid_legacy_course_time(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    client, SessionLocal = client_and_session
+    username = "invalid_time_api"
+    headers = auth_headers(client, username)
+    with SessionLocal() as session:
+        from_building, target_building = first_two_buildings(session)
+    course_id = add_api_course(
+        SessionLocal,
+        username=username,
+        building_id=target_building.id,
+        weekday=1,
+        start_time="09:00",
+        end_time="08:00",
+        weeks="2",
+    )
+    app.dependency_overrides[get_current_time] = lambda: datetime(
+        2026, 9, 7, 8, 0, tzinfo=SHANGHAI_TZ
+    )
+
+    response = client.post(
+        "/api/schedule/suggestion",
+        json={"current_building_id": from_building.id},
+        headers=headers,
+    )
+
+    assert response.status_code == 409
+    assert response.json()["code"] == "course_data_invalid"
+    assert response.json()["details"] == {
+        "course_id": course_id,
+        "issues": ["start_time", "end_time"],
+    }
+
+
+def test_schedule_api_skips_past_course_with_invalid_end_time(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    client, SessionLocal = client_and_session
+    username = "past_invalid_api"
+    headers = auth_headers(client, username)
+    with SessionLocal() as session:
+        from_building, target_building = first_two_buildings(session)
+    add_api_course(
+        SessionLocal,
+        username=username,
+        building_id=target_building.id,
+        weekday=1,
+        start_time="07:00",
+        end_time="oops",
+        weeks="2",
+    )
+    upcoming_id = add_api_course(
+        SessionLocal,
+        username=username,
+        building_id=target_building.id,
+        weekday=1,
+        start_time="09:00",
+        end_time="10:00",
+        weeks="2",
+    )
+    app.dependency_overrides[get_current_time] = lambda: datetime(
+        2026, 9, 7, 8, 0, tzinfo=SHANGHAI_TZ
+    )
+
+    response = client.post(
+        "/api/schedule/suggestion",
+        json={"current_building_id": from_building.id},
+        headers=headers,
+    )
+
+    assert response.status_code == 200
+    assert response.json()["next_course"]["id"] == upcoming_id
+
+
+def test_schedule_api_rejects_browser_selected_week(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    client, SessionLocal = client_and_session
+    headers = auth_headers(client, "browser_week")
+    with SessionLocal() as session:
+        from_building, _ = first_two_buildings(session)
+
+    response = client.post(
+        "/api/schedule/suggestion",
+        json={"current_building_id": from_building.id, "current_week": 9},
+        headers=headers,
+    )
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "validation_error"
+    assert "current_week" in response.json()["fields"]
+
+
+def test_schedule_api_requires_semester_configuration(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    client, SessionLocal = client_and_session
+    headers = auth_headers(client, "unconfigured_api", configure=False)
+    with SessionLocal() as session:
+        from_building, _ = first_two_buildings(session)
+    app.dependency_overrides[get_current_time] = lambda: datetime(
+        2026, 9, 7, 8, 0, tzinfo=SHANGHAI_TZ
+    )
+
+    response = client.post(
+        "/api/schedule/suggestion",
+        json={"current_building_id": from_building.id},
+        headers=headers,
+    )
+
+    assert response.status_code == 409
+    assert response.json()["code"] == "semester_unconfigured"
+
+
+@pytest.mark.parametrize(
+    ("now", "semester_status"),
+    [
+        (datetime(2026, 8, 30, 8, 0, tzinfo=SHANGHAI_TZ), "before_term"),
+        (datetime(2027, 1, 18, 8, 0, tzinfo=SHANGHAI_TZ), "after_term"),
+    ],
+)
+def test_schedule_api_rejects_dates_outside_semester(
+    client_and_session: tuple[TestClient, sessionmaker],
+    now: datetime,
+    semester_status: str,
+) -> None:
+    client, SessionLocal = client_and_session
+    headers = auth_headers(client, f"inactive_api_{semester_status}")
+    with SessionLocal() as session:
+        from_building, _ = first_two_buildings(session)
+    app.dependency_overrides[get_current_time] = lambda: now
+
+    response = client.post(
+        "/api/schedule/suggestion",
+        json={"current_building_id": from_building.id},
+        headers=headers,
+    )
+
+    assert response.status_code == 409
+    assert response.json()["code"] == "semester_not_active"
+    assert response.json()["details"]["semester_status"] == semester_status
+
+
+def test_schedule_api_returns_no_upcoming_without_looking_at_next_week(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    client, SessionLocal = client_and_session
+    username = "no_upcoming_api"
+    headers = auth_headers(client, username)
+    with SessionLocal() as session:
+        from_building, target_building = first_two_buildings(session)
+    add_api_course(
+        SessionLocal,
+        username=username,
+        building_id=target_building.id,
+        weekday=1,
+        start_time="09:00",
+        weeks="3",
+    )
+    app.dependency_overrides[get_current_time] = lambda: datetime(
+        2026, 9, 13, 20, 0, tzinfo=SHANGHAI_TZ
+    )
+
+    response = client.post(
+        "/api/schedule/suggestion",
+        json={"current_building_id": from_building.id},
+        headers=headers,
+    )
+
+    assert response.status_code == 404
+    assert response.json()["code"] == "no_upcoming_course"
+
+
+def test_schedule_endpoint_documents_business_errors(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    client, _ = client_and_session
+    responses = client.get("/openapi.json").json()["paths"][
+        "/api/schedule/suggestion"
+    ]["post"]["responses"]
+    expected = {"$ref": "#/components/schemas/BusinessErrorResponse"}
+
+    assert responses["409"]["content"]["application/json"]["schema"] == expected
+    assert responses["404"]["content"]["application/json"]["schema"] == expected
+    assert responses["422"]["content"]["application/json"]["schema"] == expected
 
 
 def test_schedule_suggestion_without_token_returns_401(
@@ -145,211 +1041,14 @@ def test_schedule_suggestion_without_token_returns_401(
     assert response.status_code == 401
 
 
-def test_schedule_suggestion_with_current_building_returns_success(
-    client_and_session: tuple[TestClient, sessionmaker],
-) -> None:
-    client, _ = client_and_session
-    from_building_id, target_building_id = first_two_building_ids(client)
-    headers = auth_headers(client)
-    created = client.post(
-        "/api/courses",
-        json=create_course_payload(target_building_id),
-        headers=headers,
-    )
-    assert created.status_code == 201
-
-    response = client.post(
-        "/api/schedule/suggestion",
-        json={"current_building_id": from_building_id},
-        headers=headers,
-    )
-
-    assert response.status_code == 200
-    data = response.json()
-    assert data["next_course"]["course_name"] == "Schedule Design"
-    assert data["from_location"]["building_id"] == from_building_id
-    assert data["target_building"]["id"] == target_building_id
-    assert data["distance_meters"] >= 0
-    assert data["walk_minutes"] >= 0
-    assert data["buffer_minutes"] == 10
-    assert data["suggest_departure_time"]
-    assert data["status"] in {"normal", "tight", "likely_late"}
-    assert "预计步行" in data["text"]
-
-
-def test_schedule_suggestion_with_coordinates_returns_success(
-    client_and_session: tuple[TestClient, sessionmaker],
-) -> None:
-    client, _ = client_and_session
-    _, target_building_id = first_two_building_ids(client)
-    headers = auth_headers(client)
-    created = client.post(
-        "/api/courses",
-        json=create_course_payload(target_building_id),
-        headers=headers,
-    )
-    assert created.status_code == 201
-
-    response = client.post(
-        "/api/schedule/suggestion",
-        json={"latitude": 30.58, "longitude": 114.32},
-        headers=headers,
-    )
-
-    assert response.status_code == 200
-    assert response.json()["from_location"]["name"] == "当前位置"
-
-
-def test_schedule_suggestion_without_courses_returns_404(
-    client_and_session: tuple[TestClient, sessionmaker],
-) -> None:
-    client, _ = client_and_session
-    from_building_id, _ = first_two_building_ids(client)
-    headers = auth_headers(client)
-
-    response = client.post(
-        "/api/schedule/suggestion",
-        json={"current_building_id": from_building_id},
-        headers=headers,
-    )
-
-    assert response.status_code == 404
-    assert response.json()["detail"] == "No upcoming course found"
-
-
-def test_schedule_suggestion_with_missing_current_building_returns_404(
-    client_and_session: tuple[TestClient, sessionmaker],
-) -> None:
-    client, _ = client_and_session
-    headers = auth_headers(client)
-
-    response = client.post(
-        "/api/schedule/suggestion",
-        json={"current_building_id": 999999},
-        headers=headers,
-    )
-
-    assert response.status_code == 404
-
-
-def test_find_next_course_selects_nearest_course_after_current_time(
-    client_and_session: tuple[TestClient, sessionmaker],
-) -> None:
-    _, SessionLocal = client_and_session
-    now = datetime(2026, 5, 29, 9, 0)
-
-    with SessionLocal() as session:
-        user = create_service_user(session, "next_course_user")
-        building = session.query(Building).first()
-        assert building is not None
-        add_course(
-            session,
-            user,
-            building,
-            course_name="Later Course",
-            weekday=now.isoweekday(),
-            start_time="14:00",
-        )
-        add_course(
-            session,
-            user,
-            building,
-            course_name="Soon Course",
-            weekday=now.isoweekday(),
-            start_time="10:00",
-        )
-
-        result = find_next_course(session, user.id, now=now)
-
-    assert result is not None
-    assert result.course.course_name == "Soon Course"
-    assert result.starts_at == datetime(2026, 5, 29, 10, 0)
-
-
-def test_find_next_course_falls_back_to_future_days(
-    client_and_session: tuple[TestClient, sessionmaker],
-) -> None:
-    _, SessionLocal = client_and_session
-    now = datetime(2026, 5, 29, 12, 0)
-
-    with SessionLocal() as session:
-        user = create_service_user(session, "future_course_user")
-        building = session.query(Building).first()
-        assert building is not None
-        add_course(
-            session,
-            user,
-            building,
-            course_name="Past Today",
-            weekday=now.isoweekday(),
-            start_time="08:00",
-        )
-        add_course(
-            session,
-            user,
-            building,
-            course_name="Tomorrow Course",
-            weekday=(now + timedelta(days=1)).isoweekday(),
-            start_time="09:00",
-        )
-
-        result = find_next_course(session, user.id, now=now)
-
-    assert result is not None
-    assert result.course.course_name == "Tomorrow Course"
-    assert result.starts_at == datetime(2026, 5, 30, 9, 0)
-
-
-def test_same_time_courses_choose_smallest_id_and_return_warning(
-    client_and_session: tuple[TestClient, sessionmaker],
-) -> None:
-    _, SessionLocal = client_and_session
-    now = datetime(2026, 5, 29, 8, 0)
-
-    with SessionLocal() as session:
-        user = create_service_user(session, "same_time_user")
-        buildings = session.query(Building).order_by(Building.id).limit(2).all()
-        assert len(buildings) == 2
-        first = add_course(
-            session,
-            user,
-            buildings[1],
-            course_name="First Same Time",
-            weekday=now.isoweekday(),
-            start_time="10:00",
-        )
-        add_course(
-            session,
-            user,
-            buildings[1],
-            course_name="Second Same Time",
-            weekday=now.isoweekday(),
-            start_time="10:00",
-        )
-
-        suggestion = build_schedule_suggestion(
-            session,
-            user.id,
-            ScheduleSuggestionRequest(current_building_id=buildings[0].id),
-            now=now,
-        )
-
-    assert suggestion.next_course.id == first.id
-    assert suggestion.warning == "该时间段有多门课程，已选择最先创建的一门。"
-
-
-def test_distance_and_walk_estimation_are_reasonable() -> None:
+def test_distance_walk_and_departure_helpers_are_stable() -> None:
     assert haversine_distance_meters(30.0, 114.0, 30.0, 114.0) == 0
     distance = haversine_distance_meters(30.0, 114.0, 30.001, 114.0)
-
     assert 100 <= distance <= 120
     assert estimate_walk_minutes(0) == 0
     assert estimate_walk_minutes(161) == 3
 
-
-def test_departure_status_levels() -> None:
-    now = datetime(2026, 5, 29, 8, 0)
-
-    assert get_departure_status(now, datetime(2026, 5, 29, 8, 6)) == "normal"
-    assert get_departure_status(now, datetime(2026, 5, 29, 8, 4)) == "tight"
-    assert get_departure_status(now, datetime(2026, 5, 29, 7, 59)) == "likely_late"
+    now = datetime(2026, 9, 7, 8, 0, tzinfo=SHANGHAI_TZ)
+    assert get_departure_status(now, now + timedelta(minutes=6)) == "normal"
+    assert get_departure_status(now, now + timedelta(minutes=4)) == "tight"
+    assert get_departure_status(now, now - timedelta(minutes=1)) == "likely_late"

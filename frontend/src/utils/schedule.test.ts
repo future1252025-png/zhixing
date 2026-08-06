@@ -5,7 +5,8 @@ import {
   formatDistance,
   getLocationDisplayInfo,
   getRouteVisualPoints,
-  getStatusMeta
+  getStatusMeta,
+  toSchedulePageError
 } from './schedule'
 
 describe('schedule helpers', () => {
@@ -26,6 +27,77 @@ describe('schedule helpers', () => {
     expect(getStatusMeta('likely_late')).toEqual({
       label: '可能迟到',
       className: 'status-late'
+    })
+  })
+
+  it('branches schedule recovery only by structured error code', () => {
+    expect(toSchedulePageError({
+      status: 404,
+      code: 'no_upcoming_course',
+      message: 'arbitrary server wording',
+      fields: [],
+      details: {}
+    }).title).toBe('本周暂无后续课程')
+
+    expect(toSchedulePageError({
+      status: 409,
+      code: 'semester_not_active',
+      message: 'same code, unrelated wording',
+      fields: [],
+      details: { semester_status: 'before_term' }
+    })).toMatchObject({
+      title: '学期尚未开始',
+      semesterStatus: 'before_term'
+    })
+  })
+
+  it('keeps the exact course identity for incomplete locations', () => {
+    expect(toSchedulePageError({
+      status: 409,
+      code: 'course_location_incomplete',
+      message: 'location missing',
+      fields: ['building_id', 'room_name'],
+      details: {
+        course_id: 18,
+        course_name: '软件工程',
+        missing_fields: ['building_id', 'room_name']
+      }
+    })).toMatchObject({
+      courseId: 18,
+      courseName: '软件工程',
+      title: '“软件工程”地点不完整'
+    })
+  })
+
+  it('explains exactly which imported location field is needed for routing', () => {
+    expect(toSchedulePageError({
+      status: 409,
+      code: 'course_location_incomplete',
+      message: 'location missing',
+      fields: ['building_id'],
+      details: {
+        course_id: 18,
+        course_name: '软件工程',
+        missing_fields: ['building_id']
+      }
+    })).toMatchObject({
+      title: '“软件工程”地图地点未匹配',
+      message: '请为这门课选择地图上的上课建筑，再重新生成出发建议。'
+    })
+
+    expect(toSchedulePageError({
+      status: 409,
+      code: 'course_location_incomplete',
+      message: 'room missing',
+      fields: ['room_name'],
+      details: {
+        course_id: 18,
+        course_name: '软件工程',
+        missing_fields: ['room_name']
+      }
+    })).toMatchObject({
+      title: '“软件工程”教室信息不完整',
+      message: '请补全这门课的教室信息，再重新生成出发建议。'
     })
   })
 
@@ -57,7 +129,7 @@ describe('schedule helpers', () => {
       type: '校园地点'
     })).toEqual({
       title: '生命科学学院',
-      subtitle: '湖北大学武昌校区 · 校园地点'
+      subtitle: '校园地点'
     })
 
     expect(getLocationDisplayInfo({

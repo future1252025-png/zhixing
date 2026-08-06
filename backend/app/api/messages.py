@@ -1,9 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
+from app.core import errors
 from app.core.security import get_current_user
 from app.db.database import get_session
-from app.models import User
+from app.models import Building, User
 from app.schemas.message import ChatRoomRead, MessageCreate, MessageRead
 from app.services.message_service import (
     MessageLocationTooFarError,
@@ -19,12 +20,14 @@ router = APIRouter(
 )
 
 
-def require_building(session: Session, building_id: int) -> None:
-    if get_building(session, building_id) is None:
+def require_building(session: Session, building_id: int) -> Building:
+    building = get_building(session, building_id)
+    if building is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Building not found",
+            detail=errors.BUILDING_NOT_FOUND,
         )
+    return building
 
 
 @router.get("/chatrooms", response_model=list[ChatRoomRead])
@@ -40,9 +43,10 @@ def read_building_chatrooms(
 @router.get("/messages", response_model=list[MessageRead])
 def read_building_messages(
     building_id: int,
-    room_name: str | None = Query(default=None, max_length=64),
+    room_name: str | None = Query(default=None, max_length=120),
     limit: int = Query(default=50, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
+    before_id: int | None = Query(default=None, ge=1),
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ) -> list[MessageRead]:
@@ -53,6 +57,7 @@ def read_building_messages(
         room_name,
         limit=limit,
         offset=offset,
+        before_id=before_id,
     )
 
 
@@ -63,9 +68,9 @@ def create_message(
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
 ) -> MessageRead:
-    require_building(session, building_id)
+    building = require_building(session, building_id)
     try:
-        return create_building_message(session, building_id, current_user, payload)
+        return create_building_message(session, building, current_user, payload)
     except MessageLocationTooFarError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

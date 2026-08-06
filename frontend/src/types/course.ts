@@ -4,17 +4,22 @@ export type CourseBuilding = {
   type: string
 }
 
+export type CourseSourceKind = 'manual' | 'import'
+
 export type Course = {
   id: number
   course_name: string
   weekday: number
-  start_time: string
-  end_time: string
-  building_id: number
-  building: CourseBuilding
+  start_time: string | null
+  end_time: string | null
+  building_id: number | null
+  building: CourseBuilding | null
   room_name: string
+  source_location: string | null
   teacher: string | null
-  weeks: string | null
+  weeks: string
+  source_kind: CourseSourceKind
+  needs_location_review: boolean
   created_at: string
 }
 
@@ -26,7 +31,7 @@ export type CoursePayload = {
   building_id: number
   room_name: string
   teacher?: string | null
-  weeks?: string | null
+  weeks: string
 }
 
 export type CourseUpdatePayload = Partial<CoursePayload>
@@ -40,27 +45,4 @@ export type CourseForm = {
   room_name: string
   teacher: string
   weeks: string
-}
-
-export type CourseImportPreviewItem = {
-  course_name: string
-  weekday: number
-  start_time: string
-  end_time: string
-  room_name: string
-  teacher: string | null
-  weeks: string | null
-  raw_weeks: string | null
-  raw_location: string | null
-  building_id: number | null
-  building_name: string | null
-  confidence: 'matched' | 'needs_review'
-  needs_building: boolean
-}
-
-export type CourseImportPreviewResponse = {
-  total: number
-  matched_count: number
-  needs_review_count: number
-  items: CourseImportPreviewItem[]
 }

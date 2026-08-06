@@ -5,6 +5,7 @@ import type { Course } from '@/types/course'
 import {
   buildChatSearchResults,
   buildNextCourseChatTarget,
+  formatChatEntryLabel,
   readRecentChatEntries,
   rememberRecentChatEntry
 } from './chat'
@@ -47,8 +48,11 @@ const course: Course = {
     type: '教学楼'
   },
   room_name: '教4-211',
+  source_location: null,
   teacher: '罗益辉',
   weeks: '1-16',
+  source_kind: 'import',
+  needs_location_review: false,
   created_at: '2026-06-01T08:00:00'
 }
 
@@ -65,6 +69,17 @@ function createMemoryStorage(initial: Record<string, string> = {}) {
 }
 
 describe('chat utilities', () => {
+  it('uses concise building names in recent chat labels', () => {
+    expect(formatChatEntryLabel({
+      buildingName: '湖北大学（武昌主校区）双创大楼A座',
+      roomName: null
+    })).toBe('双创大楼A座')
+    expect(formatChatEntryLabel({
+      buildingName: '湖北大学武昌校区图书馆',
+      roomName: 'A203'
+    })).toBe('图书馆 · A203')
+  })
+
   it('builds a next course chat target with room name', () => {
     expect(buildNextCourseChatTarget(course)).toEqual({
       buildingId: 1,
@@ -72,6 +87,23 @@ describe('chat utilities', () => {
       roomName: '教4-211',
       title: '计算机组成原理',
       subtitle: '湖北大学(武昌校区)-教4 · 教4-211'
+    })
+  })
+
+  it('keeps an unmapped imported location readable without inventing a building id', () => {
+    expect(buildNextCourseChatTarget({
+      ...course,
+      building_id: null,
+      building: null,
+      room_name: '待确认教室',
+      source_location: '创新创业中心西区 302',
+      needs_location_review: true
+    })).toEqual({
+      buildingId: null,
+      buildingName: null,
+      roomName: '待确认教室',
+      title: '计算机组成原理',
+      subtitle: '创新创业中心西区 302'
     })
   })
 
