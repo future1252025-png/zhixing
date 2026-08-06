@@ -1,50 +1,27 @@
-# 智行 CampusMind 文档说明
+# 文档索引
 
-## 1. 文档用途
+本目录只保留与当前代码、部署、测试和演示直接相关的资料。早期 AI 执行提示、未完成任务清单、初始模板和内部实现计划已经移除，避免与当前实现混淆。
 
-本目录保留项目从范围收敛、设计、实施到最终交付的文档。当前课程设计答辩与演示应优先阅读最终 MVP 交付文档，再按需要查看设计和计划文档。
+## 开发与部署
 
-## 2. 最终交付文档
+- [RUNNING_GUIDE.md](RUNNING_GUIDE.md)：本地后端、网页端和局域网调试。
+- [ANDROID_COURSE_IMPORT.md](ANDROID_COURSE_IMPORT.md)：Android 构建与湖北大学教务系统导入。
+- [../frontend/DEPLOYMENT.md](../frontend/DEPLOYMENT.md)：网页生产部署和高德代理配置。
 
-以下文档对应已经实现并验证通过的 MVP：
+## 当前实现
 
-1. `../README.md`
-2. `RUNNING_GUIDE.md`
-3. `DEMO_SCRIPT.md`
-4. `TEST_REPORT.md`
-5. `FEATURE_SUMMARY.md`
-6. `FUTURE_WORK.md`
-7. `SCREENSHOT_CHECKLIST.md`
+- [ARCHITECTURE_OVERVIEW.md](ARCHITECTURE_OVERVIEW.md)：前后端与 Android 容器架构。
+- [FEATURE_SUMMARY.md](FEATURE_SUMMARY.md)：当前已经实现的产品能力。
+- [USER_FLOW.md](USER_FLOW.md)：真实用户主流程。
+- [TECHNICAL_HIGHLIGHTS.md](TECHNICAL_HIGHLIGHTS.md)：关键工程与业务设计。
+- [FUTURE_WORK.md](FUTURE_WORK.md)：明确尚未实现的后续方向。
 
-## 3. Design Spec 文档
+## 验证与展示
 
-以下文档是经过 MVP 范围收敛后的设计说明，用于解释当前实现边界：
+- [TEST_REPORT.md](TEST_REPORT.md)：最新自动化验证基线。
+- [DEMO_SCRIPT.md](DEMO_SCRIPT.md)：网页端与 Android 演示流程。
+- [SCREENSHOT_CHECKLIST.md](SCREENSHOT_CHECKLIST.md)：演示截图建议。
+- [REPOSITORY_GUIDE.md](REPOSITORY_GUIDE.md)：维护者和评审阅读入口。
+- [RESUME_PROJECT.md](RESUME_PROJECT.md)：简历与面试描述。
 
-1. `PROJECT_SPEC.md`
-2. `MVP_SCOPE.md`
-3. `USER_FLOW.md`
-4. `PAGE_LIST.md`
-5. `ARCHITECTURE_OVERVIEW.md`
-6. `DATA_MODEL_DRAFT.md`
-7. `API_DESIGN_DRAFT.md`
-8. `NON_GOALS.md`
-9. `DEMO_PLAN.md`
-
-## 4. Planning 文档
-
-以下文档记录开发阶段拆分和验收计划：
-
-1. `IMPLEMENTATION_PLAN.md`
-2. `FRONTEND_TASKS.md`
-3. `BACKEND_TASKS.md`
-4. `DATABASE_PLAN.md`
-5. `TEST_PLAN.md`
-6. `DEVELOPMENT_SCHEDULE.md`
-7. `EXECUTION_PROMPTS.md`
-8. `ACCEPTANCE_CHECKLIST.md`
-
-## 5. 历史模板文档
-
-早期编号文档已归档到 `archive/initial-template-docs/`。这些文档记录了项目初始设想，其中包含 WebSocket、管理员后台、真实地图 SDK 等后续扩展内容，不代表当前 MVP 已实现范围。
-
-当前 MVP 的准确信息以 `README.md`、最终交付文档和 Design Spec 文档为准。
+带日期的流量测试报告是历史测试记录，文件名中的日期代表其适用版本，不作为当前测试基线。
