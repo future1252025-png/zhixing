@@ -138,15 +138,9 @@ test('mobile core journey keeps weeks, locations, sessions, text, and actions tr
   expect((await conflictResponse).status()).toBe(409)
   await expect(page.getByRole('alert')).toContainText('这段时间已有课程')
   await expect(page.getByRole('alert')).toContainText('交互设计基础')
-  const coursesAfterConflict = await page.evaluate(async () => {
-    const token = localStorage.getItem('campusmind_token')
-    const response = await fetch('http://127.0.0.1:8010/api/courses', {
-      headers: { Authorization: `Bearer ${token}` }
-    })
-    return response.json() as Promise<Array<{ course_name: string }>>
-  })
-  expect(coursesAfterConflict.filter((course) => course.course_name === '交互设计基础')).toHaveLength(1)
-  expect(coursesAfterConflict.some((course) => course.course_name === '不应写入的冲突课程')).toBe(false)
+  await page.goto('/courses')
+  await expect(page.getByText('交互设计基础').first()).toBeVisible()
+  await expect(page.getByText('不应写入的冲突课程')).toHaveCount(0)
 
   await page.goto('/courses/import')
   await expect(page.getByTestId('hubu-native-import')).toBeDisabled()
@@ -290,17 +284,32 @@ test('mobile core journey keeps weeks, locations, sessions, text, and actions tr
   await screenshot(page, testInfo, 'departure-advice.png')
   await assertPageQuality(page)
 
-  await page.evaluate(() => localStorage.setItem('campusmind_token', 'invalid-e2e-token'))
-  await page.getByRole('link', { name: /校园/ }).click()
+  // Access tokens are memory-only; a reload must silently restore the session
+  // from the rotating HttpOnly refresh cookie.
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('campusmind_token')))
+    .toBeNull()
+  await page.reload()
+  await page.waitForURL('**/schedule')
+  await expect(page.getByRole('heading', { name: '你现在在哪里？' })).toBeVisible()
+
+  // Revoke the refresh family through the cookie-authenticated logout route,
+  // then reload to verify that the app cannot silently recreate a session.
+  await page.evaluate(async () => {
+    await fetch('http://127.0.0.1:8010/api/auth/logout', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}'
+    })
+  })
+  await page.reload()
   await page.waitForURL('**/login?**')
-  const expiredToasts = page.locator('.van-toast').filter({ hasText: '登录已过期，请重新登录' })
-  await expect(expiredToasts).toHaveCount(1)
   await screenshot(page, testInfo, 'session-expired.png')
 
   await page.locator('input[name="username"]').fill(username)
   await page.locator('input[name="password"]').fill(password)
   await page.getByRole('button', { name: /进入智行/ }).click()
-  await page.waitForURL('**/home')
-  await expect(page.getByText('真实第 4 周')).toBeVisible()
+  await page.waitForURL('**/schedule')
+  await expect(page.getByRole('heading', { name: '你现在在哪里？' })).toBeVisible()
   await expectReadableControls(page)
 })

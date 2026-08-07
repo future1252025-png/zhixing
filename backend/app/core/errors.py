@@ -41,6 +41,8 @@ DUPLICATE_USER = "用户名或学号已存在"
 INVALID_CREDENTIALS = "用户名或密码错误"
 TOKEN_EXPIRED = "登录已过期，请重新登录"
 TOKEN_INVALID = "登录无效，请重新登录"
+REFRESH_TOKEN_INVALID = "登录状态已失效，请重新登录"
+REFRESH_ORIGIN_INVALID = "登录续期请求来源无效"
 
 # Resources
 BUILDING_NOT_FOUND = "建筑不存在"

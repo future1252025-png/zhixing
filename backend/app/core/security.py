@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+import secrets
 
 import bcrypt
 import jwt
@@ -40,6 +41,10 @@ def create_access_token(subject: str) -> str:
     expires_at = now + timedelta(minutes=settings.access_token_expire_minutes)
     payload = {
         "sub": subject,
+        "typ": "access",
+        "iss": "campusmind-api",
+        "aud": "campusmind-client",
+        "jti": secrets.token_urlsafe(16),
         "iat": now,
         "exp": expires_at,
     }
@@ -60,6 +65,9 @@ def decode_access_token(token: str) -> str:
             token,
             settings.jwt_secret_key,
             algorithms=[settings.jwt_algorithm],
+            audience="campusmind-client",
+            issuer="campusmind-api",
+            options={"require": ["sub", "typ", "iat", "exp", "jti"]},
         )
     except ExpiredSignatureError as exc:
         raise _credentials_exception(errors.TOKEN_EXPIRED) from exc
@@ -67,7 +75,7 @@ def decode_access_token(token: str) -> str:
         raise _credentials_exception() from exc
 
     subject = payload.get("sub")
-    if not isinstance(subject, str) or not subject:
+    if payload.get("typ") != "access" or not isinstance(subject, str) or not subject:
         raise _credentials_exception()
     return subject
 

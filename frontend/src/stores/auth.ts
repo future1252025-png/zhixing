@@ -10,7 +10,12 @@ import {
   type ProfileUpdatePayload,
   type RegisterPayload
 } from '@/api/auth'
-import { TOKEN_STORAGE_KEY } from '@/api/request'
+import { restoreSession, revokeSession } from '@/api/request'
+import {
+  getAccessToken,
+  setAccessToken,
+  setRefreshToken
+} from '@/auth/sessionTokens'
 import { extractBusinessError, resetUnauthorizedState } from '@/api/errors'
 import { useSemesterStore } from '@/stores/semester'
 
@@ -22,7 +27,7 @@ type AuthState = {
 
 export const useAuthStore = defineStore('auth', {
   state: (): AuthState => ({
-    token: localStorage.getItem(TOKEN_STORAGE_KEY),
+    token: getAccessToken(),
     currentUser: null,
     loadingUser: false
   }),
@@ -34,7 +39,7 @@ export const useAuthStore = defineStore('auth', {
   actions: {
     setToken(token: string) {
       this.token = token
-      localStorage.setItem(TOKEN_STORAGE_KEY, token)
+      setAccessToken(token)
     },
     setCurrentUser(user: AuthUser | null) {
       this.currentUser = user
@@ -49,10 +54,21 @@ export const useAuthStore = defineStore('auth', {
     },
     async login(payload: LoginPayload) {
       const result = await loginRequest(payload)
+      if (result.refresh_token) {
+        await setRefreshToken(result.refresh_token)
+      }
       this.setToken(result.access_token)
       this.setCurrentUser(result.user)
       resetUnauthorizedState()
       return result.user
+    },
+    async restoreSession() {
+      const restored = await restoreSession()
+      this.token = getAccessToken()
+      if (!restored) {
+        this.setCurrentUser(null)
+      }
+      return restored
     },
     async loadCurrentUser() {
       if (!this.token) {
@@ -76,10 +92,12 @@ export const useAuthStore = defineStore('auth', {
     clearSession() {
       this.token = null
       this.currentUser = null
-      localStorage.removeItem(TOKEN_STORAGE_KEY)
+      setAccessToken(null)
+      void setRefreshToken(null)
       useSemesterStore().reset()
     },
-    logout() {
+    async logout() {
+      await revokeSession()
       this.clearSession()
     }
   }

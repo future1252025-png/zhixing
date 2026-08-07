@@ -16,11 +16,21 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m alembic upgrade head
 ```
 
-开发时设置稳定 JWT 密钥，避免重启后现有登录失效：
+开发环境首次启动会自动生成 `backend/data/.jwt-secret`（已被 Git 忽略），后续重启继续使用同一密钥。也可以显式覆盖：
 
 ```powershell
 $env:JWT_SECRET_KEY="请替换为足够长的随机值"
 ```
+
+默认登录策略：访问令牌 30 分钟、刷新令牌空闲有效期 30 天、会话绝对上限 90 天。需要调整时在启动后端前设置：
+
+```powershell
+$env:ACCESS_TOKEN_EXPIRE_MINUTES="30"
+$env:REFRESH_TOKEN_EXPIRE_DAYS="30"
+$env:REFRESH_SESSION_ABSOLUTE_DAYS="90"
+```
+
+生产环境必须设置固定且不少于 32 字节的 `JWT_SECRET_KEY`。网页前端与 API 应部署在同一站点的 HTTPS 域名下，并把网页 Origin 精确加入 `CORS_ALLOW_ORIGINS`，以便安全发送 `HttpOnly + SameSite=Strict` 刷新 Cookie。
 
 只供本机网页访问：
 
@@ -104,7 +114,7 @@ cd frontend\android
 
 ## 常见问题
 
-- **`JWT_SECRET_KEY 未设置`**：开发后端生成了临时密钥；设置固定环境变量后重启。
+- **`JWT_SECRET_KEY 未设置`**：开发后端正在使用 `backend/data/.jwt-secret` 的本地持久密钥；这是正常提示。生产环境必须显式设置环境变量。
 - **手机访问 `127.0.0.1` 失败**：手机中的 `127.0.0.1` 指向手机，不是电脑。
 - **`adb devices` 显示 offline**：解锁手机，重新确认“允许 USB 调试”，必要时拔插数据线。
 - **地图不显示**：检查高德 Key、服务代理、域名白名单和网络。

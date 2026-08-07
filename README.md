@@ -21,7 +21,7 @@ GitHub 仓库：[future1252025-png/zhixing](https://github.com/future1252025-png
 | 前端 | Vue 3、Vite、TypeScript、Vant、Pinia、Vue Router、Axios |
 | Android | Capacitor 8、Android Gradle Plugin、原生 Geolocation、教务导入插件 |
 | 地图 | 高德地图 JS API、Walking 路线规划 |
-| 后端 | FastAPI、SQLAlchemy、Alembic、Pydantic、JWT |
+| 后端 | FastAPI、SQLAlchemy、Alembic、Pydantic、JWT、轮换刷新会话 |
 | 数据库 | SQLite |
 | 测试 | pytest、Vitest、Playwright、JUnit、vue-tsc |
 
@@ -53,7 +53,7 @@ python -m venv .venv
 
 健康检查：`http://127.0.0.1:8000/health`
 
-开发环境建议设置稳定的 `JWT_SECRET_KEY`，否则后端重启后旧登录状态会失效。
+开发环境首次启动会在忽略提交的 `backend/data/.jwt-secret` 中生成本地持久密钥，后端重启不会再让登录立即失效。生产环境仍必须显式设置 `JWT_SECRET_KEY`。
 
 ### 网页前端
 
@@ -86,9 +86,9 @@ cd android
 
 ## 当前验证基线
 
-截至 2026-08-06：
+截至 2026-08-07：
 
-- 后端：`379 passed, 2 skipped`
+- 后端：`389 passed, 2 skipped`
 - 前端：`46` 个测试文件、`312 passed`
 - Playwright：桌面与手机视口核心用户流程通过
 - Android：JUnit、Debug/Release 单元测试任务和 Debug APK 构建通过
@@ -106,6 +106,7 @@ cd android
 
 - 不提交 `.env.local`、`.env.android.local`、数据库、日志、APK 和构建目录。
 - Android 发布包应连接 HTTPS 后端。
+- 访问令牌默认 30 分钟且只驻留内存；刷新会话空闲 30 天、最长 90 天。网页刷新令牌使用 `HttpOnly + SameSite=Strict` Cookie，Android 使用 Keystore 加密存储，并在每次续期后轮换。
 - 高德生产环境推荐使用 `VITE_AMAP_SERVICE_HOST` 代理安全密钥，不把安全密钥写入客户端。
 
 ## License

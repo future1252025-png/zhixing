@@ -37,3 +37,10 @@ class User(Base):
         cascade="all, delete-orphan",
         passive_deletes=True,
     )
+    refresh_sessions = relationship(
+        "RefreshSession",
+        back_populates="user",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        foreign_keys="RefreshSession.user_id",
+    )

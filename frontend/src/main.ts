@@ -27,25 +27,33 @@ if (Capacitor.isNativePlatform()) {
   )
 }
 
-const app = createApp(App)
-const pinia = createPinia()
+async function bootstrap() {
+  const app = createApp(App)
+  const pinia = createPinia()
 
-app.use(pinia)
-app.use(router)
-app.directive('reveal', revealDirective)
+  app.use(pinia)
+  app.directive('reveal', revealDirective)
 
-setUnauthorizedHandler(async () => {
-  const auth = useAuthStore(pinia)
-  const currentRoute = router.currentRoute.value
-  const redirect = currentRoute.fullPath
-  auth.clearSession()
-  if (currentRoute.name !== 'login') {
-    showFailToast('登录已过期，请重新登录')
-    await router.replace({
-      name: 'login',
-      query: { redirect, reason: 'expired' }
-    })
-  }
-})
+  setUnauthorizedHandler(async () => {
+    const auth = useAuthStore(pinia)
+    const currentRoute = router.currentRoute.value
+    const redirect = currentRoute.fullPath
+    auth.clearSession()
+    if (currentRoute.name !== 'login') {
+      showFailToast('登录已过期，请重新登录')
+      await router.replace({
+        name: 'login',
+        query: { redirect, reason: 'expired' }
+      })
+    }
+  })
 
-app.mount('#app')
+  // Access tokens are memory-only. Restore a valid session from the HttpOnly
+  // web cookie or Android Keystore before the router evaluates auth guards.
+  await useAuthStore(pinia).restoreSession()
+
+  app.use(router)
+  app.mount('#app')
+}
+
+void bootstrap()

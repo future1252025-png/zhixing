@@ -16,20 +16,28 @@ def test_missing_jwt_secret_falls_back_to_stable_process_random_secret() -> None
     assert first.jwt_secret_key == second.jwt_secret_key
 
 
-def test_dev_fallback_secret_warns_once_per_process(monkeypatch, caplog) -> None:
+def test_dev_fallback_secret_warns_once_per_process(
+    monkeypatch, caplog, tmp_path
+) -> None:
     import app.core.config as config_module
 
     monkeypatch.setattr(config_module, "_generated_dev_jwt_secret", None)
+    monkeypatch.setattr(
+        config_module,
+        "DEFAULT_DEV_JWT_SECRET_PATH",
+        tmp_path / ".jwt-secret",
+    )
     with caplog.at_level(logging.WARNING, logger="app.core.config"):
         first = Settings(environ={})
         second = Settings(environ={})
 
     warnings = [
-        record for record in caplog.records if "临时随机密钥" in record.getMessage()
+        record for record in caplog.records if "本地持久密钥" in record.getMessage()
     ]
     assert len(warnings) == 1
     assert first.jwt_secret_key == second.jwt_secret_key
     assert first.jwt_secret_key != DEFAULT_JWT_SECRET
+    assert (tmp_path / ".jwt-secret").read_text(encoding="utf-8") == first.jwt_secret_key
 
 
 def test_validate_settings_rejects_implicit_fallback_secret_in_production() -> None:
@@ -119,6 +127,28 @@ def test_validate_settings_rejects_unsafe_token_ttl_in_all_environments(
     )
 
     with pytest.raises(RuntimeError, match="ACCESS_TOKEN_EXPIRE_MINUTES"):
+        validate_settings(config)
+
+
+@pytest.mark.parametrize("days", [0, -1, 91])
+def test_validate_settings_rejects_unsafe_refresh_inactivity_ttl(days: int) -> None:
+    config = Settings(
+        refresh_token_expire_days=days,
+        refresh_session_absolute_days=max(days, 90),
+    )
+
+    with pytest.raises(RuntimeError, match="REFRESH_TOKEN_EXPIRE_DAYS"):
+        validate_settings(config)
+
+
+@pytest.mark.parametrize("days", [29, 366])
+def test_validate_settings_rejects_unsafe_refresh_absolute_ttl(days: int) -> None:
+    config = Settings(
+        refresh_token_expire_days=30,
+        refresh_session_absolute_days=days,
+    )
+
+    with pytest.raises(RuntimeError, match="REFRESH_SESSION_ABSOLUTE_DAYS"):
         validate_settings(config)
 
 

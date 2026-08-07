@@ -128,7 +128,7 @@ async function handleLogout() {
   } catch {
     return
   }
-  authStore.logout()
+  await authStore.logout()
   await router.replace('/login')
 }
 </script>

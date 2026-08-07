@@ -2,6 +2,7 @@ import { createPinia, setActivePinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { TOKEN_STORAGE_KEY } from '@/api/request'
+import { getAccessToken, setAccessToken } from '@/auth/sessionTokens'
 import * as authApi from '@/api/auth'
 import * as apiErrors from '@/api/errors'
 import { useAuthStore } from './auth'
@@ -38,6 +39,7 @@ const user = {
 describe('auth store', () => {
   beforeEach(() => {
     localStorage.clear()
+    setAccessToken(null)
     setActivePinia(createPinia())
     vi.clearAllMocks()
   })
@@ -46,6 +48,7 @@ describe('auth store', () => {
     vi.mocked(authApi.login).mockResolvedValue({
       access_token: 'token-123',
       token_type: 'bearer',
+      expires_in: 1800,
       user
     })
 
@@ -55,13 +58,14 @@ describe('auth store', () => {
 
     expect(store.token).toBe('token-123')
     expect(store.currentUser?.username).toBe('alice')
-    expect(localStorage.getItem(TOKEN_STORAGE_KEY)).toBe('token-123')
+    expect(getAccessToken()).toBe('token-123')
+    expect(localStorage.getItem(TOKEN_STORAGE_KEY)).toBeNull()
     expect(store.isAuthenticated).toBe(true)
     expect(apiErrors.resetUnauthorizedState).toHaveBeenCalledTimes(1)
   })
 
   it('loads current user when token exists', async () => {
-    localStorage.setItem(TOKEN_STORAGE_KEY, 'saved-token')
+    setAccessToken('saved-token')
     vi.mocked(authApi.getCurrentUser).mockResolvedValue(user)
 
     const store = useAuthStore()
@@ -72,7 +76,7 @@ describe('auth store', () => {
   })
 
   it('keeps the saved session on a transient profile load failure', async () => {
-    localStorage.setItem(TOKEN_STORAGE_KEY, 'saved-token')
+    setAccessToken('saved-token')
     vi.mocked(authApi.getCurrentUser).mockRejectedValue({
       response: { status: 503 }
     })
@@ -81,11 +85,12 @@ describe('auth store', () => {
     await expect(store.loadCurrentUser()).rejects.toBeTruthy()
 
     expect(store.token).toBe('saved-token')
-    expect(localStorage.getItem(TOKEN_STORAGE_KEY)).toBe('saved-token')
+    expect(getAccessToken()).toBe('saved-token')
+    expect(localStorage.getItem(TOKEN_STORAGE_KEY)).toBeNull()
   })
 
   it('clears the saved session when the profile request is unauthorized', async () => {
-    localStorage.setItem(TOKEN_STORAGE_KEY, 'expired-token')
+    setAccessToken('expired-token')
     vi.mocked(authApi.getCurrentUser).mockRejectedValue({
       response: { status: 401 }
     })
@@ -94,6 +99,7 @@ describe('auth store', () => {
     await expect(store.loadCurrentUser()).rejects.toBeTruthy()
 
     expect(store.token).toBeNull()
+    expect(getAccessToken()).toBeNull()
     expect(localStorage.getItem(TOKEN_STORAGE_KEY)).toBeNull()
   })
 
@@ -106,6 +112,7 @@ describe('auth store', () => {
 
     expect(store.token).toBeNull()
     expect(store.currentUser).toBeNull()
+    expect(getAccessToken()).toBeNull()
     expect(localStorage.getItem(TOKEN_STORAGE_KEY)).toBeNull()
   })
 

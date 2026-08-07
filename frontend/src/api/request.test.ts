@@ -5,6 +5,7 @@ import {
   setUnauthorizedHandler
 } from './errors'
 import request, { TOKEN_STORAGE_KEY, resolveApiBaseURL } from './request'
+import { setAccessToken } from '@/auth/sessionTokens'
 
 describe('resolveApiBaseURL', () => {
   it('uses the explicitly configured base URL', () => {
@@ -32,11 +33,12 @@ describe('resolveApiBaseURL', () => {
 describe('request session handling', () => {
   beforeEach(() => {
     localStorage.clear()
+    setAccessToken(null)
     resetUnauthorizedState()
   })
 
-  it('attaches the saved bearer token', async () => {
-    localStorage.setItem(TOKEN_STORAGE_KEY, 'saved-token')
+  it('attaches the in-memory bearer token without persisting it', async () => {
+    setAccessToken('saved-token')
     const adapter = vi.fn(async (config) => ({
       data: {},
       status: 200,
@@ -50,6 +52,7 @@ describe('request session handling', () => {
     expect(adapter.mock.calls[0]?.[0].headers.get('Authorization')).toBe(
       'Bearer saved-token'
     )
+    expect(localStorage.getItem(TOKEN_STORAGE_KEY)).toBeNull()
   })
 
   it('coordinates concurrent 401 responses and preserves original errors', async () => {

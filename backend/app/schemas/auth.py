@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import BaseModel, Field, field_validator
 
 from app.schemas.user import UserRead
@@ -53,6 +55,7 @@ class RegisterRequest(BaseModel):
 class LoginRequest(BaseModel):
     username: str = Field(min_length=3, max_length=64)
     password: str = Field(min_length=6, max_length=128)
+    client_kind: Literal["web", "native"] = "web"
 
     @field_validator("username")
     @classmethod
@@ -68,6 +71,17 @@ class LoginRequest(BaseModel):
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
+    expires_in: int
+    refresh_token: str | None = None
+
+
+class RefreshRequest(BaseModel):
+    client_kind: Literal["web", "native"] = "web"
+    refresh_token: str | None = Field(default=None, min_length=32, max_length=512)
+
+
+class LogoutRequest(RefreshRequest):
+    pass
 
 
 class LoginResponse(TokenResponse):

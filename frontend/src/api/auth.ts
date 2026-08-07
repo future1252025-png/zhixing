@@ -1,4 +1,5 @@
 import request from './request'
+import { isNativeAuthClient } from '@/auth/sessionTokens'
 
 export type AuthUser = {
   id: number
@@ -32,6 +33,8 @@ export type ProfileUpdatePayload = {
 export type LoginResponse = {
   access_token: string
   token_type: 'bearer'
+  expires_in: number
+  refresh_token?: string
   user: AuthUser
 }
 
@@ -41,7 +44,10 @@ export async function register(payload: RegisterPayload): Promise<AuthUser> {
 }
 
 export async function login(payload: LoginPayload): Promise<LoginResponse> {
-  const response = await request.post<LoginResponse>('/api/auth/login', payload)
+  const response = await request.post<LoginResponse>('/api/auth/login', {
+    ...payload,
+    client_kind: isNativeAuthClient() ? 'native' : 'web'
+  })
   return response.data
 }
 

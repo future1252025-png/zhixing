@@ -79,7 +79,9 @@ async def request_validation_error_handler(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=list(settings.cors_allow_origins),
-    allow_credentials=False,  # Pure Bearer-token auth; no cookies are ever used.
+    # The web client keeps its rotating refresh token in an HttpOnly cookie.
+    # Origins are explicit and never wildcarded, so credentialed CORS is safe.
+    allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type"],
 )
