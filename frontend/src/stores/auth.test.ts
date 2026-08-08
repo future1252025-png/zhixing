@@ -5,6 +5,7 @@ import { TOKEN_STORAGE_KEY } from '@/api/request'
 import { getAccessToken, setAccessToken } from '@/auth/sessionTokens'
 import * as authApi from '@/api/auth'
 import * as apiErrors from '@/api/errors'
+import * as requestApi from '@/api/request'
 import { useAuthStore } from './auth'
 
 vi.mock('@/api/auth', () => ({
@@ -114,6 +115,20 @@ describe('auth store', () => {
     expect(store.currentUser).toBeNull()
     expect(getAccessToken()).toBeNull()
     expect(localStorage.getItem(TOKEN_STORAGE_KEY)).toBeNull()
+  })
+
+  it('clears local state even when server-side logout fails', async () => {
+    const revoke = vi.spyOn(requestApi, 'revokeSession').mockRejectedValue(new Error('offline'))
+    const store = useAuthStore()
+    store.setToken('token-123')
+    store.setCurrentUser(user)
+
+    await expect(store.logout()).rejects.toThrow('offline')
+
+    expect(store.token).toBeNull()
+    expect(store.currentUser).toBeNull()
+    expect(getAccessToken()).toBeNull()
+    revoke.mockRestore()
   })
 
   it('updates current user profile after saving profile changes', async () => {

@@ -349,6 +349,9 @@ describe('CourseImportPage', () => {
       ['row-2']
     )
     expect(wrapper.text()).toContain('1 门课程已覆盖导入')
+    expect(wrapper.text()).toContain('另有 1 门课程未导入')
+    expect(wrapper.text()).toContain('大学英语')
+    expect(wrapper.text()).toContain('无法识别上课周次')
   })
 
   it('auto-skips invalid and empty-schedule rows returned by the native browser', async () => {
@@ -401,5 +404,9 @@ describe('CourseImportPage', () => {
       ['row-2']
     )
     expect(wrapper.text()).toContain('1 门课程已覆盖导入')
+    expect(wrapper.text()).toContain('另有 1 门课程未导入')
+    expect(wrapper.text()).toContain('课程设计')
+    expect(wrapper.text()).toContain('无法识别上课周次')
+    expect(wrapper.text()).toContain('没有可用的上课时间和地点')
   })
 })

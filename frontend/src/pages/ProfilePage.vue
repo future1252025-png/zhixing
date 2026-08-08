@@ -128,8 +128,13 @@ async function handleLogout() {
   } catch {
     return
   }
-  await authStore.logout()
-  await router.replace('/login')
+  try {
+    await authStore.logout()
+  } catch {
+    showFailToast('已从本机退出，服务端暂时未确认注销')
+  } finally {
+    await router.replace('/login')
+  }
 }
 </script>
 

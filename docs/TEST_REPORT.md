@@ -1,18 +1,20 @@
 # 测试报告
 
-验证日期：2026-08-07
+验证日期：2026-08-08
 
 ## 自动化结果
 
 | 范围 | 结果 |
 | --- | --- |
 | 后端 pytest | 389 passed, 2 skipped |
-| 前端 Vitest | 46 个测试文件，312 passed |
+| 前端 Vitest | 50 个测试文件，329 passed |
+| 前端覆盖率 | 语句 79%、分支 76.1%、函数 77.26%、行 81.1%，门槛通过 |
 | 前端生产构建 | 通过 |
 | Playwright 手机视口 | 核心用户旅程通过 |
 | Playwright 桌面视口 | 核心用户旅程通过 |
 | Android Gradle 单元测试 | Debug/Release 任务通过 |
 | Android Debug APK | 构建通过 |
+| 依赖漏洞审计 | npm 与 Python 均未发现已知漏洞 |
 
 ## 覆盖范围
 

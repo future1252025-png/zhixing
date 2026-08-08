@@ -75,7 +75,7 @@ cd frontend
 Copy-Item .env.android.example .env.android.local
 ```
 
-将 `VITE_API_BASE_URL` 改为手机可访问的 HTTPS API；局域网调试时可临时使用 `http://<电脑IPv4>:8000`。
+正式包将 `VITE_API_BASE_URL` 改为真实可访问的公网 HTTPS API，然后执行：
 
 ```powershell
 npm ci
@@ -83,6 +83,14 @@ npm run android:sync
 cd android
 .\gradlew.bat test assembleDebug
 ```
+
+局域网调试时可临时使用 `http://<电脑IPv4>:8000`，但必须改用：
+
+```powershell
+npm run android:sync:dev
+```
+
+正式同步命令会拒绝 HTTP、私网地址和示例占位域名；开发同步命令只应用于本机调试 APK。
 
 安装到已授权 USB 调试的手机：
 

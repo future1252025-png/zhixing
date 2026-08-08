@@ -1,10 +1,13 @@
 import axios, { AxiosHeaders, type InternalAxiosRequestConfig } from 'axios'
 
 import {
+  clearPendingWebLogout,
   clearSessionTokens,
   getAccessToken,
   getRefreshToken,
+  hasPendingWebLogout,
   isNativeAuthClient,
+  markPendingWebLogout,
   setAccessToken,
   setRefreshToken
 } from '@/auth/sessionTokens'
@@ -42,7 +45,7 @@ export function resolveApiBaseURL(
 }
 
 const apiBaseURL = resolveApiBaseURL()
-const sessionRequest = axios.create({
+export const sessionRequest = axios.create({
   baseURL: apiBaseURL,
   timeout: 10000,
   withCredentials: true
@@ -100,6 +103,19 @@ function isRejectedRefreshCredential(error: unknown): boolean {
 }
 
 export async function restoreSession(): Promise<boolean> {
+  if (!isNativeAuthClient() && hasPendingWebLogout()) {
+    try {
+      await sessionRequest.post('/api/auth/logout', {
+        client_kind: 'web',
+        refresh_token: null
+      })
+      clearPendingWebLogout()
+    } catch {
+      // Stay logged out and retry server-side revocation on a later startup.
+    }
+    setAccessToken(null)
+    return false
+  }
   try {
     await refreshAccessToken()
     return true
@@ -115,11 +131,19 @@ export async function restoreSession(): Promise<boolean> {
 export async function revokeSession(): Promise<void> {
   const native = isNativeAuthClient()
   const refreshToken = native ? await getRefreshToken() : null
-  await sessionRequest.post('/api/auth/logout', {
-    client_kind: native ? 'native' : 'web',
-    refresh_token: refreshToken
-  })
+  if (!native) markPendingWebLogout()
   await clearSessionTokens()
+  try {
+    await sessionRequest.post('/api/auth/logout', {
+      client_kind: native ? 'native' : 'web',
+      refresh_token: refreshToken
+    })
+    if (!native) clearPendingWebLogout()
+  } catch (error) {
+    // Local logout is already complete. Web startup will keep the user logged
+    // out and retry cookie-backed revocation when the API is reachable again.
+    throw error
+  }
 }
 
 request.interceptors.request.use((config) => {

@@ -12,6 +12,7 @@ import {
 } from '@/api/auth'
 import { restoreSession, revokeSession } from '@/api/request'
 import {
+  clearPendingWebLogout,
   getAccessToken,
   setAccessToken,
   setRefreshToken
@@ -54,6 +55,7 @@ export const useAuthStore = defineStore('auth', {
     },
     async login(payload: LoginPayload) {
       const result = await loginRequest(payload)
+      clearPendingWebLogout()
       if (result.refresh_token) {
         await setRefreshToken(result.refresh_token)
       }
@@ -93,12 +95,15 @@ export const useAuthStore = defineStore('auth', {
       this.token = null
       this.currentUser = null
       setAccessToken(null)
-      void setRefreshToken(null)
+      void setRefreshToken(null).catch(() => {})
       useSemesterStore().reset()
     },
     async logout() {
-      await revokeSession()
-      this.clearSession()
+      try {
+        await revokeSession()
+      } finally {
+        this.clearSession()
+      }
     }
   }
 })

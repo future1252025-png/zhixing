@@ -5,7 +5,6 @@ import { fileURLToPath } from 'node:url'
 
 const currentDir = dirname(fileURLToPath(import.meta.url))
 const fixturePath = resolve(currentDir, 'fixtures/import-schedule.html')
-const username = 'e2e_student'
 const password = 'e2e-pass-2026'
 const fullManualRoom = '东区三层 A101 交互设计实验室'
 
@@ -91,7 +90,10 @@ async function fillCourseForm(page: Page, courseName: string): Promise<void> {
   await page.locator('.van-field').filter({ hasText: /^教室/ }).locator('input').fill(fullManualRoom)
 }
 
-test('mobile core journey keeps weeks, locations, sessions, text, and actions trustworthy', async ({ page }, testInfo) => {
+test('core journey keeps weeks, locations, sessions, text, and actions trustworthy', async ({ page }, testInfo) => {
+  const projectSuffix = testInfo.project.name.startsWith('mobile') ? 'mobile' : 'desktop'
+  const username = `e2e_student_${projectSuffix}`
+  const studentId = `E2E2026${projectSuffix === 'mobile' ? '002' : '001'}`
   await page.clock.install({ time: new Date('2026-09-21T07:00:00+08:00') })
   await page.goto('/login')
   await screenshot(page, testInfo, 'login.png')
@@ -101,7 +103,7 @@ test('mobile core journey keeps weeks, locations, sessions, text, and actions tr
   await page.waitForURL('**/register')
   await page.locator('input[name="nickname"]').fill('端到端同学')
   await page.locator('input[name="username"]').fill(username)
-  await page.locator('input[name="student_id"]').fill('E2E2026001')
+  await page.locator('input[name="student_id"]').fill(studentId)
   await page.locator('input[name="password"]').fill(password)
   await page.locator('input[name="confirm_password"]').fill(password)
   await page.getByRole('button', { name: /创建账号/ }).click()

@@ -7,6 +7,7 @@ interface SecureSessionPlugin {
 }
 
 const SecureSession = registerPlugin<SecureSessionPlugin>('SecureSession')
+const PENDING_WEB_LOGOUT_KEY = 'campusmind_pending_web_logout'
 
 // Access tokens deliberately live only in memory. A page/app restart restores
 // the session with the revocable refresh credential instead of persisting a
@@ -45,4 +46,29 @@ export async function setRefreshToken(token: string | null): Promise<void> {
 export async function clearSessionTokens(): Promise<void> {
   setAccessToken(null)
   await setRefreshToken(null)
+}
+
+export function hasPendingWebLogout(): boolean {
+  try {
+    return localStorage.getItem(PENDING_WEB_LOGOUT_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
+export function markPendingWebLogout(): void {
+  try {
+    localStorage.setItem(PENDING_WEB_LOGOUT_KEY, '1')
+  } catch {
+    // Access tokens are already memory-only. If Web Storage is unavailable,
+    // the best remaining protection is clearing memory and attempting logout.
+  }
+}
+
+export function clearPendingWebLogout(): void {
+  try {
+    localStorage.removeItem(PENDING_WEB_LOGOUT_KEY)
+  } catch {
+    // Best-effort cleanup for restricted WebView/browser storage modes.
+  }
 }

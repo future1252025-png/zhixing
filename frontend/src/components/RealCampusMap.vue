@@ -53,6 +53,7 @@ const overlays = shallowRef<any[]>([])
 const routePlanner = shallowRef<any>(null)
 const loading = shallowRef(false)
 const errorMessage = shallowRef('')
+const routeErrorMessage = shallowRef('')
 const searchQuery = ref('')
 const selectedSearchBuildingId = ref<number | null>(null)
 const currentZoom = ref(props.zoom)
@@ -218,19 +219,38 @@ function renderWalkingRoute() {
     !props.fromPoint ||
     !props.toPoint
   ) {
+    routeErrorMessage.value = ''
     return
   }
 
   clearWalkingRoute()
-  routePlanner.value = new amap.value.Walking({
+  routeErrorMessage.value = ''
+  const planner = new amap.value.Walking({
     map: map.value,
     hideMarkers: true
   })
-  routePlanner.value.search(
-    pointToLngLat(props.fromPoint),
-    pointToLngLat(props.toPoint),
-    () => {}
-  )
+  routePlanner.value = planner
+
+  try {
+    planner.search(
+      pointToLngLat(props.fromPoint),
+      pointToLngLat(props.toPoint),
+      (status: string) => {
+        if (disposed || routePlanner.value !== planner) {
+          return
+        }
+        if (status === 'complete') {
+          routeErrorMessage.value = ''
+          return
+        }
+        planner.clear?.()
+        routeErrorMessage.value = '步行路线暂时规划失败，请检查网络后重试'
+      }
+    )
+  } catch {
+    planner.clear?.()
+    routeErrorMessage.value = '步行路线暂时规划失败，请检查网络后重试'
+  }
 }
 
 function renderMapContent(adjustView = false) {
@@ -601,6 +621,18 @@ onBeforeUnmount(() => {
             <strong>地图没有加载成功</strong>
             <span>{{ errorMessage }}</span>
           </div>
+        </div>
+
+        <div
+          v-if="routeErrorMessage && !errorMessage"
+          class="route-error-message"
+          role="alert"
+        >
+          <div>
+            <strong>路线暂时没有规划成功</strong>
+            <span>{{ routeErrorMessage }}</span>
+          </div>
+          <button type="button" @click="renderWalkingRoute">重新规划</button>
         </div>
       </div>
 
@@ -1256,6 +1288,55 @@ onBeforeUnmount(() => {
   color: #ff739f;
 }
 
+.route-error-message {
+  position: absolute;
+  z-index: 19;
+  right: 14px;
+  bottom: 14px;
+  left: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  border: 1px solid rgb(255 102 150 / 35%);
+  border-radius: 12px 3px 12px 3px;
+  background: rgb(24 12 27 / 92%);
+  box-shadow: 0 12px 30px rgb(0 3 12 / 38%);
+  color: #f8edf1;
+  padding: 11px 12px;
+  backdrop-filter: blur(14px);
+}
+
+.route-error-message div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.route-error-message strong {
+  font-size: 14px;
+  line-height: 1.35;
+}
+
+.route-error-message span {
+  color: rgb(246 218 227 / 72%);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.route-error-message button {
+  flex: 0 0 auto;
+  min-height: 40px;
+  border: 1px solid rgb(255 122 165 / 38%);
+  border-radius: 9px 3px 9px 3px;
+  background: rgb(255 122 165 / 10%);
+  color: #ffe9f0;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
+  padding: 0 13px;
+}
+
 .state-alert {
   position: relative;
   display: grid;
@@ -1858,6 +1939,20 @@ onBeforeUnmount(() => {
 }
 .map-state--error { background: rgba(255, 248, 240, .94); }
 .map-state--error .map-state__copy small { color: #89503f; }
+.route-error-message {
+  border-color: rgba(137, 80, 63, .2);
+  border-radius: 18px;
+  background: rgba(255, 250, 244, .95);
+  box-shadow: 0 10px 26px rgba(78, 61, 51, .14);
+  color: var(--fresh-ink);
+}
+.route-error-message span { color: #6d5b53; }
+.route-error-message button {
+  border-color: rgba(137, 80, 63, .22);
+  border-radius: 12px;
+  background: var(--cm-red-soft);
+  color: #774b3e;
+}
 .state-alert {
   border: 0;
   border-radius: 50%;

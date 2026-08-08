@@ -56,7 +56,17 @@ const candidates = computed(() => preview.value?.candidates ?? [])
 const activeCandidates = computed(() =>
   candidates.value.filter((candidate) => !excludedRowRefs.value.includes(candidate.row_ref))
 )
+const excludedCandidates = computed(() =>
+  candidates.value.filter((candidate) => excludedRowRefs.value.includes(candidate.row_ref))
+)
 const excludedCount = computed(() => candidates.value.length - activeCandidates.value.length)
+const skippedCandidateDetails = computed(() =>
+  excludedCandidates.value.map((candidate) => ({
+    rowRef: candidate.row_ref,
+    name: candidate.source.raw_course_name || candidate.course_name || '未识别课程',
+    reasons: candidateSkipReasons(candidate)
+  }))
+)
 const resolvedCount = computed(() =>
   activeCandidates.value.filter((candidate) => isCandidateImportable(candidate)).length
 )
@@ -104,6 +114,25 @@ function shouldSkipCandidateAutomatically(candidate: ImportCandidate): boolean {
   const hasTime = Boolean(candidate.start_time && candidate.end_time)
   const hasLocation = Boolean(candidate.source.raw_location.trim())
   return !isCandidateImportable(candidate) || (!hasTime && !hasLocation)
+}
+
+function candidateSkipReasons(candidate: ImportCandidate): string[] {
+  const reasons = candidate.errors
+    .filter((issue) => !NON_BLOCKING_ERROR_CODES.has(issue.code))
+    .map((issue) => issue.message.trim())
+    .filter(Boolean)
+  const hasTime = Boolean(candidate.start_time && candidate.end_time)
+  const hasLocation = Boolean(candidate.source.raw_location.trim())
+  if (!hasTime && !hasLocation) {
+    reasons.push('没有可用的上课时间和地点')
+  }
+  if (!hasParsedCourse(candidate) && reasons.length === 0) {
+    reasons.push('课程名称、星期或周次无法识别')
+  }
+  if (reasons.length === 0) {
+    reasons.push('已选择不导入')
+  }
+  return [...new Set(reasons)]
 }
 
 function prepareAutomaticImportSelection() {
@@ -464,7 +493,18 @@ async function commitImport() {
       <section v-if="state === 'success'" class="success-sheet" aria-live="polite">
         <span aria-hidden="true">✓</span>
         <h2>{{ createdCount }} 门课程已覆盖导入</h2>
-        <p>原课表已由本次课表替换；无有效时间且无地点的条目已自动跳过。</p>
+        <p>原课表已由本次课表替换。</p>
+        <div v-if="skippedCandidateDetails.length" class="skipped-import-summary" role="status">
+          <strong>另有 {{ skippedCandidateDetails.length }} 门课程未导入</strong>
+          <p>以下课程及原因已明确记录，你可以返回教务系统核对原课表。</p>
+          <ul>
+            <li v-for="candidate in skippedCandidateDetails" :key="candidate.rowRef">
+              <b>{{ candidate.name }}</b>
+              <span>{{ candidate.reasons.join('；') }}</span>
+            </li>
+          </ul>
+        </div>
+        <p v-else>本次没有跳过任何课程。</p>
         <button type="button" data-testid="view-courses" @click="router.push('/courses')">
           查看我的课表
         </button>
@@ -992,6 +1032,22 @@ async function commitImport() {
 .success-sheet > span { display: grid; width: 58px; height: 58px; place-items: center; border-radius: 50%; background: var(--fresh-mint); color: var(--fresh-green-dark); font-size: 25px; font-weight: 900; animation: success-arrive 700ms cubic-bezier(.2,.9,.2,1) both; }
 .success-sheet h2 { margin: 15px 0 5px; color: var(--fresh-ink); font-size: 21px; }
 .success-sheet p { margin: 0 0 18px; color: var(--fresh-text); font-size: 13px; }
+.skipped-import-summary {
+  width: min(100%, 560px);
+  margin: 0 0 18px;
+  border: 1px solid #dfc6a3;
+  border-radius: 16px;
+  background: #fff8e9;
+  color: var(--fresh-ink);
+  padding: 14px;
+  text-align: left;
+}
+.skipped-import-summary > strong { color: #7b5325; font-size: 14px; }
+.success-sheet .skipped-import-summary > p { margin: 5px 0 10px; line-height: 1.55; }
+.skipped-import-summary ul { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.skipped-import-summary li { display: grid; gap: 2px; border-top: 1px solid rgba(123,83,37,.16); padding-top: 8px; }
+.skipped-import-summary li b { font-size: 13px; }
+.skipped-import-summary li span { color: #725e45; font-size: 12px; line-height: 1.5; }
 .success-sheet button { min-width: 190px; }
 
 @keyframes paper-breathe { 0%,100% { transform: translateY(0) rotate(1deg); } 50% { transform: translateY(-8px) rotate(-1deg); } }

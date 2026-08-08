@@ -73,12 +73,21 @@ npm run dev
 ```powershell
 cd frontend
 Copy-Item .env.android.example .env.android.local
-# 编辑 .env.android.local 中的 VITE_API_BASE_URL
+# 正式包：将 VITE_API_BASE_URL 改为真实可访问的公网 HTTPS API
 npm ci
 npm run android:sync
 cd android
 .\gradlew.bat test assembleDebug
 ```
+
+同一 Wi-Fi 下连接电脑后端只用于开发调试。此时可把 API 配成
+`http://<电脑IPv4>:8000`，并改用显式的开发同步命令：
+
+```powershell
+npm run android:sync:dev
+```
+
+`android:sync` 会拒绝 HTTP、私网地址和示例占位域名，避免把只能在本机网络使用的配置误发到正式 APK。
 
 调试 APK：`frontend/android/app/build/outputs/apk/debug/app-debug.apk`
 
@@ -89,7 +98,7 @@ cd android
 截至 2026-08-07：
 
 - 后端：`389 passed, 2 skipped`
-- 前端：`46` 个测试文件、`312 passed`
+- 前端：`50` 个测试文件、`329 passed`，覆盖率门槛通过
 - Playwright：桌面与手机视口核心用户流程通过
 - Android：JUnit、Debug/Release 单元测试任务和 Debug APK 构建通过
 

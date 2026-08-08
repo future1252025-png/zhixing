@@ -32,6 +32,7 @@ yarn-error.log*
 pnpm-debug.log*
 frontend/test-results/
 frontend/playwright-report/
+frontend/coverage/
 /.e2e-artifacts/
 
 # IDE / OS

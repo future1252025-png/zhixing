@@ -44,4 +44,6 @@ npm run android:sync
 npm run android:test
 ```
 
+`android:sync` 仅接受真实公网 HTTPS API。若是在同一 Wi-Fi 下连接电脑后端进行开发调试，请配置 `http://<电脑IPv4>:8000` 并使用 `npm run android:sync:dev`；不要把该调试配置用于发布包。
+
 Android 工程位于 `frontend/android`，应用 ID 为 `com.campusmind.zhixing`，最低 Android API 为 24。
