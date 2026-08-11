@@ -5,6 +5,19 @@ import pytest
 from app.core.config import DEFAULT_JWT_SECRET, Settings, validate_settings
 
 
+def test_unknown_app_environment_fails_closed() -> None:
+    settings = Settings(
+        environ={
+            "APP_ENV": "prd",
+            "JWT_SECRET_KEY": "short",
+            "CORS_ALLOW_ORIGINS": "*",
+        }
+    )
+
+    with pytest.raises(RuntimeError, match="APP_ENV"):
+        validate_settings(settings)
+
+
 def test_missing_jwt_secret_falls_back_to_stable_process_random_secret() -> None:
     first = Settings(environ={})
     second = Settings(environ={})

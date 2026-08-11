@@ -626,6 +626,10 @@ async function commitImport() {
 </template>
 
 <style scoped>
+.course-import-page {
+  --page-max: 780px;
+}
+
 .import-content {
   display: grid;
   width: min(100%, 780px);
@@ -804,11 +808,15 @@ async function commitImport() {
   animation: spin 1s linear infinite;
 }
 .hubu-browser-link {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
   justify-self: center;
   color: #4e7055;
   font-size: 12px;
   font-weight: 760;
   text-decoration: underline;
+  padding: 0 6px;
   text-underline-offset: 3px;
 }
 .privacy-note {

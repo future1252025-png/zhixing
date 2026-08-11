@@ -15,9 +15,6 @@ function message(id: number): BuildingMessage {
     display_name: '匿名同学',
     room_name: null,
     created_at: `2026-07-07T08:${String(id).padStart(2, '0')}:00`,
-    latitude: null,
-    longitude: null,
-    location_source: null,
     distance_to_building_meters: null
   }
 }

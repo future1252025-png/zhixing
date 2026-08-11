@@ -7,6 +7,7 @@ from app.core.security import create_access_token, get_current_user
 from app.db.database import get_session
 from app.models import User
 from app.schemas.auth import (
+    DeleteAccountRequest,
     LoginRequest,
     LoginResponse,
     LogoutRequest,
@@ -19,6 +20,7 @@ from app.services.auth_service import (
     DuplicateUserError,
     authenticate_user,
     create_user,
+    delete_user_account,
     get_user_by_student_id,
     get_user_by_username,
     update_user_profile,
@@ -218,3 +220,32 @@ def update_current_user_profile(
     session: Session = Depends(get_session),
 ) -> User:
     return update_user_profile(session, current_user, payload)
+
+
+@router.delete("/me", status_code=status.HTTP_204_NO_CONTENT)
+def delete_current_user_account(
+    payload: DeleteAccountRequest,
+    request: Request,
+    response: Response,
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+) -> None:
+    client_ip = _client_ip(request)
+    if rate_limit.login_ip_limiter.is_limited(
+        client_ip
+    ) or rate_limit.login_username_limiter.is_limited(current_user.username):
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=rate_limit.LOGIN_RATE_LIMITED,
+        )
+
+    if authenticate_user(session, current_user.username, payload.password) is None:
+        rate_limit.login_ip_limiter.record_failure(client_ip)
+        rate_limit.login_username_limiter.record_failure(current_user.username)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=errors.INVALID_CREDENTIALS,
+        )
+
+    delete_user_account(session, current_user)
+    _clear_refresh_cookie(response)

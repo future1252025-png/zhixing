@@ -188,7 +188,7 @@ watch(
 
 .semester-card header button,
 .semester-cancel {
-  min-height: 42px;
+  min-height: 44px;
   border: 1px solid var(--fresh-line);
   border-radius: 13px;
   background: var(--fresh-paper);

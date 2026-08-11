@@ -1,10 +1,11 @@
 from collections.abc import Generator
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -12,7 +13,15 @@ from app.core import rate_limit
 from app.core.rate_limit import SlidingWindowRateLimiter
 from app.db.database import Base, create_sqlite_engine, get_session, init_db
 from app.main import app
-from app.models import RefreshSession, User
+from app.models import (
+    Building,
+    Course,
+    CourseImportSource,
+    Message,
+    RefreshSession,
+    SemesterSetting,
+    User,
+)
 from app.schemas.auth import RegisterRequest
 from app.services.auth_service import DuplicateUserError, authenticate_user, create_user
 
@@ -278,6 +287,26 @@ def test_update_profile_requires_login(
     assert response.status_code == 401
 
 
+def test_update_profile_rejects_blank_nickname(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    client, _ = client_and_session
+    client.post("/api/auth/register", json=register_payload())
+    login = client.post(
+        "/api/auth/login",
+        json={"username": "alice", "password": "secret123"},
+    )
+
+    response = client.patch(
+        "/api/auth/me",
+        json={"nickname": "   ", "avatar_text": None, "avatar_color": None},
+        headers={"Authorization": f"Bearer {login.json()['access_token']}"},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "validation_error"
+
+
 def test_verify_password_rejects_invalid_hash_without_raising() -> None:
     from app.core.security import verify_password
 
@@ -417,6 +446,39 @@ def test_new_login_removes_refresh_families_past_absolute_expiry(
         assert session.query(RefreshSession).count() == 1
 
 
+def test_new_logins_cap_active_refresh_families_per_user(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    client, SessionLocal = client_and_session
+    client.post("/api/auth/register", json=register_payload())
+    payload = {
+        "username": "alice",
+        "password": "secret123",
+        "client_kind": "native",
+    }
+
+    for _ in range(12):
+        assert client.post("/api/auth/login", json=payload).status_code == 200
+
+    with SessionLocal() as session:
+        user_id = session.scalar(select(User.id).where(User.username == "alice"))
+        active_families = session.scalar(
+            select(func.count(func.distinct(RefreshSession.family_id))).where(
+                RefreshSession.user_id == user_id,
+                RefreshSession.revoked_at.is_(None),
+            )
+        )
+        revoked_families = session.scalar(
+            select(func.count(func.distinct(RefreshSession.family_id))).where(
+                RefreshSession.user_id == user_id,
+                RefreshSession.revoked_at.is_not(None),
+            )
+        )
+
+    assert active_families == 10
+    assert revoked_families == 2
+
+
 def test_native_refresh_rotates_token_and_rejects_replay(
     client_and_session: tuple[TestClient, sessionmaker],
 ) -> None:
@@ -459,6 +521,153 @@ def test_native_refresh_rotates_token_and_rejects_replay(
         json={"client_kind": "native", "refresh_token": second_refresh_token},
     )
     assert latest_after_replay.status_code == 401
+
+
+def test_delete_account_requires_authentication(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    client, _ = client_and_session
+
+    response = client.request(
+        "DELETE",
+        "/api/auth/me",
+        json={"password": "secret123"},
+    )
+
+    assert response.status_code == 401
+
+
+def test_delete_account_rejects_wrong_password_without_removing_data(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    client, SessionLocal = client_and_session
+    client.post("/api/auth/register", json=register_payload())
+    login = client.post(
+        "/api/auth/login",
+        json={
+            "username": "alice",
+            "password": "secret123",
+            "client_kind": "native",
+        },
+    )
+    access_token = login.json()["access_token"]
+
+    response = client.request(
+        "DELETE",
+        "/api/auth/me",
+        json={"password": "wrong-password"},
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
+
+    assert response.status_code == 401
+    with SessionLocal() as session:
+        assert session.scalar(select(User).where(User.username == "alice")) is not None
+        assert session.scalar(select(func.count(RefreshSession.id))) == 1
+
+
+def test_delete_account_removes_owned_data_and_revokes_sessions(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    client, SessionLocal = client_and_session
+    client.post("/api/auth/register", json=register_payload())
+    login = client.post(
+        "/api/auth/login",
+        json={
+            "username": "alice",
+            "password": "secret123",
+            "client_kind": "native",
+        },
+    )
+    access_token = login.json()["access_token"]
+    refresh_token = login.json()["refresh_token"]
+
+    with SessionLocal() as session:
+        user = session.scalar(select(User).where(User.username == "alice"))
+        assert user is not None
+        building = Building(
+            name="账号删除测试楼",
+            type="教学楼",
+            description="测试",
+            latitude=30.0,
+            longitude=114.0,
+            map_x=50.0,
+            map_y=50.0,
+        )
+        course = Course(
+            user_id=user.id,
+            course_name="待删除课程",
+            weekday=1,
+            start_time="08:00",
+            end_time="09:40",
+            room_name="101",
+            teacher="教师",
+            weeks="1-16",
+            source_kind="import",
+            building=building,
+        )
+        session.add_all(
+            [
+                course,
+                SemesterSetting(
+                    user_id=user.id,
+                    start_date=date(2026, 9, 1),
+                    total_weeks=20,
+                ),
+            ]
+        )
+        session.flush()
+        session.add_all(
+            [
+                CourseImportSource(
+                    course_id=course.id,
+                    filename="课表.xlsx",
+                    file_sha256="a" * 64,
+                    source_row="2",
+                    raw_course_name="待删除课程",
+                    raw_weekday="星期一",
+                    raw_time_or_section="1-2节",
+                    raw_teacher="教师",
+                    raw_weeks="1-16周",
+                    raw_location="账号删除测试楼101",
+                ),
+                Message(
+                    building_id=building.id,
+                    user_id=user.id,
+                    content="待删除留言",
+                    display_name="匿名同学",
+                    room_name="101",
+                    distance_to_building_meters=10.0,
+                ),
+            ]
+        )
+        session.commit()
+
+    response = client.request(
+        "DELETE",
+        "/api/auth/me",
+        json={"password": "secret123"},
+        headers={"Authorization": f"Bearer {access_token}"},
+    )
+
+    assert response.status_code == 204
+    assert client.get(
+        "/api/auth/me",
+        headers={"Authorization": f"Bearer {access_token}"},
+    ).status_code == 401
+    assert client.post(
+        "/api/auth/refresh",
+        json={"client_kind": "native", "refresh_token": refresh_token},
+    ).status_code == 401
+
+    with SessionLocal() as session:
+        assert session.scalar(select(func.count(User.id))) == 0
+        assert session.scalar(select(func.count(Course.id))) == 0
+        assert session.scalar(select(func.count(CourseImportSource.id))) == 0
+        assert session.scalar(select(func.count(Message.id))) == 0
+        assert session.scalar(select(func.count(SemesterSetting.id))) == 0
+        assert session.scalar(select(func.count(RefreshSession.id))) == 0
+        # Shared campus reference data is not user-owned and must remain.
+        assert session.scalar(select(func.count(Building.id))) == 1
 
 
 def test_web_refresh_uses_httponly_cookie_and_logout_revokes_session(

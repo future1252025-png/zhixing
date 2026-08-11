@@ -7,6 +7,8 @@ export type DevicePosition = {
   latitude: number
   longitude: number
   accuracy: number | null
+  /** 定位采样发生的时刻，而不是用户稍后点击发送的时刻。 */
+  locatedAt: string
   source: DeviceLocationSource
 }
 
@@ -26,6 +28,15 @@ function hasGrantedPermission(status: {
   coarseLocation: string
 }): boolean {
   return status.location === 'granted' || status.coarseLocation === 'granted'
+}
+
+function formatLocatedAt(timestamp: unknown): string {
+  if (typeof timestamp === 'number' && Number.isFinite(timestamp)) {
+    const sampledAt = new Date(timestamp)
+    if (!Number.isNaN(sampledAt.getTime())) return sampledAt.toISOString()
+  }
+  // 某些原生实现不返回 timestamp；此处紧邻定位结果采集完成，仍能准确表示采样时刻。
+  return new Date().toISOString()
 }
 
 async function requestNativePosition(): Promise<DevicePosition> {
@@ -53,6 +64,7 @@ async function requestNativePosition(): Promise<DevicePosition> {
     accuracy: Number.isFinite(position.coords.accuracy)
       ? position.coords.accuracy
       : null,
+    locatedAt: formatLocatedAt(position.timestamp),
     source: 'native'
   }
 }
@@ -71,6 +83,7 @@ function requestBrowserPosition(): Promise<DevicePosition> {
         accuracy: Number.isFinite(position.coords.accuracy)
           ? position.coords.accuracy
           : null,
+        locatedAt: formatLocatedAt(position.timestamp),
         source: 'browser'
       }),
       reject,

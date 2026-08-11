@@ -9,6 +9,7 @@ import { extractBusinessError } from '@/api/errors'
 
 const LoginPage = () => import('@/pages/LoginPage.vue')
 const RegisterPage = () => import('@/pages/RegisterPage.vue')
+const PrivacyPage = () => import('@/pages/PrivacyPage.vue')
 const HomePage = () => import('@/pages/HomePage.vue')
 const MapCollectorPage = () => import('@/pages/MapCollectorPage.vue')
 const BuildingDetailPage = () => import('@/pages/BuildingDetailPage.vue')
@@ -26,7 +27,15 @@ type AuthRouteTarget = {
   meta: {
     requiresAuth?: boolean
     publicOnly?: boolean
+    devOnly?: boolean
   }
+}
+
+export function resolveEnvironmentRedirect(
+  to: Pick<AuthRouteTarget, 'meta'>,
+  isDevelopment: boolean
+): { path: string } | null {
+  return to.meta.devOnly && !isDevelopment ? { path: '/home' } : null
 }
 
 type AuthRedirect =
@@ -91,12 +100,13 @@ const routes: RouteRecordRaw[] = [
     component: RegisterPage,
     meta: { publicOnly: true }
   },
+  { path: '/privacy', name: 'privacy', component: PrivacyPage },
   { path: '/home', name: 'home', component: HomePage, meta: { requiresAuth: true } },
   {
     path: '/map-collector',
     name: 'map-collector',
     component: MapCollectorPage,
-    meta: { requiresAuth: true }
+    meta: { requiresAuth: true, devOnly: true }
   },
   {
     path: '/buildings/:id',
@@ -169,6 +179,9 @@ router.beforeEach(async (to) => {
     fullPath: to.fullPath,
     meta: to.meta
   }
+
+  const environmentRedirect = resolveEnvironmentRedirect(target, import.meta.env.DEV)
+  if (environmentRedirect) return environmentRedirect
 
   if (shouldLoadCurrentUser(target, Boolean(authStore.token), Boolean(authStore.currentUser))) {
     try {

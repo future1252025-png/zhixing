@@ -20,15 +20,15 @@ class SemesterUpdate(BaseModel):
     @classmethod
     def parse_exact_date(cls, value: object) -> date:
         if isinstance(value, datetime):
-            raise ValueError("start_date must be a date, not a datetime")
+            raise ValueError("学期开始日期不能包含具体时间")
         if isinstance(value, date):
             return value
         if isinstance(value, str) and ISO_DATE_PATTERN.fullmatch(value):
             try:
                 return date.fromisoformat(value)
             except ValueError as error:
-                raise ValueError("start_date must be YYYY-MM-DD") from error
-        raise ValueError("start_date must be YYYY-MM-DD")
+                raise ValueError("学期开始日期必须使用 YYYY-MM-DD 格式") from error
+        raise ValueError("学期开始日期必须使用 YYYY-MM-DD 格式")
 
     @model_validator(mode="after")
     def validate_domain_values(self) -> "SemesterUpdate":

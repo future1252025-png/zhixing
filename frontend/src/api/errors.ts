@@ -6,6 +6,19 @@ let unauthorizedHandler: UnauthorizedHandler | null = null
 let unauthorizedPromise: Promise<void> | null = null
 let unauthorizedHandled = false
 
+const BUSINESS_ERROR_FALLBACKS: Readonly<Record<string, string>> = {
+  semester_unconfigured: '尚未设置学期，请先完成学期设置',
+  course_not_found: '课程不存在',
+  building_not_found: '建筑不存在',
+  invalid_room_name: '上课地点尚未确认，请选择或填写有效地点',
+  user_not_found: '用户不存在'
+}
+
+function localizedBusinessMessage(code: string, message: string): string {
+  // 新后端直接返回中文；此映射同时兼容仍缓存旧英文响应的网页或 APK。
+  return /[\u3400-\u9fff]/u.test(message) ? message : (BUSINESS_ERROR_FALLBACKS[code] ?? message)
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
 }
@@ -32,7 +45,7 @@ export function extractBusinessError(error: unknown): BusinessError {
     return {
       status,
       code: data.code,
-      message: data.message,
+      message: localizedBusinessMessage(data.code, data.message),
       fields: [...data.fields],
       details: data.details
     }

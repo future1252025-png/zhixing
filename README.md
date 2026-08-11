@@ -73,23 +73,24 @@ npm run dev
 ```powershell
 cd frontend
 Copy-Item .env.android.example .env.android.local
-# 正式包：将 VITE_API_BASE_URL 改为真实可访问的公网 HTTPS API
 npm ci
-npm run android:sync
+```
+
+同一 Wi-Fi 下连接电脑后端只用于开发调试。此时可把 API 配成
+`http://<电脑IPv4>:8000`，然后构建 Debug APK：
+
+```powershell
+npm run android:sync:dev
 cd android
 .\gradlew.bat test assembleDebug
 ```
 
-同一 Wi-Fi 下连接电脑后端只用于开发调试。此时可把 API 配成
-`http://<电脑IPv4>:8000`，并改用显式的开发同步命令：
+`android:sync` 是严格的正式资源同步：它要求真实公网 HTTPS API、高德 Web Key 和自有域名的 `/_AMapService` 代理，并会反向检查生成产物。正式 App 通过 Capacitor 原生 HTTP 通道访问 API，不需要后端放行 WebView 的 `https://localhost` 来规避 CORS。
 
-```powershell
-npm run android:sync:dev
-```
-
-`android:sync` 会拒绝 HTTP、私网地址和示例占位域名，避免把只能在本机网络使用的配置误发到正式 APK。
+可发布包不再使用 `assembleDebug`。推荐在 GitHub Actions 手动运行 **Android Release**，配好仓库 Variables/Secrets 后生成已签名 AAB。本地也可设置 `ANDROID_VERSION_CODE`、`ANDROID_VERSION_NAME` 及四个 `ANDROID_RELEASE_*` 签名变量后执行 `npm run android:release`。
 
 调试 APK：`frontend/android/app/build/outputs/apk/debug/app-debug.apk`
+正式 AAB：`frontend/android/app/build/outputs/bundle/release/app-release.aab`
 
 完整说明见 [Android 教务导入](docs/ANDROID_COURSE_IMPORT.md) 和 [运行指南](docs/RUNNING_GUIDE.md)。
 

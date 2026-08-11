@@ -68,6 +68,22 @@ describe('API errors', () => {
     ).toBe('该时间与已有课程冲突')
   })
 
+  it('localizes known business errors returned by an older backend', () => {
+    expect(
+      extractBusinessError({
+        response: {
+          status: 409,
+          data: {
+            code: 'semester_unconfigured',
+            message: 'Semester is not configured',
+            fields: [],
+            details: {}
+          }
+        }
+      }).message
+    ).toBe('尚未设置学期，请先完成学期设置')
+  })
+
   it.each<[unknown, number]>([
     [null, 0],
     [{ response: { status: 500, data: { detail: '   ' } } }, 500],

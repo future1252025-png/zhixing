@@ -21,6 +21,65 @@ from app.db.database import init_db
 from app.schemas.error import BusinessErrorResponse
 
 
+MAX_REQUEST_BODY_BYTES = 11 * 1024 * 1024
+
+
+class RequestBodyTooLarge(Exception):
+    pass
+
+
+class RequestBodyLimitMiddleware:
+    """Reject oversized bodies before multipart parsing or endpoint execution."""
+
+    def __init__(self, app, max_bytes: int = MAX_REQUEST_BODY_BYTES) -> None:
+        self.app = app
+        self.max_bytes = max_bytes
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        headers = {key.lower(): value for key, value in scope.get("headers", [])}
+        content_length = headers.get(b"content-length")
+        if content_length is not None:
+            try:
+                declared_size = int(content_length)
+            except ValueError:
+                declared_size = 0
+            if declared_size > self.max_bytes:
+                await self._send_rejection(scope, receive, send)
+                return
+
+        received = 0
+
+        async def limited_receive():
+            nonlocal received
+            message = await receive()
+            if message["type"] == "http.request":
+                received += len(message.get("body", b""))
+                if received > self.max_bytes:
+                    raise RequestBodyTooLarge()
+            return message
+
+        try:
+            await self.app(scope, limited_receive, send)
+        except RequestBodyTooLarge:
+            await self._send_rejection(scope, receive, send)
+
+    async def _send_rejection(self, scope, receive, send) -> None:
+        response = JSONResponse(
+            status_code=413,
+            content={
+                "code": "request_too_large",
+                "message": "请求内容过大",
+                "fields": ["body"],
+                "details": {"max_bytes": self.max_bytes},
+            },
+        )
+        await response(scope, receive, send)
+
+
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next) -> Response:
         response = await call_next(request)
@@ -85,6 +144,7 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type"],
 )
+app.add_middleware(RequestBodyLimitMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
 
 app.include_router(health_router)

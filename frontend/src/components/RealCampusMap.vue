@@ -30,7 +30,7 @@ const props = withDefaults(defineProps<{
   selectedActionText?: string
 }>(), {
   title: '校园地图',
-  subtitle: '基于高德地图展示湖北大学建筑位置',
+  subtitle: '展示湖北大学建筑位置',
   buildings: () => [],
   activeBuildingId: null,
   fromPoint: null,
@@ -640,12 +640,9 @@ onBeforeUnmount(() => {
         <div class="placeholder-core" aria-hidden="true">
           <i /><i /><span>!</span>
         </div>
-        <small>还差一步配置</small>
-        <strong>未配置高德地图 Key</strong>
-        <p>
-          请在 <code>frontend/.env.local</code> 中配置
-          <span>VITE_AMAP_KEY</span> 和 <span>VITE_AMAP_SECURITY_CODE</span>
-        </p>
+        <small>地图暂时不可用</small>
+        <strong>校园地图还没有准备好</strong>
+        <p>请稍后再试，其他地点信息仍可正常查看。</p>
       </div>
 
       <article v-if="hasConfig && selectedBuilding" class="map-selected-card">
@@ -666,31 +663,26 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .real-map-card {
-  --map-cyan: #55f7ff;
-  --map-cyan-rgb: 85 247 255;
-  --map-violet: #9678ff;
-  --map-violet-rgb: 150 120 255;
-  --map-night: #050b18;
-  --map-panel: rgb(8 17 35 / 88%);
-  --map-line: rgb(116 226 255 / 19%);
+  --map-cyan: #6f9b69;
+  --map-cyan-rgb: 111 155 105;
+  --map-violet: #7ea9a5;
+  --map-violet-rgb: 126 169 165;
   margin: 0;
   position: relative;
   isolation: isolate;
-  overflow: hidden;
-  border: 1px solid rgb(var(--map-cyan-rgb) / 18%);
-  border-radius: 24px;
+  overflow: visible;
+  border: 1px solid rgba(84, 118, 82, .14);
+  border-radius: 28px;
   background:
-    radial-gradient(circle at 88% 0%, rgb(var(--map-violet-rgb) / 18%), transparent 36%),
-    radial-gradient(circle at 4% 100%, rgb(var(--map-cyan-rgb) / 12%), transparent 38%),
-    linear-gradient(145deg, #071125 0%, #040914 62%, #090b1b 100%);
-  box-shadow:
-    0 28px 70px rgb(0 3 12 / 42%),
-    inset 0 1px 0 rgb(255 255 255 / 7%);
-  color: #effcff;
+    radial-gradient(circle at 92% 5%, rgba(240, 207, 132, .2), transparent 25%),
+    var(--fresh-paper);
+  box-shadow: 0 19px 44px rgba(70, 91, 66, .1);
+  color: var(--fresh-ink);
   padding: clamp(14px, 2.3vw, 22px);
 }
 
 .real-map-card--compact {
+  overflow: visible;
   border: 0;
   border-radius: 0;
   background: transparent;
@@ -1605,30 +1597,7 @@ onBeforeUnmount(() => {
   }
 }
 
-/* 清新自然版地图：保留地图能力，只留下柔和、易读的界面。 */
-.real-map-card {
-  --map-cyan: #6f9b69;
-  --map-cyan-rgb: 111 155 105;
-  --map-violet: #7ea9a5;
-  --map-violet-rgb: 126 169 165;
-  overflow: visible;
-  border: 1px solid rgba(84, 118, 82, .14);
-  border-radius: 28px;
-  background:
-    radial-gradient(circle at 92% 5%, rgba(240, 207, 132, .2), transparent 25%),
-    var(--fresh-paper);
-  box-shadow: 0 19px 44px rgba(70, 91, 66, .1);
-  color: var(--fresh-ink);
-}
-
-.real-map-card--compact {
-  overflow: visible;
-  border: 0;
-  border-radius: 0;
-  background: transparent;
-  box-shadow: none;
-  padding: 0;
-}
+/* 清新自然视觉层：基础容器已与结构规则合并，以下只覆盖子组件观感。 */
 
 .real-map-heading {
   margin-bottom: 15px;

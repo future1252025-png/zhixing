@@ -40,6 +40,8 @@ const conflictNotices = ref<Array<{ courseName: string; overlapWeeks: number[] }
 const weekOptions = getTeachingWeekOptions()
 const weekRangeStart = ref(1)
 const weekRangeEnd = ref(16)
+const weekdaySelectRef = ref<HTMLSelectElement | null>(null)
+const buildingPickerRef = ref<{ openSheet: () => void } | null>(null)
 const { pageStyle, onFieldFocus } = useKeyboardAwarePage({ basePaddingPx: 34 })
 
 const courseId = computed(() => {
@@ -278,9 +280,18 @@ onMounted(loadFormData)
               maxlength="100"
               placeholder="例如：设计心理学"
             />
-            <van-field required label="星期">
+            <van-field required @click="weekdaySelectRef?.focus()">
+              <template #label>
+                <label id="course-weekday-label" for="course-weekday">星期</label>
+              </template>
               <template #input>
-                <select v-model.number="form.weekday" class="form-select" aria-label="选择星期">
+                <select
+                  id="course-weekday"
+                  ref="weekdaySelectRef"
+                  v-model.number="form.weekday"
+                  class="form-select"
+                  aria-labelledby="course-weekday-label"
+                >
                   <option v-for="weekday in WEEKDAYS" :key="weekday.value" :value="weekday.value">
                     {{ weekday.label }}
                   </option>
@@ -359,11 +370,14 @@ onMounted(loadFormData)
               <van-field v-model="form.end_time" required type="time" label="结束时间" />
             </div>
 
-            <van-field required label="上课建筑">
+            <van-field required @click="buildingPickerRef?.openSheet()">
+              <template #label><span id="course-building-label">上课建筑</span></template>
               <template #input>
                 <BuildingPicker
+                  ref="buildingPickerRef"
                   v-model="buildingIdModel"
                   :buildings="buildings"
+                  labelled-by="course-building-label"
                   placeholder="请选择建筑"
                 />
               </template>
@@ -397,6 +411,10 @@ onMounted(loadFormData)
 </template>
 
 <style scoped>
+.course-form-page {
+  --page-max: 720px;
+}
+
 .form-content {
   display: grid;
   width: min(100%, 720px);
@@ -658,7 +676,7 @@ onMounted(loadFormData)
   place-items: center;
   border-radius: 50% 50% 48% 38%;
   background: var(--fresh-mint);
-  color: #567852;
+  color: #486848;
   font-family: Georgia, serif;
   font-size: 15px;
   font-weight: 700;
@@ -718,7 +736,7 @@ onMounted(loadFormData)
 }
 .week-planner-title { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
 .week-planner-title strong { color: var(--fresh-green-dark); font-size: 13px; }
-.week-planner-title span { color: #899488; font-size: 13px; }
+.week-planner-title span { color: #68766b; font-size: 13px; }
 .week-range {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 26px minmax(0, 1fr) auto;
@@ -731,10 +749,10 @@ onMounted(loadFormData)
 .range-path { display: grid; height: 40px; place-items: center; }
 .range-path i { width: 17px; height: 2px; border-radius: 2px; background: #a7bfa0; }
 .write-range {
-  min-height: 40px;
+  min-height: 44px;
   border: 0;
   border-radius: 12px;
-  background: #668e61;
+  background: #466d48;
   color: #fff;
   font-weight: 700;
   padding: 0 14px;
@@ -751,8 +769,8 @@ onMounted(loadFormData)
   transition: transform .2s ease, background .2s ease, color .2s ease;
 }
 .week-presets button.active {
-  border-color: #6d9468;
-  background: #6d9468;
+  border-color: #466d48;
+  background: #466d48;
   color: #fff;
   box-shadow: 0 5px 12px rgba(75, 116, 72, .18);
   transform: translateY(-2px);

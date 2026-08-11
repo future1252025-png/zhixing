@@ -1,13 +1,21 @@
 import re
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.security import hash_password, verify_password
-from app.models import User
+from app.models import (
+    Course,
+    CourseImportSource,
+    Message,
+    RefreshSession,
+    SemesterSetting,
+    User,
+)
 from app.schemas.auth import RegisterRequest
 from app.schemas.user import UserProfileUpdate
+from app.services.user_mutation_guard import acquire_user_mutation_guard
 
 
 class DuplicateUserError(ValueError):
@@ -98,3 +106,19 @@ def update_user_profile(
     session.commit()
     session.refresh(user)
     return user
+
+
+def delete_user_account(session: Session, user: User) -> None:
+    """Permanently remove a user's account and every user-owned record."""
+
+    acquire_user_mutation_guard(session, user.id)
+    course_ids = select(Course.id).where(Course.user_id == user.id)
+    session.execute(
+        delete(CourseImportSource).where(CourseImportSource.course_id.in_(course_ids))
+    )
+    session.execute(delete(Message).where(Message.user_id == user.id))
+    session.execute(delete(Course).where(Course.user_id == user.id))
+    session.execute(delete(SemesterSetting).where(SemesterSetting.user_id == user.id))
+    session.execute(delete(RefreshSession).where(RefreshSession.user_id == user.id))
+    session.delete(user)
+    session.commit()

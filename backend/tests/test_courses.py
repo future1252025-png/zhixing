@@ -394,7 +394,7 @@ def test_update_course_with_invalid_time_range_returns_422(
     assert response.status_code == 422
     assert response.json()["code"] == "invalid_course_time"
     assert response.json()["fields"] == ["start_time", "end_time"]
-    assert "end_time" in response.json()["message"].lower()
+    assert response.json()["message"] == "下课时间必须晚于上课时间"
 
 
 def test_user_cannot_access_another_users_course(
@@ -466,7 +466,7 @@ def test_course_writes_require_a_configured_semester(
     assert response.status_code == 409
     assert response.json() == {
         "code": "semester_unconfigured",
-        "message": "Semester is not configured",
+        "message": "尚未设置学期，请先完成学期设置",
         "fields": [],
         "details": {},
     }
@@ -494,7 +494,7 @@ def test_course_writes_return_structured_business_errors(
     assert placeholder.status_code == 422
     assert placeholder.json() == {
         "code": "invalid_room_name",
-        "message": "Room name must be a confirmed location",
+        "message": "上课地点尚未确认，请选择或填写有效地点",
         "fields": ["room_name"],
         "details": {},
     }
@@ -525,7 +525,7 @@ def test_week_31_is_a_standard_schema_validation_error(
     assert response.json()["details"]["errors"] == [
         {
             "loc": ["body", "weeks"],
-            "msg": "Value error, Week must be between 1 and 30",
+            "msg": "Value error, 周次必须在第 1 至 30 周之间",
             "type": "value_error",
         }
     ]

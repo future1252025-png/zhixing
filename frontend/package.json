@@ -19,10 +19,11 @@
     "test:e2e": "playwright test",
     "test:e2e:wide": "cross-env E2E_VIEWPORT_WIDTH=430 E2E_VIEWPORT_HEIGHT=932 playwright test",
     "build:android": "vue-tsc --noEmit && vite build --mode android",
-    "android:sync": "node tools/validateAndroidProductionEnv.mjs && npm run build:android && cross-env CAPACITOR_ALLOW_MIXED_CONTENT=false cap sync android",
+    "android:sync": "node tools/validateAndroidProductionEnv.mjs && npm run build:android && cross-env CAPACITOR_ALLOW_MIXED_CONTENT=false cap sync android && node tools/verifyAndroidProductionBundle.mjs",
     "android:sync:dev": "npm run build:android && cross-env CAPACITOR_ALLOW_MIXED_CONTENT=true cap sync android",
     "android:test": "cd android && gradlew.bat test",
-    "android:open": "cap open android"
+    "android:open": "cap open android",
+    "android:release": "npm run android:sync && cross-env-shell ANDROID_REQUIRE_RELEASE_SIGNING=true \"cd android && gradlew.bat clean bundleRelease --no-daemon\""
   },
   "dependencies": {
     "@amap/amap-jsapi-loader": "^1.0.1",

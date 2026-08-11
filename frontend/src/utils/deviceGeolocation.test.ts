@@ -48,6 +48,7 @@ describe('device geolocation', () => {
       coarseLocation: 'granted'
     })
     mocks.getCurrentPosition.mockResolvedValue({
+      timestamp: Date.parse('2026-07-07T08:00:00.000Z'),
       coords: {
         latitude: 30.58,
         longitude: 114.32,
@@ -59,6 +60,7 @@ describe('device geolocation', () => {
       latitude: 30.58,
       longitude: 114.32,
       accuracy: 9,
+      locatedAt: '2026-07-07T08:00:00.000Z',
       source: 'native'
     })
     expect(mocks.requestPermissions).toHaveBeenCalledWith({
@@ -94,6 +96,7 @@ describe('device geolocation', () => {
 
   it('uses browser geolocation on the web', async () => {
     const getCurrentPosition = vi.fn((resolve: PositionCallback) => resolve({
+      timestamp: Date.parse('2026-07-07T08:30:00.000Z'),
       coords: {
         latitude: 30.582,
         longitude: 114.322,
@@ -110,6 +113,7 @@ describe('device geolocation', () => {
       latitude: 30.582,
       longitude: 114.322,
       accuracy: 16,
+      locatedAt: '2026-07-07T08:30:00.000Z',
       source: 'browser'
     })
     expect(getCurrentPosition).toHaveBeenCalledWith(

@@ -32,6 +32,9 @@ MIN_JWT_SECRET_BYTES: Final = 32
 MAX_ACCESS_TOKEN_EXPIRE_MINUTES: Final = 24 * 60
 MAX_REFRESH_TOKEN_EXPIRE_DAYS: Final = 90
 MAX_REFRESH_SESSION_ABSOLUTE_DAYS: Final = 365
+ALLOWED_APP_ENVS: Final = frozenset(
+    {"development", "dev", "test", "testing", "production", "prod"}
+)
 _UNSET: Final = object()
 _DOMAIN_LABEL = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
 _generated_dev_jwt_secret: str | None = None
@@ -333,6 +336,10 @@ def _is_remote_https_origin(origin: str) -> bool:
 def validate_settings(config: Settings | None = None) -> None:
     """Fail fast on unsafe or unusable runtime configuration."""
     current = settings if config is None else config
+
+    if current.app_env not in ALLOWED_APP_ENVS:
+        allowed = ", ".join(sorted(ALLOWED_APP_ENVS))
+        raise RuntimeError(f"APP_ENV must be one of: {allowed}.")
 
     if not 1 <= current.access_token_expire_minutes <= MAX_ACCESS_TOKEN_EXPIRE_MINUTES:
         raise RuntimeError(

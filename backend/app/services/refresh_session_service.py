@@ -5,7 +5,7 @@ import hashlib
 import secrets
 import uuid
 
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -18,6 +18,9 @@ class RefreshSessionError(ValueError):
 
 class RefreshTokenReplayError(RefreshSessionError):
     """A consumed refresh token was presented again."""
+
+
+MAX_ACTIVE_REFRESH_FAMILIES_PER_USER = 10
 
 
 def _token_digest(token: str) -> str:
@@ -47,6 +50,7 @@ def issue_refresh_session(
             RefreshSession.absolute_expires_at <= issued_at
         )
     )
+    _limit_active_families_before_issue(session, user.id, issued_at)
     token = _new_token()
     absolute_expires_at = issued_at + timedelta(
         days=settings.refresh_session_absolute_days
@@ -65,6 +69,27 @@ def issue_refresh_session(
     session.add(refresh_session)
     session.commit()
     return token
+
+
+def _limit_active_families_before_issue(
+    session: Session,
+    user_id: int,
+    issued_at: datetime,
+) -> None:
+    first_created = func.min(RefreshSession.created_at)
+    active_families = session.execute(
+        select(RefreshSession.family_id, first_created.label("first_created"))
+        .where(
+            RefreshSession.user_id == user_id,
+            RefreshSession.revoked_at.is_(None),
+            RefreshSession.absolute_expires_at > issued_at,
+        )
+        .group_by(RefreshSession.family_id)
+        .order_by(first_created.desc(), RefreshSession.family_id.desc())
+    ).all()
+    keep_existing = MAX_ACTIVE_REFRESH_FAMILIES_PER_USER - 1
+    for family_id, _ in active_families[keep_existing:]:
+        _revoke_family(session, family_id, issued_at)
 
 
 def _revoke_family(session: Session, family_id: str, revoked_at: datetime) -> None:

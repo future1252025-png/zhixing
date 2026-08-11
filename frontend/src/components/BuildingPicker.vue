@@ -17,6 +17,7 @@ const props = withDefaults(
     filter?: (buildings: T[], keyword: string, limit: number) => T[]
     /** 过滤结果上限，避免超长列表拖慢弹层 */
     limit?: number
+    labelledBy?: string
   }>(),
   {
     placeholder: '请选择建筑',
@@ -58,6 +59,8 @@ function openSheet() {
   show.value = true
 }
 
+defineExpose({ openSheet })
+
 function closeSheet() {
   show.value = false
 }
@@ -74,6 +77,7 @@ function selectBuilding(building: T) {
       type="button"
       class="picker-trigger"
       :aria-expanded="show"
+      :aria-labelledby="labelledBy"
       aria-haspopup="dialog"
       @click="openSheet"
     >

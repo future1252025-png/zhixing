@@ -54,6 +54,17 @@ async function expectReadableControls(page: Page): Promise<void> {
       const center = controlIsFullyInViewport && !centerIsClipped
         ? document.elementFromPoint(centerX, centerY)
         : null
+      const coveringTabbar = center?.closest('.app-tabbar')
+      const tabbarTop = coveringTabbar?.getBoundingClientRect().top ?? window.innerHeight
+      const requiredScrollToClearTabbar = Math.max(0, centerY - tabbarTop + rect.height / 2 + 8)
+      const documentHeight = Math.max(
+        document.documentElement.scrollHeight,
+        document.body.scrollHeight
+      )
+      const remainingScroll = Math.max(0, documentHeight - window.innerHeight - window.scrollY)
+      const canScrollClearTabbar = Boolean(
+        coveringTabbar && remainingScroll >= requiredScrollToClearTabbar
+      )
       const issues: string[] = []
       if (!text) issues.push('缺少可读文字或 aria-label')
       if (rect.height < 40) issues.push(`高度只有 ${rect.height.toFixed(1)}px`)
@@ -62,7 +73,8 @@ async function expectReadableControls(page: Page): Promise<void> {
         center
         && center !== element
         && !element.contains(center)
-        && !center.closest('.app-tabbar, .van-nav-bar, .van-toast, .van-overlay')
+        && !center.closest('.van-nav-bar, .van-toast, .van-overlay')
+        && !canScrollClearTabbar
       ) {
         issues.push('中心被其他元素遮挡')
       }
@@ -80,7 +92,7 @@ async function assertPageQuality(page: Page): Promise<void> {
 
 async function fillCourseForm(page: Page, courseName: string): Promise<void> {
   await page.locator('.van-field').filter({ hasText: '课程名称' }).locator('input').fill(courseName)
-  await page.getByLabel('选择星期').selectOption('1')
+  await page.getByLabel('星期', { exact: true }).selectOption('1')
   await page.locator('.van-field').filter({ hasText: '上课周次' }).locator('input').fill('1-16')
   await page.locator('.van-field').filter({ hasText: '开始时间' }).locator('input').fill('09:00')
   await page.locator('.van-field').filter({ hasText: '结束时间' }).locator('input').fill('10:40')
@@ -193,10 +205,26 @@ test('core journey keeps weeks, locations, sessions, text, and actions trustwort
   ])
   await expect(page.locator('.timetable-slot').first().locator('.course-cell')).toHaveCount(7)
   await expect(page.locator('.week-head .weekday-head:visible')).toHaveCount(7)
-  const timetableFitsViewport = await page.locator('.timetable-viewport').evaluate((viewport) =>
-    viewport.scrollWidth <= viewport.clientWidth + 1
-  )
-  expect(timetableFitsViewport).toBe(true)
+  const timetableMetrics = await page.locator('.timetable-viewport').evaluate((viewport) => ({
+    clientWidth: viewport.clientWidth,
+    scrollWidth: viewport.scrollWidth,
+    firstDayWidth: viewport.querySelector('.weekday-head')?.getBoundingClientRect().width ?? 0
+  }))
+  if (projectSuffix === 'mobile') {
+    expect(timetableMetrics.scrollWidth).toBeGreaterThan(timetableMetrics.clientWidth + 100)
+    expect(timetableMetrics.firstDayWidth).toBeGreaterThanOrEqual(90)
+    await expect(page.locator('.timetable-scroll-hint')).toBeVisible()
+    const sundayIsReachable = await page.locator('.timetable-viewport').evaluate((viewport) => {
+      viewport.scrollLeft = viewport.scrollWidth
+      const sunday = viewport.querySelectorAll('.weekday-head')[6]?.getBoundingClientRect()
+      const bounds = viewport.getBoundingClientRect()
+      return Boolean(sunday && sunday.left >= bounds.left - 1 && sunday.right <= bounds.right + 1)
+    })
+    expect(sundayIsReachable).toBe(true)
+  } else {
+    expect(timetableMetrics.scrollWidth).toBeLessThanOrEqual(timetableMetrics.clientWidth + 1)
+    await expect(page.locator('.timetable-scroll-hint')).toBeHidden()
+  }
   const timetableBounds = await page.locator('.timetable-shell').evaluate((timetable) => {
     const bounds = timetable.getBoundingClientRect()
     return { left: bounds.left, right: bounds.right, viewportWidth: window.innerWidth }

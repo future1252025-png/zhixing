@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.db.database import Base, create_sqlite_engine, get_session, init_db
 from app.db.seed import seed_demo_data
 from app.main import app
-from app.models import Building, Course, Message, User
+from app.models import Building, Course, CourseImportSource, Message, User
 
 
 def make_test_database_url(path: Path) -> str:
@@ -62,7 +62,9 @@ def message_location_payload(building: dict) -> dict:
     return {
         "latitude": building["latitude"],
         "longitude": building["longitude"],
-        "location_source": "manual",
+        "location_source": "browser",
+        "located_at": datetime.now(timezone.utc).isoformat(),
+        "location_accuracy_meters": 10,
     }
 
 
@@ -74,16 +76,33 @@ def create_course_room(
     """Register a classroom channel by giving the building a course in it."""
     with SessionLocal() as session:
         user = session.query(User).first()
+        building = session.get(Building, building_id)
         assert user is not None
+        assert building is not None
+        course = Course(
+            user_id=user.id,
+            course_name="教室频道课程",
+            weekday=1,
+            start_time="08:00",
+            end_time="09:40",
+            building_id=building_id,
+            room_name=room_name,
+            source_kind="import",
+        )
+        session.add(course)
+        session.flush()
         session.add(
-            Course(
-                user_id=user.id,
-                course_name="教室频道课程",
-                weekday=1,
-                start_time="08:00",
-                end_time="09:40",
-                building_id=building_id,
-                room_name=room_name,
+            CourseImportSource(
+                course_id=course.id,
+                filename="test-timetable.html",
+                file_sha256="0" * 64,
+                source_row=f"row-{course.id}",
+                raw_course_name=course.course_name,
+                raw_weekday="星期一",
+                raw_time_or_section="01-02节",
+                raw_teacher="测试教师",
+                raw_weeks="1-16周",
+                raw_location=f"{building.name}{room_name}",
             )
         )
         session.commit()
@@ -325,9 +344,9 @@ def test_create_message_with_token_returns_anonymous_message(
     assert data["building_id"] == building["id"]
     assert data["content"] == "今天这里很安静"
     assert data["display_name"] == "匿名同学"
-    assert data["latitude"] == building["latitude"]
-    assert data["longitude"] == building["longitude"]
-    assert data["location_source"] == "manual"
+    assert "latitude" not in data
+    assert "longitude" not in data
+    assert "location_source" not in data
     assert data["distance_to_building_meters"] == 0
     assert datetime.fromisoformat(data["created_at"]).utcoffset() == timedelta(0)
     assert "password_hash" not in data
@@ -359,15 +378,132 @@ def test_create_message_accepts_native_device_location(
         f"/api/buildings/{building['id']}/messages",
         json={
             "content": "来自手机定位",
-            "latitude": building["latitude"],
-            "longitude": building["longitude"],
+            **message_location_payload(building),
             "location_source": "native",
         },
         headers=auth_headers(client),
     )
 
     assert response.status_code == 201
-    assert response.json()["location_source"] == "native"
+    assert "location_source" not in response.json()
+
+
+def test_create_message_rejects_manual_location_source(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    client, _ = client_and_session
+    building = get_first_building(client)
+    payload = message_location_payload(building)
+    payload["location_source"] = "manual"
+
+    response = client.post(
+        f"/api/buildings/{building['id']}/messages",
+        json={"content": "不应使用手动定位", **payload},
+        headers=auth_headers(client),
+    )
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "validation_error"
+
+
+def test_create_message_rejects_stale_or_inaccurate_location(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    client, _ = client_and_session
+    building = get_first_building(client)
+    headers = auth_headers(client)
+    stale = message_location_payload(building)
+    stale["located_at"] = (
+        datetime.now(timezone.utc) - timedelta(minutes=5)
+    ).isoformat()
+    inaccurate = message_location_payload(building)
+    inaccurate["location_accuracy_meters"] = 101
+
+    stale_response = client.post(
+        f"/api/buildings/{building['id']}/messages",
+        json={"content": "过期定位", **stale},
+        headers=headers,
+    )
+    inaccurate_response = client.post(
+        f"/api/buildings/{building['id']}/messages",
+        json={"content": "低精度定位", **inaccurate},
+        headers=headers,
+    )
+
+    assert stale_response.status_code == 422
+    assert stale_response.json()["code"] == "location_evidence_stale"
+    assert inaccurate_response.status_code == 422
+    assert inaccurate_response.json()["code"] == "location_accuracy_insufficient"
+
+
+def test_message_does_not_persist_or_expose_exact_location(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    client, SessionLocal = client_and_session
+    building = get_first_building(client)
+    writer_headers = auth_headers(client, "location_writer")
+    reader_headers = auth_headers(client, "location_reader")
+
+    created = client.post(
+        f"/api/buildings/{building['id']}/messages",
+        json={"content": "位置隐私消息", **message_location_payload(building)},
+        headers=writer_headers,
+    )
+    listed = client.get(
+        f"/api/buildings/{building['id']}/messages",
+        headers=reader_headers,
+    )
+
+    assert created.status_code == 201
+    exposed = next(item for item in listed.json() if item["content"] == "位置隐私消息")
+    assert "latitude" not in exposed
+    assert "longitude" not in exposed
+    assert "location_source" not in exposed
+    with SessionLocal() as session:
+        stored = session.query(Message).filter(Message.content == "位置隐私消息").one()
+        assert stored.latitude is None
+        assert stored.longitude is None
+        assert stored.location_source is None
+
+
+def test_duplicate_messages_and_message_burst_are_limited(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    client, _ = client_and_session
+    building = get_first_building(client)
+    headers = auth_headers(client, "message_limiter")
+
+    first = client.post(
+        f"/api/buildings/{building['id']}/messages",
+        json={"content": "重复内容", **message_location_payload(building)},
+        headers=headers,
+    )
+    duplicate = client.post(
+        f"/api/buildings/{building['id']}/messages",
+        json={"content": "重复内容", **message_location_payload(building)},
+        headers=headers,
+    )
+    for index in range(1, 10):
+        response = client.post(
+            f"/api/buildings/{building['id']}/messages",
+            json={
+                "content": f"限流消息 {index}",
+                **message_location_payload(building),
+            },
+            headers=headers,
+        )
+        assert response.status_code == 201
+    limited = client.post(
+        f"/api/buildings/{building['id']}/messages",
+        json={"content": "第十一条", **message_location_payload(building)},
+        headers=headers,
+    )
+
+    assert first.status_code == 201
+    assert duplicate.status_code == 409
+    assert duplicate.json()["code"] == "duplicate_message"
+    assert limited.status_code == 429
+    assert limited.json()["code"] == "message_rate_limited"
 
 
 def test_create_message_too_far_from_building_fails(
@@ -383,12 +519,14 @@ def test_create_message_too_far_from_building_fails(
             "latitude": building["latitude"] + 0.02,
             "longitude": building["longitude"] + 0.02,
             "location_source": "browser",
+            "located_at": datetime.now(timezone.utc).isoformat(),
+            "location_accuracy_meters": 10,
         },
         headers=auth_headers(client),
     )
 
     assert response.status_code == 400
-    assert "过远" in response.json()["detail"]
+    assert response.json()["code"] == "message_location_too_far"
 
 
 def test_create_empty_message_fails(
@@ -705,6 +843,46 @@ def test_create_message_with_unknown_room_name_returns_422(
     data = response.json()
     assert data["code"] == "room_not_found"
     assert "教室" in data["message"]
+    assert data["fields"] == ["room_name"]
+
+
+def test_manual_course_cannot_create_a_classroom_channel(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    client, SessionLocal = client_and_session
+    building = get_first_building(client)
+    room_name = "手工任意教室-404"
+    with SessionLocal() as session:
+        user = session.query(User).first()
+        assert user is not None
+        session.add(
+            Course(
+                user_id=user.id,
+                course_name="手工课程",
+                weekday=1,
+                start_time="08:00",
+                end_time="09:40",
+                building_id=building["id"],
+                room_name=room_name,
+                source_kind="manual",
+            )
+        )
+        session.commit()
+
+    response = client.post(
+        f"/api/buildings/{building['id']}/messages",
+        json={
+            "content": "不应创建频道",
+            "room_name": room_name,
+            **message_location_payload(building),
+        },
+        headers=auth_headers(client, "manual_room_user"),
+    )
+
+    assert response.status_code == 422
+    data = response.json()
+    assert data["code"] == "room_not_found"
+    assert data["message"] == "该建筑下不存在此教室频道，无法留言"
     assert data["fields"] == ["room_name"]
 
 

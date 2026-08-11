@@ -14,11 +14,20 @@ export default mergeConfig(
       coverage: {
         provider: 'v8',
         reporter: ['text', 'json-summary'],
+        // 统计全部生产代码，而不是只统计测试恰好导入的文件。
+        include: ['src/**/*.{ts,vue}'],
+        exclude: [
+          'src/**/*.d.ts',
+          'src/**/*.test.{ts,tsx}',
+          'src/test/**',
+          'src/main.ts'
+        ],
         thresholds: {
-          statements: 78,
-          branches: 75,
-          functions: 76,
-          lines: 80
+          // 以当前全量统计结果作为诚实基线，后续只允许提高，不允许回退。
+          statements: 60,
+          branches: 62,
+          functions: 57,
+          lines: 61
         }
       }
     }

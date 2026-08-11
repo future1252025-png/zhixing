@@ -4,7 +4,11 @@ import { useRoute, useRouter } from 'vue-router'
 import { getBuildingDetail, type Building } from '@/api/buildings'
 import RealCampusMap from '@/components/RealCampusMap.vue'
 import TechIcon from '@/components/TechIcon.vue'
-import { formatBuildingDisplayName } from '@/utils/buildings'
+import {
+  formatBuildingDescription,
+  formatBuildingDisplayName,
+  formatBuildingWalkHint
+} from '@/utils/buildings'
 import { goBack } from '@/utils/navigation'
 
 const route = useRoute()
@@ -63,11 +67,11 @@ onMounted(loadBuilding)
           <div class="place-copy">
             <span class="fresh-kicker">{{ building.type }}</span>
             <h1>{{ formatBuildingDisplayName(building.name) }}</h1>
-            <p>{{ building.description }}</p>
+            <p>{{ formatBuildingDescription(building.description) }}</p>
           </div>
           <div class="place-walk">
             <span><TechIcon name="guide" :size="18" /></span>
-            <div><small>步行提示</small><strong>{{ building.walk_hint || '校园内步行可达' }}</strong></div>
+            <div><small>步行提示</small><strong>{{ formatBuildingWalkHint(building.walk_hint) }}</strong></div>
           </div>
         </header>
 

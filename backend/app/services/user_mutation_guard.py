@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from sqlalchemy import update
 from sqlalchemy.orm import Session, SessionTransaction
 
+from app.core import errors
 from app.core.errors import BusinessError
 from app.models import SemesterSetting, User
 
@@ -37,7 +38,7 @@ def acquire_user_mutation_guard(session: Session, user_id: int) -> UserMutationG
             .values(username=User.username)
         )
         if result.rowcount != 1:
-            raise BusinessError(404, "user_not_found", "User not found")
+            raise BusinessError(404, "user_not_found", errors.USER_NOT_FOUND)
     transaction = _current_transaction(session)
     if transaction is None or not transaction.is_active:
         raise RuntimeError("user mutation guard requires an active transaction")

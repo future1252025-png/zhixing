@@ -241,13 +241,11 @@ onUnmounted(() => {
 
       <Transition name="login-welcome">
         <div v-if="loginWelcomeVisible" class="login-welcome-shell">
-          <aside
+          <button
+            type="button"
             class="login-welcome"
             aria-live="polite"
-            role="button"
-            tabindex="0"
             @click="handleWelcomeTap"
-            @keydown.enter="handleWelcomeTap"
           >
             <span class="login-welcome__path" aria-hidden="true"><i></i></span>
             <div>
@@ -258,7 +256,7 @@ onUnmounted(() => {
               </p>
               <p v-else>课表、地点和出发建议已经准备好了。</p>
             </div>
-          </aside>
+          </button>
         </div>
       </Transition>
 
@@ -575,6 +573,7 @@ onUnmounted(() => {
 .login-welcome {
   position: relative;
   display: grid;
+  width: 100%;
   grid-template-columns: auto minmax(0, 1fr);
   gap: 12px;
   overflow: hidden;
@@ -583,7 +582,10 @@ onUnmounted(() => {
   background: var(--fresh-mint);
   box-shadow: 0 12px 30px rgba(55, 81, 57, .09);
   color: var(--fresh-ink);
+  cursor: pointer;
+  font: inherit;
   padding: 14px 15px;
+  text-align: left;
 }
 
 .login-welcome__path {

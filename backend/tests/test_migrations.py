@@ -126,6 +126,60 @@ def test_upgrade_on_empty_sqlite_creates_current_schema(tmp_path: Path) -> None:
         assert not source_columns["filename"]["nullable"]
         assert not source_columns["file_sha256"]["nullable"]
         assert not source_columns["source_row"]["nullable"]
+        assert "ix_refresh_sessions_absolute_expires_at" in {
+            index["name"] for index in inspector.get_indexes("refresh_sessions")
+        }
+    finally:
+        engine.dispose()
+
+
+def test_latest_migration_erases_historical_precise_message_locations(
+    tmp_path: Path,
+) -> None:
+    database_url = make_database_url(tmp_path / "message-privacy.db")
+    config = migration_config(database_url)
+    command.upgrade(config, "20260807_07")
+    engine = create_engine(database_url)
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO users "
+                    "(id, username, password_hash, nickname, role, created_at) "
+                    "VALUES (1, 'privacy-user', 'hash', 'Privacy', 'student', CURRENT_TIMESTAMP)"
+                )
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO buildings "
+                    "(id, name, type, description, latitude, longitude, map_x, map_y, created_at) "
+                    "VALUES (1, 'Privacy building', 'teaching', 'privacy', 30, 114, 0, 0, CURRENT_TIMESTAMP)"
+                )
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO messages "
+                    "(id, building_id, user_id, content, display_name, latitude, longitude, "
+                    "location_source, status, created_at) "
+                    "VALUES (1, 1, 1, 'secret location', 'anonymous', 30.123456, "
+                    "114.654321, 'native', 'normal', CURRENT_TIMESTAMP)"
+                )
+            )
+    finally:
+        engine.dispose()
+
+    command.upgrade(config, "head")
+
+    engine = create_engine(database_url)
+    try:
+        with engine.connect() as connection:
+            row = connection.execute(
+                text(
+                    "SELECT latitude, longitude, location_source FROM messages WHERE id = 1"
+                )
+            ).one()
+            assert row == (None, None, None)
+            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260809_08"
     finally:
         engine.dispose()
 
@@ -173,7 +227,7 @@ def test_upgrade_adopts_database_stamped_by_previous_initial_migration(
     try:
         inspector = inspect(engine)
         with engine.connect() as connection:
-            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260807_07"
+            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260809_08"
             assert connection.scalar(text("SELECT COUNT(*) FROM courses")) == 1
             assert connection.scalar(text("SELECT weeks FROM courses WHERE id = 1")) == "1-20"
         assert {
@@ -499,7 +553,7 @@ def test_migration_round_trip_preserves_legacy_course_and_recreates_current_sche
     try:
         inspector = inspect(engine)
         with engine.connect() as connection:
-            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260807_07"
+            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260809_08"
             assert connection.scalar(text("SELECT COUNT(*) FROM courses")) == 1
         assert "source_kind" in {
             column["name"] for column in inspector.get_columns("courses")
@@ -550,7 +604,7 @@ def test_alembic_upgrade_is_idempotent(tmp_path: Path) -> None:
     engine = create_engine(database_url)
     try:
         with engine.connect() as connection:
-            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260807_07"
+            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260809_08"
     finally:
         engine.dispose()
 
@@ -575,7 +629,7 @@ def test_upgrade_database_serializes_simultaneous_threads(
     engine = create_engine(database_url)
     try:
         with engine.connect() as connection:
-            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260807_07"
+            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260809_08"
         assert {
             "semester_settings",
             "course_import_sources",
@@ -620,7 +674,7 @@ def test_upgrade_database_serializes_simultaneous_processes(
     engine = create_engine(database_url)
     try:
         with engine.connect() as connection:
-            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260807_07"
+            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260809_08"
         assert {
             "semester_settings",
             "course_import_sources",

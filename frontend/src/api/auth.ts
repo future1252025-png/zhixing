@@ -30,6 +30,10 @@ export type ProfileUpdatePayload = {
   avatar_color?: string | null
 }
 
+export type DeleteAccountPayload = {
+  password: string
+}
+
 export type LoginResponse = {
   access_token: string
   token_type: 'bearer'
@@ -59,4 +63,8 @@ export async function getCurrentUser(): Promise<AuthUser> {
 export async function updateProfile(payload: ProfileUpdatePayload): Promise<AuthUser> {
   const response = await request.patch<AuthUser>('/api/auth/me', payload)
   return response.data
+}
+
+export async function deleteAccount(payload: DeleteAccountPayload): Promise<void> {
+  await request.delete('/api/auth/me', { data: payload })
 }

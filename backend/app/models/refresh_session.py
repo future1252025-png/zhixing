@@ -17,6 +17,7 @@ class RefreshSession(Base):
 
     __tablename__ = "refresh_sessions"
     __table_args__ = (
+        Index("ix_refresh_sessions_absolute_expires_at", "absolute_expires_at"),
         Index("ix_refresh_sessions_family_id", "family_id"),
         Index("ix_refresh_sessions_user_id", "user_id"),
     )

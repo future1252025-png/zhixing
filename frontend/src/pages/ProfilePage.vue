@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref } from 'vue'
 import { showConfirmDialog, showFailToast, showSuccessToast } from 'vant'
 import { useRouter } from 'vue-router'
 
@@ -15,6 +15,9 @@ const coursesStore = useCoursesStore()
 const semesterStore = useSemesterStore()
 const editing = ref(false)
 const saving = ref(false)
+const deleteAccountOpen = ref(false)
+const deletingAccount = ref(false)
+const deleteAccountPassword = ref('')
 // hero 底部换成真实数据：课程数 / 教学周 / 学号（拿不到就显示占位横线）
 const courseCount = ref<number | null>(null)
 const currentWeekText = computed(() =>
@@ -136,6 +139,59 @@ async function handleLogout() {
     await router.replace('/login')
   }
 }
+
+async function labelProfileEditorOverlay() {
+  await nextTick()
+  document.querySelector<HTMLElement>('.profile-editor-overlay')
+    ?.setAttribute('aria-label', '关闭资料编辑')
+}
+
+async function labelDeleteAccountOverlay() {
+  await nextTick()
+  document.querySelector<HTMLElement>('.delete-account-overlay')
+    ?.setAttribute('aria-label', '关闭删除账号确认')
+}
+
+function openDeleteAccount() {
+  deleteAccountPassword.value = ''
+  deleteAccountOpen.value = true
+}
+
+function closeDeleteAccount() {
+  if (deletingAccount.value) return
+  deleteAccountPassword.value = ''
+  deleteAccountOpen.value = false
+}
+
+async function permanentlyDeleteAccount() {
+  if (deleteAccountPassword.value.length < 6) {
+    showFailToast('请输入当前账号密码')
+    return
+  }
+  try {
+    await showConfirmDialog({
+      title: '永久删除账号',
+      message: '账号、课表、学期设置和登录会话都会永久删除，且无法恢复。确定继续吗？',
+      confirmButtonText: '永久删除',
+      cancelButtonText: '保留账号',
+      confirmButtonColor: '#9a4e47'
+    })
+  } catch {
+    return
+  }
+
+  deletingAccount.value = true
+  try {
+    await authStore.deleteAccount({ password: deleteAccountPassword.value })
+    showSuccessToast('账号及相关数据已删除')
+    deleteAccountOpen.value = false
+    await router.replace('/login')
+  } catch (error) {
+    showFailToast(getErrorMessage(error))
+  } finally {
+    deletingAccount.value = false
+  }
+}
 </script>
 
 <template>
@@ -156,8 +212,8 @@ async function handleLogout() {
 
         <div class="profile-copy">
           <span>很高兴又见到你</span>
-          <h1>{{ authStore.displayName }}</h1>
-          <p>@{{ authStore.currentUser?.username || 'campus-user' }}</p>
+          <h1 :title="authStore.displayName">{{ authStore.displayName }}</h1>
+          <p :title="authStore.currentUser?.username || 'campus-user'">@{{ authStore.currentUser?.username || 'campus-user' }}</p>
         </div>
 
         <button type="button" class="edit-profile-button" @click="startEdit">
@@ -179,6 +235,7 @@ async function handleLogout() {
         safe-area-inset-bottom
         class="profile-editor-popup"
         overlay-class="profile-editor-overlay"
+        @opened="labelProfileEditorOverlay"
       >
         <section class="profile-editor">
           <div class="fresh-section-heading">
@@ -237,6 +294,44 @@ async function handleLogout() {
         </section>
       </van-popup>
 
+      <van-popup
+        v-model:show="deleteAccountOpen"
+        position="bottom"
+        round
+        safe-area-inset-bottom
+        close-on-popstate
+        class="delete-account-popup"
+        overlay-class="delete-account-overlay"
+        @opened="labelDeleteAccountOverlay"
+      >
+        <section class="delete-account-sheet" aria-labelledby="delete-account-title">
+          <span class="danger-mark" aria-hidden="true">!</span>
+          <div>
+            <h2 id="delete-account-title">永久删除账号</h2>
+            <p>这会删除账号、课表、学期设置和登录会话。此操作无法撤销。</p>
+          </div>
+          <van-field
+            v-model="deleteAccountPassword"
+            type="password"
+            label="当前密码"
+            autocomplete="current-password"
+            placeholder="输入密码以确认本人操作"
+          />
+          <div class="delete-account-actions">
+            <van-button block plain :disabled="deletingAccount" @click="closeDeleteAccount">取消</van-button>
+            <van-button
+              block
+              type="danger"
+              :loading="deletingAccount"
+              loading-text="正在删除"
+              @click="permanentlyDeleteAccount"
+            >
+              继续删除账号
+            </van-button>
+          </div>
+        </section>
+      </van-popup>
+
       <section
         v-reveal="{ from: 'right', distance: 38, stagger: 50 }"
         class="account-card fresh-card"
@@ -249,7 +344,7 @@ async function handleLogout() {
         <div class="account-list">
           <article>
             <span><TechIcon name="contact" :size="18" /></span>
-            <div><small>用户名</small><strong>{{ authStore.currentUser?.username || '未加载' }}</strong></div>
+            <div><small>用户名</small><strong :title="authStore.currentUser?.username || '未加载'">{{ authStore.currentUser?.username || '未加载' }}</strong></div>
           </article>
           <article>
             <span><TechIcon name="notes" :size="18" /></span>
@@ -261,6 +356,12 @@ async function handleLogout() {
           </article>
         </div>
       </section>
+
+      <router-link class="privacy-entry" to="/privacy">
+        <span><TechIcon name="certificate" :size="19" /></span>
+        <span><strong>隐私与数据说明</strong><small>了解定位、课表和频道信息如何使用</small></span>
+        <TechIcon name="arrow" :size="18" />
+      </router-link>
 
       <section
         v-reveal="{ from: 'left', distance: 38 }"
@@ -280,6 +381,17 @@ async function handleLogout() {
           <TechIcon name="arrow" :size="18" />
         </button>
       </div>
+
+      <section class="danger-zone" aria-labelledby="danger-zone-title">
+        <div>
+          <span>不可恢复</span>
+          <h2 id="danger-zone-title">删除账号与全部数据</h2>
+          <p>如果只是暂时离开，请使用上方“退出当前账号”。</p>
+        </div>
+        <button type="button" class="delete-account-button" @click="openDeleteAccount">
+          永久删除账号
+        </button>
+      </section>
     </div>
   </section>
 </template>
@@ -411,15 +523,14 @@ async function handleLogout() {
   margin: 6px 0 0;
   color: var(--fresh-muted);
   font-size: 12px;
+  overflow-wrap: anywhere;
 }
 
 .edit-profile-button {
   position: relative;
   z-index: 2;
   display: flex;
-  height: 36px;
-  min-height: 36px;
-  max-height: 36px;
+  min-height: 44px;
   align-self: start;
   align-items: center;
   gap: 6px;
@@ -432,13 +543,6 @@ async function handleLogout() {
   font-size: 12px;
   font-weight: 700;
   padding: 0 11px;
-}
-
-/* 视觉保持 36px，伪元素外扩补足 44px 命中区 */
-.edit-profile-button::after {
-  position: absolute;
-  inset: -4px;
-  content: "";
 }
 
 .profile-hero footer {
@@ -486,6 +590,41 @@ async function handleLogout() {
   border-radius: var(--radius-lg) var(--radius-lg) 0 0;
   background: var(--fresh-paper);
 }
+
+.delete-account-popup {
+  right: 0;
+  left: 0;
+  width: min(100%, var(--page-max));
+  margin: 0 auto;
+  overflow: hidden;
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  background: var(--fresh-paper);
+}
+
+.delete-account-sheet {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 14px;
+  padding: 22px 18px calc(20px + env(safe-area-inset-bottom));
+}
+
+.danger-mark {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border-radius: 15px;
+  background: var(--cm-red-soft);
+  color: #8f3f35;
+  font-size: 21px;
+  font-weight: 900;
+}
+
+.delete-account-sheet h2 { margin: 0; color: var(--fresh-ink); font-size: 21px; }
+.delete-account-sheet p { margin: 6px 0 0; color: var(--fresh-text); font-size: 13px; line-height: 1.65; }
+.delete-account-sheet :deep(.van-field),
+.delete-account-actions { grid-column: 1 / -1; }
+.delete-account-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
 
 .profile-editor {
   max-height: min(78vh, 560px);
@@ -610,7 +749,7 @@ async function handleLogout() {
 }
 
 .account-list small { color: var(--fresh-muted); font-size: 12px; }
-.account-list strong { overflow: hidden; color: var(--fresh-ink); font-size: 15px; text-overflow: ellipsis; white-space: nowrap; }
+.account-list strong { color: var(--fresh-ink); font-size: 15px; overflow-wrap: anywhere; }
 
 .data-note {
   display: grid;
@@ -621,6 +760,32 @@ async function handleLogout() {
   background: var(--fresh-sky);
   padding: 15px;
 }
+
+.privacy-entry {
+  display: grid;
+  min-height: 66px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--fresh-line);
+  border-radius: 21px;
+  background: var(--fresh-paper);
+  padding: 10px 13px;
+}
+
+.privacy-entry > span:first-child {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border-radius: var(--radius-sm);
+  background: var(--fresh-mint);
+  color: var(--fresh-green-dark);
+}
+
+.privacy-entry > span:nth-child(2) { display: grid; gap: 3px; }
+.privacy-entry strong { color: var(--fresh-ink); font-size: 15px; }
+.privacy-entry small { color: var(--fresh-text); font-size: 13px; line-height: 1.45; }
 
 .note-icon {
   display: grid;
@@ -670,7 +835,28 @@ async function handleLogout() {
 }
 
 .logout-button strong { font-size: 15px; }
-.logout-button small { color: #a87b75; font-size: 13px; }
+.logout-button small { color: #80504b; font-size: 13px; }
+
+.danger-zone {
+  display: grid;
+  gap: 14px;
+  border: 1px solid #e2c8c2;
+  border-radius: 23px;
+  background: #fffaf7;
+  padding: 17px;
+}
+
+.danger-zone span { color: #8f3f35; font-size: 12px; font-weight: 800; }
+.danger-zone h2 { margin: 4px 0 0; color: #71433e; font-size: 18px; }
+.danger-zone p { margin: 6px 0 0; color: #765d59; font-size: 13px; line-height: 1.55; }
+.delete-account-button {
+  min-height: 46px;
+  border: 1px solid #b86a61;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: #8f3f35;
+  font-weight: 800;
+}
 
 @keyframes profile-sun {
   50% { transform: translateY(-5px) scale(1.04); }

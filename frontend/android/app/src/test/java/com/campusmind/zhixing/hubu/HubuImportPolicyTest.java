@@ -13,6 +13,8 @@ public class HubuImportPolicyTest {
         assertTrue(HubuImportPolicy.isAllowedUrl("https://sso.hubu.edu.cn/login"));
 
         assertFalse(HubuImportPolicy.isAllowedUrl("http://jwxt.hubu.edu.cn/jsxsd/"));
+        assertFalse(HubuImportPolicy.isAllowedUrl("https://hubu.edu.cn/"));
+        assertFalse(HubuImportPolicy.isAllowedUrl("https://unknown.hubu.edu.cn/jsxsd/"));
         assertFalse(HubuImportPolicy.isAllowedUrl("https://hubu.edu.cn.evil.example/jsxsd/"));
         assertFalse(HubuImportPolicy.isAllowedUrl("https://hubu.edu.cn@evil.example/jsxsd/"));
         assertFalse(HubuImportPolicy.isAllowedUrl("javascript:alert(1)"));

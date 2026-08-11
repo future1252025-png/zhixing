@@ -423,7 +423,7 @@ onMounted(loadPage)
 .room-copy strong { font-size: 15px; }
 .room-copy small { color: var(--fresh-muted); font-size: 13px; }
 .room-copy strong { overflow: hidden; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
-.room-copy > span { color: var(--fresh-green); font-size: 12px; }
+.room-copy > span { color: #3e6845; font-size: 12px; }
 
 .room-arrow {
   position: relative;

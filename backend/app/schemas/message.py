@@ -12,7 +12,9 @@ class MessageCreate(BaseModel):
     room_name: str | None = Field(default=None, max_length=120)
     latitude: float = Field(ge=-90, le=90)
     longitude: float = Field(ge=-180, le=180)
-    location_source: Literal["native", "browser", "manual"] = "browser"
+    location_source: Literal["native", "browser"]
+    located_at: datetime
+    location_accuracy_meters: float = Field(ge=0, le=10_000)
 
     @field_validator("content")
     @classmethod
@@ -30,6 +32,13 @@ class MessageCreate(BaseModel):
         room_name = value.strip()
         return room_name or None
 
+    @field_validator("located_at")
+    @classmethod
+    def require_aware_location_time(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("located_at must include a timezone offset")
+        return value
+
 
 class MessageRead(BaseModel):
     id: int
@@ -38,9 +47,6 @@ class MessageRead(BaseModel):
     display_name: str
     room_name: str | None = None
     created_at: datetime
-    latitude: float | None = None
-    longitude: float | None = None
-    location_source: str | None = None
     distance_to_building_meters: float | None = None
 
 

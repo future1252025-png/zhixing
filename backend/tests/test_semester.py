@@ -168,7 +168,7 @@ def test_upsert_setting_rejects_invalid_domain_values_before_writing(
         session.add(user)
         session.flush()
 
-        with pytest.raises(ValueError, match="start_date|total_weeks"):
+        with pytest.raises(ValueError, match="学期|第一周"):
             upsert_setting(session, user.id, start_date, total_weeks)
 
         assert session.scalar(select(func.count()).select_from(SemesterSetting)) == 0

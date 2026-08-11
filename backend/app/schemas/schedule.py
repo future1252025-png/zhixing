@@ -21,9 +21,9 @@ class ScheduleSuggestionRequest(BaseModel):
         has_longitude = self.longitude is not None
         has_coordinates = has_latitude and has_longitude
         if not has_building and not has_coordinates:
-            raise ValueError("current_building_id or latitude and longitude are required")
+            raise ValueError("请选择当前建筑，或提供完整的定位坐标")
         if has_latitude != has_longitude:
-            raise ValueError("latitude and longitude must be provided together")
+            raise ValueError("纬度和经度必须同时提供")
         return self
 
 

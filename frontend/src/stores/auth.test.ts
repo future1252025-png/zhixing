@@ -9,6 +9,7 @@ import * as requestApi from '@/api/request'
 import { useAuthStore } from './auth'
 
 vi.mock('@/api/auth', () => ({
+  deleteAccount: vi.fn(),
   getCurrentUser: vi.fn(),
   login: vi.fn(),
   register: vi.fn(),
@@ -157,5 +158,30 @@ describe('auth store', () => {
     expect(store.currentUser?.nickname).toBe('小智同学')
     expect(store.currentUser?.avatar_text).toBe('智')
     expect(store.currentUser?.avatar_color).toBe('#2b6fbe')
+  })
+
+  it('permanently deletes the account only after the server confirms it', async () => {
+    vi.mocked(authApi.deleteAccount).mockResolvedValue(undefined)
+    const store = useAuthStore()
+    store.setToken('token-123')
+    store.setCurrentUser(user)
+
+    await store.deleteAccount({ password: 'secret123' })
+
+    expect(authApi.deleteAccount).toHaveBeenCalledWith({ password: 'secret123' })
+    expect(store.token).toBeNull()
+    expect(store.currentUser).toBeNull()
+  })
+
+  it('keeps the local account session when deletion is rejected', async () => {
+    vi.mocked(authApi.deleteAccount).mockRejectedValue(new Error('wrong password'))
+    const store = useAuthStore()
+    store.setToken('token-123')
+    store.setCurrentUser(user)
+
+    await expect(store.deleteAccount({ password: 'wrong-pass' })).rejects.toThrow()
+
+    expect(store.token).toBe('token-123')
+    expect(store.currentUser).toEqual(user)
   })
 })

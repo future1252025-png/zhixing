@@ -43,12 +43,12 @@ function handleTabClick(path: string) {
 .app-tabbar {
   position: fixed;
   right: max(14px, calc((100vw - var(--page-max)) / 2 + 14px));
-  bottom: max(12px, env(safe-area-inset-bottom));
+  bottom: max(8px, env(safe-area-inset-bottom));
   left: max(14px, calc((100vw - var(--page-max)) / 2 + 14px));
   z-index: 1000;
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  height: 74px;
+  height: 64px;
   overflow: hidden;
   border: 1px solid rgba(79, 125, 88, 0.13);
   border-radius: 25px;
@@ -64,9 +64,9 @@ function handleTabClick(path: string) {
   display: grid;
   place-content: center;
   justify-items: center;
-  gap: 5px;
+  gap: 3px;
   color: var(--fresh-muted);
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 700;
   -webkit-tap-highlight-color: transparent;
   transition:
@@ -76,7 +76,7 @@ function handleTabClick(path: string) {
 
 .app-tabbar-item::before {
   position: absolute;
-  inset: 7px 8px;
+  inset: 5px 8px;
   z-index: -1;
   border-radius: 18px 18px 14px 18px;
   background: transparent;

@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.core.config import settings
 from app.core.security import hash_password
 from app.db.database import create_sqlite_engine, upgrade_database
-from app.models import Building, Course, LocationPreset, Message, User
+from app.models import Building, Course, CourseImportSource, LocationPreset, Message, User
 
 
 DEMO_USERNAME = "demo"
@@ -206,25 +206,51 @@ def _seed_user_demo_courses(
             )
         )
         if exists is None:
-            session.add(
-                Course(
-                    user_id=user.id,
-                    building_id=building.id,
-                    course_name=item["course_name"],
-                    weekday=item["weekday"],
-                    start_time=item["start_time"],
-                    end_time=item["end_time"],
-                    room_name=item["room_name"],
-                    teacher=item["teacher"],
-                    weeks=item["weeks"],
-                )
+            course = Course(
+                user_id=user.id,
+                building_id=building.id,
+                course_name=item["course_name"],
+                weekday=item["weekday"],
+                start_time=item["start_time"],
+                end_time=item["end_time"],
+                room_name=item["room_name"],
+                teacher=item["teacher"],
+                weeks=item["weeks"],
+                source_kind="import",
             )
+            session.add(course)
         else:
-            exists.building_id = building.id
-            exists.end_time = item["end_time"]
-            exists.room_name = item["room_name"]
-            exists.teacher = item["teacher"]
-            exists.weeks = item["weeks"]
+            course = exists
+            course.building_id = building.id
+            course.end_time = item["end_time"]
+            course.room_name = item["room_name"]
+            course.teacher = item["teacher"]
+            course.weeks = item["weeks"]
+            course.source_kind = "import"
+        session.flush()
+        raw_location = f"{building.name}{item['room_name']}"
+        source = course.import_source
+        if source is None:
+            source = CourseImportSource(
+                course_id=course.id,
+                filename="demo-seed.html",
+                file_sha256="0" * 64,
+                source_row=f"demo-{course.id}",
+                raw_course_name=item["course_name"],
+                raw_weekday=str(item["weekday"]),
+                raw_time_or_section=f"{item['start_time']}-{item['end_time']}",
+                raw_teacher=item["teacher"],
+                raw_weeks=item["weeks"],
+                raw_location=raw_location,
+            )
+            session.add(source)
+        else:
+            source.raw_course_name = item["course_name"]
+            source.raw_weekday = str(item["weekday"])
+            source.raw_time_or_section = f"{item['start_time']}-{item['end_time']}"
+            source.raw_teacher = item["teacher"]
+            source.raw_weeks = item["weeks"]
+            source.raw_location = raw_location
 
 
 def _seed_user_demo_messages(

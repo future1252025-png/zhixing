@@ -12,7 +12,7 @@
 ## 隐私与安全边界
 
 - 学号、密码和登录 Cookie 不发送给智行前端或后端。
-- 原生浏览器只允许访问 `hubu.edu.cn` 及其子域的 HTTPS 页面，阻止明文 HTTP、非官方域名、混合内容和 SSL 证书异常。
+- 原生浏览器只允许访问 `jwxt.hubu.edu.cn`、`one.hubu.edu.cn` 和 `sso.hubu.edu.cn` 三个已知登录/教务主机的 HTTPS 页面，阻止明文 HTTP、其他子域、混合内容和 SSL 证书异常。
 - 页面脚本不会获得原生接口；采集只在学生点击“导入课表”后执行。
 - 采集结果会转换成仅含表格文字、行列与合并单元格信息的 HTML，不保留脚本、表单、链接或事件属性。
 - 来源地址移除查询参数和片段，避免携带可能存在的登录票据。
@@ -29,10 +29,13 @@ cd frontend
 Copy-Item .env.android.example .env.android.local
 ```
 
-至少需要配置：
+正式构建至少需要配置：
 
 ```env
 VITE_API_BASE_URL=https://你的后端域名
+VITE_AMAP_KEY=你的高德WebKey
+VITE_AMAP_SECURITY_CODE=
+VITE_AMAP_SERVICE_HOST=https://你的前端域名/_AMapService
 ```
 
 不要使用 `127.0.0.1` 或 `localhost`：在实体手机上它们指向手机本身。调试 Android 模拟器时可按本机网络配置使用专用宿主地址，但发布包必须使用 HTTPS 后端。
@@ -44,6 +47,6 @@ npm run android:sync
 npm run android:test
 ```
 
-`android:sync` 仅接受真实公网 HTTPS API。若是在同一 Wi-Fi 下连接电脑后端进行开发调试，请配置 `http://<电脑IPv4>:8000` 并使用 `npm run android:sync:dev`；不要把该调试配置用于发布包。
+`android:sync` 会校验公网 HTTPS API、高德 Key 和代理地址，并在同步后反向检查实际 Android 资源。正式 App 的 Axios 请求由 Capacitor 原生 HTTP 透明承载，包括 Authorization 头与刷新令牌 POST，不依赖 WebView CORS 放行。若是在同一 Wi-Fi 下连接电脑后端进行开发调试，请配置 `http://<电脑IPv4>:8000` 并使用 `npm run android:sync:dev`；不要把该调试配置用于发布包。
 
 Android 工程位于 `frontend/android`，应用 ID 为 `com.campusmind.zhixing`，最低 Android API 为 24。

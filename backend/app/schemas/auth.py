@@ -8,14 +8,14 @@ from app.schemas.user import UserRead
 def _normalize_username(value: str) -> str:
     text = value.strip()
     if len(text) < 3:
-        raise ValueError("Username must be at least 3 characters")
+        raise ValueError("用户名至少需要 3 个字符")
     return text
 
 
 def _validate_password(value: str) -> str:
     if len(value.encode("utf-8")) > 72:
         # bcrypt only uses the first 72 bytes; reject instead of silently truncating
-        raise ValueError("Password is too long")
+        raise ValueError("密码过长")
     return value
 
 
@@ -35,7 +35,7 @@ class RegisterRequest(BaseModel):
     def normalize_nickname(cls, value: str) -> str:
         text = value.strip()
         if not text:
-            raise ValueError("Nickname cannot be empty")
+            raise ValueError("昵称不能为空")
         return text
 
     @field_validator("student_id")
@@ -82,6 +82,15 @@ class RefreshRequest(BaseModel):
 
 class LogoutRequest(RefreshRequest):
     pass
+
+
+class DeleteAccountRequest(BaseModel):
+    password: str = Field(min_length=6, max_length=128)
+
+    @field_validator("password")
+    @classmethod
+    def validate_password(cls, value: str) -> str:
+        return _validate_password(value)
 
 
 class LoginResponse(TokenResponse):

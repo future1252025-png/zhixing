@@ -75,22 +75,24 @@ cd frontend
 Copy-Item .env.android.example .env.android.local
 ```
 
-正式包将 `VITE_API_BASE_URL` 改为真实可访问的公网 HTTPS API，然后执行：
+局域网调试时可临时使用 `http://<电脑IPv4>:8000`，但必须使用开发同步命令并只生成 Debug APK：
 
 ```powershell
 npm ci
-npm run android:sync
+npm run android:sync:dev
 cd android
 .\gradlew.bat test assembleDebug
 ```
 
-局域网调试时可临时使用 `http://<电脑IPv4>:8000`，但必须改用：
+正式配置必须同时填写公网 HTTPS API、高德 Web Key 和自有域名的 `/_AMapService` 代理，且 `VITE_AMAP_SECURITY_CODE` 必须为空。可先严格同步与校验：
 
 ```powershell
-npm run android:sync:dev
+npm run android:sync
 ```
 
-正式同步命令会拒绝 HTTP、私网地址和示例占位域名；开发同步命令只应用于本机调试 APK。
+可发布产物必须使用显式版本号和发布密钥签名。推荐在 GitHub Actions 手动运行 **Android Release** 并下载已签名 AAB；本地可在配置 `ANDROID_VERSION_CODE`、`ANDROID_VERSION_NAME`、`ANDROID_RELEASE_KEYSTORE`、`ANDROID_RELEASE_STORE_PASSWORD`、`ANDROID_RELEASE_KEY_ALIAS` 和 `ANDROID_RELEASE_KEY_PASSWORD` 后执行 `npm run android:release`。
+
+CI Android 任务使用临时非发布配置运行正式校验、JUnit、Release Lint、APK/AAB 编译，但不会上传该临时产物。
 
 安装到已授权 USB 调试的手机：
 
@@ -119,6 +121,8 @@ Android：
 cd frontend\android
 .\gradlew.bat test assembleDebug
 ```
+
+CodeQL 默认在 Actions 内完成分析并保留 SARIF artifact，因此私有仓库未开启 Code Scanning 时不会因上传被拒绝而报红。仓库日后启用 GitHub Code Scanning/GitHub Code Security 后，可将 `.github/workflows/codeql.yml` 中的 `upload: never` 改为 `upload: always`，恢复 Security 面板上传。
 
 ## 常见问题
 

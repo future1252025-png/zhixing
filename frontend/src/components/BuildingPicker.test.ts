@@ -76,4 +76,14 @@ describe('BuildingPicker', () => {
     // includeSelectedBuilding：已选建筑不因关键词过滤而消失
     expect(texts.some((text) => text.includes('逸夫楼'))).toBe(true)
   })
+
+  it('associates the trigger with the visible field label', () => {
+    const wrapper = mount(BuildingPicker, {
+      props: { modelValue: null, buildings, labelledBy: 'building-field-label' },
+      global: { stubs }
+    })
+
+    expect(wrapper.get('.picker-trigger').attributes('aria-labelledby'))
+      .toBe('building-field-label')
+  })
 })

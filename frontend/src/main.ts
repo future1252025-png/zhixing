@@ -14,11 +14,13 @@ import revealDirective from './directives/reveal'
 import router from './router'
 import { setUnauthorizedHandler } from './api/errors'
 import { useAuthStore } from './stores/auth'
+import { installVanFieldFocusDelegation } from './utils/vanFieldFocus'
 import './styles/base.css'
 import './styles/fresh.css'
 
 // 旧版本把课表浏览周当成全局真实周；新版本由后端学期状态统一裁决。
 localStorage.removeItem('campusmind-selected-week')
+installVanFieldFocusDelegation()
 
 if (Capacitor.isNativePlatform()) {
   document.documentElement.classList.add(

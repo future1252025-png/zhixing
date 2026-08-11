@@ -1,11 +1,13 @@
 import { defineStore } from 'pinia'
 
 import {
+  deleteAccount as deleteAccountRequest,
   getCurrentUser,
   login as loginRequest,
   register as registerRequest,
   updateProfile as updateProfileRequest,
   type AuthUser,
+  type DeleteAccountPayload,
   type LoginPayload,
   type ProfileUpdatePayload,
   type RegisterPayload
@@ -63,6 +65,10 @@ export const useAuthStore = defineStore('auth', {
       this.setCurrentUser(result.user)
       resetUnauthorizedState()
       return result.user
+    },
+    async deleteAccount(payload: DeleteAccountPayload) {
+      await deleteAccountRequest(payload)
+      this.clearSession()
     },
     async restoreSession() {
       const restored = await restoreSession()

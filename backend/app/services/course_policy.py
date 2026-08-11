@@ -52,7 +52,7 @@ def time_ranges_overlap(
 
 def validate_time_range(start_time: time, end_time: time) -> None:
     if _require_time(start_time) >= _require_time(end_time):
-        raise ValueError("end_time must be later than start_time")
+        raise ValueError("下课时间必须晚于上课时间")
 
 
 def detect_conflicts(

@@ -1,4 +1,5 @@
 from collections.abc import Generator
+from hashlib import sha256
 from io import BytesIO
 import json
 from pathlib import Path
@@ -156,7 +157,7 @@ def test_import_does_not_conflict_single_and_even_week_courses(
     headers = auth_headers(client)
     content = """
     <table>
-      <tr><th>节次</th><th>星期三</th></tr>
+      <tr><th>节次</th><th>星期三</th><th>星期四</th><th>星期五</th></tr>
       <tr>
         <td>第一二节<br>08:00-09:40</td>
         <td>
@@ -338,7 +339,7 @@ def test_preview_import_matches_short_teaching_building_names(
 
     html = """
     <table>
-      <tr><th></th><th>星期一</th></tr>
+      <tr><th></th><th>星期一</th><th>星期二</th><th>星期三</th></tr>
       <tr>
         <td>第一二节<br>08:00-09:40</td>
         <td>大学英语4<br>潘云昊<br>1-12(周)[01-02节]<br>教3-205</td>
@@ -360,7 +361,7 @@ def test_preview_import_matches_short_teaching_building_names(
 def test_preview_import_matches_real_seed_building_aliases(client: TestClient) -> None:
     html = """
     <table>
-      <tr><th></th><th>星期二</th><th>星期五</th></tr>
+      <tr><th></th><th>星期二</th><th>星期五</th><th>星期日</th></tr>
       <tr>
         <td>第三四节<br>09:55-11:35</td>
         <td>马克思主义基本原理<br>张楠<br>1-16(周)[03-04节]<br>教4-103</td>
@@ -476,7 +477,7 @@ def test_preview_rejects_unknown_extension_with_business_error(client: TestClien
 def valid_import_content() -> bytes:
     return """
     <table>
-      <tr><th>节次</th><th>星期一</th><th>星期二</th></tr>
+      <tr><th>节次</th><th>星期一</th><th>星期二</th><th>星期三</th></tr>
       <tr>
         <td>第一二节<br>08:00-09:40</td>
         <td>大学英语<br>李老师<br>1-16(周)[01-02节]<br>教3-205</td>
@@ -489,7 +490,7 @@ def valid_import_content() -> bytes:
 def conflicting_import_content() -> bytes:
     return """
     <table>
-      <tr><th>节次</th><th>星期一</th></tr>
+      <tr><th>节次</th><th>星期一</th><th>星期二</th><th>星期三</th></tr>
       <tr>
         <td>第一二节<br>08:00-09:40</td>
         <td>
@@ -567,6 +568,68 @@ def importer_counts(SessionLocal: sessionmaker) -> tuple[int, int]:
         return int(course_count or 0), int(source_count or 0)
 
 
+def test_non_timetable_news_table_is_rejected_without_replacing_courses(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    client, SessionLocal = client_and_session
+    headers = auth_headers(client)
+    original = valid_import_content()
+    original_digest, _, _ = preview_and_resolutions(client, headers, original)
+    assert commit_import_request(
+        client,
+        headers,
+        original,
+        digest=original_digest,
+    ).status_code == 201
+
+    news_page = """
+    <html><body><h1>校园资讯</h1><table>
+      <tr><th>周一活动</th></tr>
+      <tr><td>校园新闻<br>记者张<br>1-16(周) [01-02节]<br>随机地点</td></tr>
+    </table></body></html>
+    """.encode("utf-8")
+    preview = client.post(
+        "/api/courses/import/preview",
+        files={"file": ("news.html", news_page, "text/html")},
+        headers=headers,
+    )
+    commit = commit_import_request(
+        client,
+        headers,
+        news_page,
+        digest=sha256(news_page).hexdigest(),
+        filename="news.html",
+    )
+    events_page = """
+    <table>
+      <tr><th>时间</th><th>周一</th></tr>
+      <tr><td>08:00-09:40</td><td>校园活动<br>学生会<br>1-16(周) [01-02节]<br>广场</td></tr>
+    </table>
+    """.encode("utf-8")
+    events_preview = client.post(
+        "/api/courses/import/preview",
+        files={"file": ("events.html", events_page, "text/html")},
+        headers=headers,
+    )
+    events_commit = commit_import_request(
+        client,
+        headers,
+        events_page,
+        digest=sha256(events_page).hexdigest(),
+        filename="events.html",
+    )
+
+    assert preview.status_code == 422
+    assert preview.json()["code"] == "weekday_header_missing"
+    assert commit.status_code == 422
+    assert commit.json()["code"] == "weekday_header_missing"
+    assert events_preview.status_code == 422
+    assert events_preview.json()["code"] == "timetable_confidence_low"
+    assert events_commit.status_code == 422
+    assert events_commit.json()["code"] == "timetable_confidence_low"
+    assert importer_counts(SessionLocal) == (2, 2)
+
+
 def test_import_reparses_uploaded_file_and_rejects_wrong_sha(
     client_and_session: tuple[TestClient, sessionmaker],
 ) -> None:
@@ -615,7 +678,7 @@ def test_import_can_exclude_one_unrecognized_course_and_keep_the_rest(
     headers = auth_headers(client, configure_semester=False)
     content = """
     <table>
-      <tr><th>节次</th><th>星期一</th><th>星期二</th></tr>
+      <tr><th>节次</th><th>星期一</th><th>星期二</th><th>星期三</th></tr>
       <tr>
         <td>第一二节<br>08:00-09:40</td>
         <td>可导入课程<br>李老师<br>1-16(周)[01-02节]<br>教4-205</td>
@@ -662,7 +725,7 @@ def test_import_automatically_skips_course_without_time_and_location(
     headers = auth_headers(client, configure_semester=False)
     content = """
     <table>
-      <tr><th>节次</th><th>星期一</th></tr>
+      <tr><th>节次</th><th>星期一</th><th>星期二</th><th>星期三</th></tr>
       <tr>
         <td>第一二节<br>08:00-09:40</td>
         <td>可导入课程<br>李老师<br>1-16(周)[01-02节]<br>教4-205</td>
@@ -765,7 +828,7 @@ def test_import_keeps_unrecognized_location_without_blocking_timetable(
     raw_location = "校外创新基地 C 座 501"
     content = f"""
     <table>
-      <tr><th>节次</th><th>星期一</th></tr>
+      <tr><th>节次</th><th>星期一</th><th>星期二</th><th>星期三</th></tr>
       <tr>
         <td>第一二节<br>08:00-09:40</td>
         <td>创新实践<br>陈老师<br>1-12(周)[01-02节]<br>{raw_location}</td>
@@ -899,7 +962,11 @@ def test_import_success_persists_sources_and_same_file_can_replace_again(
     with SessionLocal() as session:
         sources = list(
             session.scalars(
-                select(CourseImportSource).order_by(CourseImportSource.source_row)
+                select(CourseImportSource)
+                .join(Course, Course.id == CourseImportSource.course_id)
+                .join(User, User.id == Course.user_id)
+                .where(User.username == "importer")
+                .order_by(CourseImportSource.source_row)
             ).all()
         )
         courses = list(
@@ -973,7 +1040,7 @@ def test_import_defers_missing_room_review_until_route_time(
     headers = auth_headers(client)
     content = """
     <table>
-      <tr><th>节次</th><th>星期四</th></tr>
+      <tr><th>节次</th><th>星期四</th><th>星期五</th><th>星期六</th></tr>
       <tr><td>第一二节</td><td>形势与政策<br>周老师<br>1-4(周)[01-02节]<br>教4</td></tr>
     </table>
     """.encode("utf-8")
@@ -1040,7 +1107,7 @@ def test_import_keeps_course_when_time_cannot_be_parsed(
     headers = auth_headers(client)
     content = """
     <table>
-      <tr><th>节次</th><th>星期五</th></tr>
+      <tr><th>节次</th><th>星期五</th><th>星期六</th><th>星期日</th></tr>
       <tr><td>晚间</td><td>创新实践<br>陈老师<br>1-12(周)[晚自习]<br>教4-203</td></tr>
     </table>
     """.encode("utf-8")
@@ -1151,7 +1218,7 @@ def test_import_keeps_room_name_longer_than_legacy_limit(
     assert 64 < len(long_room) <= 120
     content = f"""
     <table>
-      <tr><th>节次</th><th>星期二</th></tr>
+      <tr><th>节次</th><th>星期二</th><th>星期三</th><th>星期四</th></tr>
       <tr>
         <td>第三四节</td>
         <td>机器学习<br>吴笛<br>1-16(周)[03-04节]<br>实训大楼{long_room}</td>

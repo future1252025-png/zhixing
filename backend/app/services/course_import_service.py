@@ -75,6 +75,12 @@ RAW_WEEKS_RE = re.compile(
 DASH_RE = re.compile(r"^-{3,}$")
 CONNECTOR_CHARS = " -—–·()（）"
 MAX_XLSX_EXPANDED_BYTES = 50 * 1024 * 1024
+TIMETABLE_AXIS_LABELS = frozenset({"节次", "时间", "上课时间", "课节", "节数"})
+TIMETABLE_AXIS_RE = re.compile(
+    r"(?:\d{1,2}:\d{2}\s*[-~—–至]\s*\d{1,2}:\d{2})"
+    r"|(?:第?[\d一二三四五六七八九十]+(?:[-~—–、]?"
+    r"[\d一二三四五六七八九十]+)?节)"
+)
 NON_BLOCKING_IMPORT_ISSUE_CODES = frozenset(
     {"building_unrecognized", "room_missing", "time_unrecognized"}
 )
@@ -299,16 +305,58 @@ def _find_header_row(
         weekday_columns: dict[int, tuple[int, str]] = {}
         for column_index, cell in enumerate(row):
             compact = re.sub(r"\s+", "", cell)
-            for label, weekday in WEEKDAY_LABELS.items():
-                if label in compact:
-                    weekday_columns[column_index] = (weekday, cell)
-                    break
+            weekday = WEEKDAY_LABELS.get(compact)
+            if weekday is not None:
+                weekday_columns[column_index] = (weekday, cell)
         if weekday_columns:
+            _require_timetable_structure(rows, row_index, weekday_columns)
             return row_index, weekday_columns
     raise BusinessError(
         422,
         "weekday_header_missing",
         "未在课表中找到星期表头",
+        fields=["file"],
+    )
+
+
+def _require_timetable_structure(
+    rows: Sequence[Sequence[str]],
+    header_index: int,
+    weekday_columns: dict[int, tuple[int, str]],
+) -> None:
+    """Reject generic tables before they can enter the destructive import flow.
+
+    A supported timetable has a leading time/section axis followed by exact
+    weekday headers. Requiring that independent structural signal prevents an
+    events/news table containing text such as "周一活动" from being treated as a
+    full timetable snapshot.
+    """
+
+    first_weekday_column = min(weekday_columns)
+    if first_weekday_column <= 0:
+        _raise_low_timetable_confidence()
+
+    header = rows[header_index]
+    leading_header_cells = [
+        re.sub(r"\s+", "", cell)
+        for cell in header[:first_weekday_column]
+    ]
+    has_named_axis = any(cell in TIMETABLE_AXIS_LABELS for cell in leading_header_cells)
+    has_timed_axis_row = any(
+        row
+        and bool(TIMETABLE_AXIS_RE.search(_clean_cell_text(row[0])))
+        for row in rows[header_index + 1 :]
+    )
+    has_full_week_shape = len(set(weekday for weekday, _ in weekday_columns.values())) >= 3
+    if not (has_full_week_shape and (has_named_axis or has_timed_axis_row)):
+        _raise_low_timetable_confidence()
+
+
+def _raise_low_timetable_confidence() -> None:
+    raise BusinessError(
+        422,
+        "timetable_confidence_low",
+        "文件结构不像完整课表，已终止导入以保护原课表",
         fields=["file"],
     )
 
