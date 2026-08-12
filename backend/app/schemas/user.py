@@ -7,8 +7,7 @@ class UserRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
-    student_id: str | None = None
-    username: str
+    student_id: str
     nickname: str
     avatar_text: str | None = None
     avatar_color: str | None = None

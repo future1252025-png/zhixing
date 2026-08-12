@@ -3,8 +3,7 @@ import { isNativeAuthClient } from '@/auth/sessionTokens'
 
 export type AuthUser = {
   id: number
-  student_id: string | null
-  username: string
+  student_id: string
   nickname: string
   avatar_text: string | null
   avatar_color: string | null
@@ -13,14 +12,13 @@ export type AuthUser = {
 }
 
 export type RegisterPayload = {
-  username: string
+  student_id: string
   password: string
   nickname: string
-  student_id?: string | null
 }
 
 export type LoginPayload = {
-  username: string
+  student_id: string
   password: string
 }
 

@@ -60,16 +60,15 @@ def auth_headers(client: TestClient, username: str = "alice") -> dict[str, str]:
     registered = client.post(
         "/api/auth/register",
         json={
-            "username": username,
+            "student_id": username,
             "password": "secret123",
             "nickname": username.title(),
-            "student_id": f"{username}-2026",
         },
     )
     assert registered.status_code == 201
     login = client.post(
         "/api/auth/login",
-        json={"username": username, "password": "secret123"},
+        json={"student_id": username, "password": "secret123"},
     )
     assert login.status_code == 200
     return {"Authorization": f"Bearer {login.json()['access_token']}"}
@@ -180,7 +179,7 @@ def test_semester_shrink_rejects_existing_courses_outside_the_new_range(
 ) -> None:
     _, SessionLocal = client_and_session
     with SessionLocal() as session:
-        user = User(username="shrink", student_id="shrink-2026", nickname="Shrink", password_hash="unused", role="student")
+        user = User(username="shrink", student_id="shrink", nickname="Shrink", password_hash="unused", role="student")
         building = Building(
             name="Shrink building",
             type="teaching",
@@ -385,7 +384,7 @@ def test_semester_service_flushes_without_committing(
     with SessionLocal() as session:
         user = User(
             username="service-user",
-            student_id="service-user-2026",
+            student_id="service-user",
             nickname="Service User",
             password_hash="not-used",
             role="student",
@@ -433,7 +432,7 @@ def test_upsert_operational_error_preserves_caller_transaction(
     with SessionLocal() as session:
         pending_user = User(
             username="pending-user",
-            student_id="pending-user-2026",
+            student_id="pending-user",
             nickname="Pending User",
             password_hash="not-used",
             role="student",
@@ -491,7 +490,7 @@ def test_api_helper_rolls_back_failed_shrink_and_reuses_the_same_session(
     with SessionLocal() as session:
         user = User(
             username="helper-shrink",
-            student_id="helper-shrink-2026",
+            student_id="helper-shrink",
             nickname="Helper Shrink",
             password_hash="unused",
             role="student",
@@ -642,7 +641,7 @@ def test_upsert_update_preserves_created_at_and_advances_updated_at(
     with SessionLocal() as session:
         user = User(
             username="timestamp-user",
-            student_id="timestamp-user-2026",
+            student_id="timestamp-user",
             nickname="Timestamp User",
             password_hash="not-used",
             role="student",
@@ -680,7 +679,7 @@ def test_concurrent_first_upserts_are_atomic_and_keep_a_complete_submission(
         with SessionLocal() as session:
             user = User(
                 username="race-user",
-                student_id="race-user-2026",
+                student_id="race-user",
                 nickname="Race User",
                 password_hash="not-used",
                 role="student",

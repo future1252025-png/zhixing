@@ -74,15 +74,14 @@ def auth_headers(
     client.post(
         "/api/auth/register",
         json={
-            "username": username,
+            "student_id": username,
             "password": "secret123",
             "nickname": username.title(),
-            "student_id": f"{username}-2024",
         },
     )
     login = client.post(
         "/api/auth/login",
-        json={"username": username, "password": "secret123"},
+        json={"student_id": username, "password": "secret123"},
     )
     assert login.status_code == 200
     headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
@@ -711,7 +710,7 @@ def test_course_service_flushes_but_never_commits(
     with SessionLocal() as session:
         building = session.query(Building).first()
         assert building is not None
-        user = User(username="service", student_id="service-2026", nickname="Service", password_hash="unused", role="student")
+        user = User(username="service", student_id="service", nickname="Service", password_hash="unused", role="student")
         session.add(user)
         session.flush()
         session.add(SemesterSetting(user_id=user.id, start_date=date(2026, 8, 31), total_weeks=20))
@@ -788,7 +787,7 @@ def test_course_routes_own_each_real_session_transaction_boundary(
         assert building is not None
         user = User(
             username="route-service",
-            student_id="route-service-2026",
+            student_id="route-service",
             nickname="Route Service",
             password_hash="unused",
             role="student",
@@ -849,7 +848,7 @@ def test_failed_route_update_rolls_back_and_keeps_the_same_session_usable(
         assert building is not None
         user = User(
             username="rollback-service",
-            student_id="rollback-service-2026",
+            student_id="rollback-service",
             nickname="Rollback Service",
             password_hash="unused",
             role="student",
@@ -1228,7 +1227,7 @@ def test_unconfigured_legacy_courses_can_be_repaired_through_the_api(
     with SessionLocal() as session:
         user = User(
             username="legacy-repair",
-            student_id="legacy-repair-2024",
+            student_id="legacy-repair",
             nickname="Legacy Repair",
             password_hash=hash_password("secret123"),
             role="student",
@@ -1247,7 +1246,10 @@ def test_unconfigured_legacy_courses_can_be_repaired_through_the_api(
         session.commit()
         first_id, second_id = first.id, second.id
 
-    login = client.post("/api/auth/login", json={"username": "legacy-repair", "password": "secret123"})
+    login = client.post(
+        "/api/auth/login",
+        json={"student_id": "legacy-repair", "password": "secret123"},
+    )
     headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
     configured = client.put("/api/semester", json={"start_date": "2026-08-31", "total_weeks": 16}, headers=headers)
     blocked = client.post("/api/courses", json=course_payload(building_id, weekday=3), headers=headers)

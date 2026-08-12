@@ -104,7 +104,6 @@ async function fillCourseForm(page: Page, courseName: string): Promise<void> {
 
 test('core journey keeps weeks, locations, sessions, text, and actions trustworthy', async ({ page }, testInfo) => {
   const projectSuffix = testInfo.project.name.startsWith('mobile') ? 'mobile' : 'desktop'
-  const username = `e2e_student_${projectSuffix}`
   const studentId = `E2E2026${projectSuffix === 'mobile' ? '002' : '001'}`
   await page.clock.install({ time: new Date('2026-09-21T07:00:00+08:00') })
   await page.goto('/login')
@@ -114,7 +113,6 @@ test('core journey keeps weeks, locations, sessions, text, and actions trustwort
   await page.getByRole('button', { name: /创建账号/ }).click()
   await page.waitForURL('**/register')
   await page.locator('input[name="nickname"]').fill('端到端同学')
-  await page.locator('input[name="username"]').fill(username)
   await page.locator('input[name="student_id"]').fill(studentId)
   await page.locator('input[name="password"]').fill(password)
   await page.locator('input[name="confirm_password"]').fill(password)
@@ -336,7 +334,7 @@ test('core journey keeps weeks, locations, sessions, text, and actions trustwort
   await page.waitForURL('**/login?**')
   await screenshot(page, testInfo, 'session-expired.png')
 
-  await page.locator('input[name="username"]').fill(username)
+  await page.locator('input[name="student_id"]').fill(studentId)
   await page.locator('input[name="password"]').fill(password)
   await page.getByRole('button', { name: /进入智行/ }).click()
   await page.waitForURL('**/schedule')

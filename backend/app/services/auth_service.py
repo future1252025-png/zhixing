@@ -19,7 +19,7 @@ from app.services.user_mutation_guard import acquire_user_mutation_guard
 
 
 class DuplicateUserError(ValueError):
-    """Raised when username or student_id collides on insert."""
+    """Raised when the unique student identity collides on insert."""
 
 
 _IDENTITY_CONSTRAINT_NAMES = frozenset(
@@ -60,7 +60,9 @@ def get_user_by_student_id(session: Session, student_id: str) -> User | None:
 
 def create_user(session: Session, payload: RegisterRequest) -> User:
     user = User(
-        username=payload.username,
+        # Keep the legacy column as an internal mirror until old clients and
+        # access tokens no longer need it.  It is not a second public identity.
+        username=payload.student_id,
         student_id=payload.student_id,
         nickname=payload.nickname,
         avatar_text=payload.nickname[:1],
@@ -82,10 +84,10 @@ def create_user(session: Session, payload: RegisterRequest) -> User:
 
 def authenticate_user(
     session: Session,
-    username: str,
+    student_id: str,
     password: str,
 ) -> User | None:
-    user = get_user_by_username(session, username)
+    user = get_user_by_student_id(session, student_id)
     if user is None:
         verify_password(password, _TIMING_EQUALIZATION_HASH)
         return None

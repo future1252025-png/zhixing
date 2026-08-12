@@ -21,20 +21,19 @@ const showPassword = ref(false)
 const showConfirmPassword = ref(false)
 // 确认密码只做本地一致性校验，不进入注册提交载荷
 const confirmPassword = ref('')
-const form = reactive({ username: '', password: '', nickname: '', student_id: '' })
+const form = reactive({ student_id: '', password: '', nickname: '' })
 const { pageStyle, onFieldFocus } = useKeyboardAwarePage({ basePaddingPx: 34 })
 
 async function handleSubmit() {
   submitting.value = true
   try {
     await authStore.register({
-      username: form.username,
       password: form.password,
       nickname: form.nickname,
-      student_id: form.student_id || null
+      student_id: form.student_id
     })
     try {
-      await authStore.login({ username: form.username, password: form.password })
+      await authStore.login({ student_id: form.student_id, password: form.password })
       // 与登录页一致的乐观导航：欢迎卡数据后台预取，立即进入目标页
       void prepareLoginIntro(getCourses, fetchSemester)
       showSuccessToast('账号创建成功，欢迎来到智行')
@@ -86,28 +85,20 @@ async function handleSubmit() {
             v-model="form.nickname"
             name="nickname"
             label="昵称"
-            maxlength="50"
-            placeholder="大家怎么称呼你"
+            maxlength="64"
+            placeholder="例如 future"
             left-icon="smile-o"
             :rules="[{ required: true, message: '请输入昵称' }]"
-          />
-          <van-field
-            v-model="form.username"
-            name="username"
-            label="账号"
-            maxlength="50"
-            placeholder="设置登录用户名"
-            autocomplete="username"
-            left-icon="contact"
-            :rules="[{ required: true, message: '请输入用户名' }]"
           />
           <van-field
             v-model="form.student_id"
             name="student_id"
             label="学号"
-            maxlength="50"
-            placeholder="选填"
+            maxlength="32"
+            placeholder="输入你的学号"
+            autocomplete="username"
             left-icon="notes-o"
+            :rules="[{ required: true, message: '请输入学号' }]"
           />
           <van-field
             v-model="form.password"
@@ -143,7 +134,9 @@ async function handleSubmit() {
 
         <div class="gentle-note">
           <span><i></i><i></i></span>
-          <p>学号可以稍后补充，我们不会公开你的个人信息。</p>
+          <p>
+            <strong>昵称</strong>用于个人页展示，之后可在“我的”中修改。
+          </p>
         </div>
 
         <div class="page-actions">
@@ -307,7 +300,7 @@ async function handleSubmit() {
 
 .register-card :deep(.van-field__label) {
   /* “确认密码”四字标签的最小宽度，保证不折行 */
-  width: 60px;
+  width: 72px;
 }
 
 .register-card :deep(.van-field__control) {
@@ -357,6 +350,11 @@ async function handleSubmit() {
   color: var(--fresh-muted);
   font-size: 12px;
   line-height: 1.55;
+}
+
+.gentle-note strong {
+  color: var(--fresh-green-dark);
+  font-weight: 800;
 }
 
 @keyframes stem-grow {

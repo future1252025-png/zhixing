@@ -22,7 +22,6 @@ from app.services.auth_service import (
     create_user,
     delete_user_account,
     get_user_by_student_id,
-    get_user_by_username,
     update_user_profile,
 )
 from app.services.refresh_session_service import (
@@ -94,12 +93,7 @@ def register(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail=rate_limit.REGISTER_RATE_LIMITED,
         )
-    # Single generic detail for both identity fields so the response cannot be
-    # used to enumerate which one collided.
-    duplicate = get_user_by_username(session, payload.username) is not None or (
-        payload.student_id is not None
-        and get_user_by_student_id(session, payload.student_id) is not None
-    )
+    duplicate = get_user_by_student_id(session, payload.student_id) is not None
     if duplicate:
         rate_limit.register_ip_limiter.record_failure(client_ip)
         raise HTTPException(
@@ -130,26 +124,26 @@ def login(
     client_ip = _client_ip(request)
     if rate_limit.login_ip_limiter.is_limited(
         client_ip
-    ) or rate_limit.login_username_limiter.is_limited(payload.username):
+    ) or rate_limit.login_username_limiter.is_limited(payload.student_id):
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail=rate_limit.LOGIN_RATE_LIMITED,
         )
-    user = authenticate_user(session, payload.username, payload.password)
+    user = authenticate_user(session, payload.student_id, payload.password)
     if user is None:
         rate_limit.login_ip_limiter.record_failure(client_ip)
-        rate_limit.login_username_limiter.record_failure(payload.username)
+        rate_limit.login_username_limiter.record_failure(payload.student_id)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=errors.INVALID_CREDENTIALS,
             headers={"WWW-Authenticate": "Bearer"},
         )
-    rate_limit.login_username_limiter.clear(payload.username)
+    rate_limit.login_username_limiter.clear(payload.student_id)
     refresh_token = issue_refresh_session(session, user)
     if payload.client_kind == "web":
         _set_refresh_cookie(response, refresh_token)
     return LoginResponse(
-        access_token=create_access_token(user.username),
+        access_token=create_access_token(user.token_subject),
         token_type="bearer",
         expires_in=settings.access_token_expire_minutes * 60,
         refresh_token=refresh_token if payload.client_kind == "native" else None,
@@ -186,7 +180,7 @@ def refresh_access_token(
     if payload.client_kind == "web":
         _set_refresh_cookie(response, next_refresh_token)
     return TokenResponse(
-        access_token=create_access_token(user.username),
+        access_token=create_access_token(user.token_subject),
         expires_in=settings.access_token_expire_minutes * 60,
         refresh_token=(
             next_refresh_token if payload.client_kind == "native" else None
@@ -233,15 +227,15 @@ def delete_current_user_account(
     client_ip = _client_ip(request)
     if rate_limit.login_ip_limiter.is_limited(
         client_ip
-    ) or rate_limit.login_username_limiter.is_limited(current_user.username):
+    ) or rate_limit.login_username_limiter.is_limited(current_user.student_id):
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail=rate_limit.LOGIN_RATE_LIMITED,
         )
 
-    if authenticate_user(session, current_user.username, payload.password) is None:
+    if authenticate_user(session, current_user.student_id, payload.password) is None:
         rate_limit.login_ip_limiter.record_failure(client_ip)
-        rate_limit.login_username_limiter.record_failure(current_user.username)
+        rate_limit.login_username_limiter.record_failure(current_user.student_id)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=errors.INVALID_CREDENTIALS,

@@ -112,8 +112,7 @@ async function mountSchedule(
   const authStore = useAuthStore(pinia)
   authStore.currentUser = {
     id: 7,
-    student_id: null,
-    username: 'student',
+    student_id: '20240001',
     nickname: '同学',
     avatar_text: null,
     avatar_color: null,

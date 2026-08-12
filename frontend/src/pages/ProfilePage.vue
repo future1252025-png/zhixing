@@ -24,6 +24,12 @@ const currentWeekText = computed(() =>
   semesterStore.currentWeek !== null ? `第 ${semesterStore.currentWeek} 周` : '—'
 )
 const studentIdText = computed(() => authStore.currentUser?.student_id || '未填写')
+const roleText = computed(() => {
+  const role = authStore.currentUser?.role
+  if (role === 'student') return '学生'
+  if (role === 'admin') return '管理员'
+  return role || '未加载'
+})
 const avatarColors = ['#6f9474', '#6f9faa', '#c58f6f', '#9b8caf', '#b07b74', '#ad9a62']
 const profileForm = reactive({
   nickname: '',
@@ -213,7 +219,7 @@ async function permanentlyDeleteAccount() {
         <div class="profile-copy">
           <span>很高兴又见到你</span>
           <h1 :title="authStore.displayName">{{ authStore.displayName }}</h1>
-          <p :title="authStore.currentUser?.username || 'campus-user'">@{{ authStore.currentUser?.username || 'campus-user' }}</p>
+          <p>个人页昵称 · 可在“编辑资料”中修改</p>
         </div>
 
         <button type="button" class="edit-profile-button" @click="startEdit">
@@ -224,7 +230,10 @@ async function permanentlyDeleteAccount() {
         <footer>
           <div><span>本学期课程</span><strong>{{ courseCount !== null ? `${courseCount} 门` : '—' }}</strong></div>
           <div><span>教学周</span><strong>{{ currentWeekText }}</strong></div>
-          <div><span>学号</span><strong>{{ studentIdText }}</strong></div>
+          <div class="student-id-stat">
+            <span>学号</span>
+            <strong :title="studentIdText">{{ studentIdText }}</strong>
+          </div>
         </footer>
       </section>
 
@@ -241,7 +250,7 @@ async function permanentlyDeleteAccount() {
           <div class="fresh-section-heading">
             <div>
               <h2>编辑资料</h2>
-              <p>头像会在上方即时预览，保存后写入账号</p>
+              <p>这里可修改昵称与头像；学号不会改变</p>
             </div>
             <span class="editor-leaf" aria-hidden="true"></span>
           </div>
@@ -250,7 +259,7 @@ async function permanentlyDeleteAccount() {
             <van-field
               v-model="profileForm.nickname"
               label="昵称"
-              maxlength="50"
+              maxlength="64"
               placeholder="输入昵称"
             />
             <van-field
@@ -337,22 +346,26 @@ async function permanentlyDeleteAccount() {
         class="account-card fresh-card"
       >
         <div class="fresh-section-heading">
-          <div><h2>账号信息</h2><p>这些信息只属于你</p></div>
+          <div><h2>账号信息</h2><p>你的账号与校园身份</p></div>
           <span class="account-stamp">安心使用</span>
         </div>
 
         <div class="account-list">
-          <article>
-            <span><TechIcon name="contact" :size="18" /></span>
-            <div><small>用户名</small><strong :title="authStore.currentUser?.username || '未加载'">{{ authStore.currentUser?.username || '未加载' }}</strong></div>
-          </article>
-          <article>
+          <article class="student-identity-row">
             <span><TechIcon name="notes" :size="18" /></span>
-            <div><small>学号</small><strong>{{ authStore.currentUser?.student_id || '尚未填写' }}</strong></div>
+            <div>
+              <small>学号</small>
+              <strong>{{ authStore.currentUser?.student_id || '尚未填写' }}</strong>
+              <p>用于登录智行</p>
+            </div>
           </article>
-          <article>
+          <article class="account-role-row">
             <span><TechIcon name="certificate" :size="18" /></span>
-            <div><small>账号角色</small><strong>{{ authStore.currentUser?.role || '学生' }}</strong></div>
+            <div>
+              <small>账号类型</small>
+              <strong>{{ roleText }}</strong>
+              <p>由系统分配</p>
+            </div>
           </article>
         </div>
       </section>
@@ -552,7 +565,7 @@ async function permanentlyDeleteAccount() {
   left: 0;
   z-index: 2;
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 0.78fr) minmax(0, 0.72fr) minmax(128px, 1.5fr);
   border-top: 1px solid rgba(79, 125, 88, 0.12);
   background: rgba(255, 255, 255, 0.34);
   padding: 12px 10px;
@@ -560,6 +573,7 @@ async function permanentlyDeleteAccount() {
 
 .profile-hero footer div {
   display: grid;
+  min-width: 0;
   gap: 3px;
 }
 
@@ -568,7 +582,14 @@ async function permanentlyDeleteAccount() {
 }
 
 .profile-hero footer span { color: var(--fresh-muted); font-size: 12px; }
-.profile-hero footer strong { color: var(--fresh-ink); font-size: 14px; }
+.profile-hero footer strong { min-width: 0; color: var(--fresh-ink); font-size: 14px; }
+.profile-hero footer .student-id-stat strong {
+  font-size: clamp(11px, 3.1vw, 13px);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.22;
+  overflow-wrap: anywhere;
+  word-break: break-all;
+}
 
 .account-card {
   padding: 18px;
@@ -732,12 +753,12 @@ async function permanentlyDeleteAccount() {
   color: var(--fresh-green-dark);
 }
 
-.account-list article:nth-child(2) > span {
+.account-list .student-identity-row > span {
   background: var(--fresh-sky);
   color: var(--cm-chat-dark);
 }
 
-.account-list article:nth-child(3) > span {
+.account-list .account-role-row > span {
   background: var(--cm-amber-soft);
   color: #9a793d;
 }
@@ -750,6 +771,12 @@ async function permanentlyDeleteAccount() {
 
 .account-list small { color: var(--fresh-muted); font-size: 12px; }
 .account-list strong { color: var(--fresh-ink); font-size: 15px; overflow-wrap: anywhere; }
+.account-list p {
+  margin: 0;
+  color: var(--fresh-text);
+  font-size: 12px;
+  line-height: 1.45;
+}
 
 .data-note {
   display: grid;

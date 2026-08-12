@@ -30,7 +30,6 @@ vi.mock('@/api/errors', () => ({
 const user = {
   id: 1,
   student_id: '20240001',
-  username: 'alice',
   nickname: 'Alice',
   avatar_text: 'A',
   avatar_color: '#0b766f',
@@ -56,10 +55,10 @@ describe('auth store', () => {
 
     const store = useAuthStore()
 
-    await store.login({ username: 'alice', password: 'secret123' })
+    await store.login({ student_id: '20240001', password: 'secret123' })
 
     expect(store.token).toBe('token-123')
-    expect(store.currentUser?.username).toBe('alice')
+    expect(store.currentUser?.student_id).toBe('20240001')
     expect(getAccessToken()).toBe('token-123')
     expect(localStorage.getItem(TOKEN_STORAGE_KEY)).toBeNull()
     expect(store.isAuthenticated).toBe(true)

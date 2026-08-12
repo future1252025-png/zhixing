@@ -3,6 +3,7 @@ from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import jwt
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select
@@ -61,12 +62,11 @@ def client_and_session(
         engine.dispose()
 
 
-def register_payload(username: str = "alice") -> dict[str, str]:
+def register_payload(student_id: str = "alice") -> dict[str, str]:
     return {
-        "username": username,
+        "student_id": student_id,
         "password": "secret123",
         "nickname": "Alice",
-        "student_id": f"{username}-2024",
     }
 
 
@@ -78,46 +78,56 @@ def test_register_success_hashes_password_and_hides_hash(
 
     assert response.status_code == 201
     data = response.json()
-    assert data["username"] == "alice"
+    assert data["student_id"] == "alice"
     assert data["nickname"] == "Alice"
     assert "password_hash" not in data
 
     with SessionLocal() as session:
-        user = session.query(User).filter(User.username == "alice").one()
+        user = session.query(User).filter(User.student_id == "alice").one()
         assert user.password_hash != "secret123"
         assert user.password_hash.startswith("$2")
 
 
-def test_register_duplicate_username_fails_with_generic_detail(
+def test_register_duplicate_student_id_fails(
     client_and_session: tuple[TestClient, sessionmaker],
 ) -> None:
     client, _ = client_and_session
     payload = register_payload()
 
     first = client.post("/api/auth/register", json=payload)
-    second = client.post("/api/auth/register", json=payload | {"student_id": "other"})
+    second = client.post("/api/auth/register", json=payload)
 
     assert first.status_code == 201
     assert second.status_code == 400
-    assert second.json()["detail"] == "用户名或学号已存在"
+    assert second.json()["detail"] == "学号已存在"
 
 
-def test_register_duplicate_student_id_fails_with_generic_detail(
+def test_register_legacy_username_only_mirrors_student_id(
     client_and_session: tuple[TestClient, sessionmaker],
 ) -> None:
     client, _ = client_and_session
-    payload = register_payload()
-
-    first = client.post("/api/auth/register", json=payload)
-    second = client.post(
+    response = client.post(
         "/api/auth/register",
-        json=payload | {"username": "bob", "student_id": payload["student_id"]},
+        json={"username": "legacy-id", "password": "secret123", "nickname": "Legacy"},
     )
 
-    # The same generic detail for both identity fields prevents enumeration.
-    assert first.status_code == 201
-    assert second.status_code == 400
-    assert second.json()["detail"] == "用户名或学号已存在"
+    assert response.status_code == 201
+    assert response.json()["student_id"] == "legacy-id"
+    assert "username" not in response.json()
+
+
+def test_register_rejects_disagreeing_legacy_username(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    client, _ = client_and_session
+
+    response = client.post(
+        "/api/auth/register",
+        json=register_payload() | {"username": "different-id"},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "validation_error"
 
 
 def test_login_success_returns_bearer_token(
@@ -128,7 +138,7 @@ def test_login_success_returns_bearer_token(
 
     response = client.post(
         "/api/auth/login",
-        json={"username": "alice", "password": "secret123"},
+        json={"student_id": "alice", "password": "secret123"},
     )
 
     assert response.status_code == 200
@@ -138,7 +148,7 @@ def test_login_success_returns_bearer_token(
     assert data["expires_in"] == 30 * 60
     assert "refresh_token" not in data
     assert response.cookies.get("campusmind_refresh")
-    assert data["user"]["username"] == "alice"
+    assert data["user"]["student_id"] == "alice"
     assert "password_hash" not in data["user"]
 
 
@@ -150,25 +160,25 @@ def test_login_wrong_password_fails(
 
     response = client.post(
         "/api/auth/login",
-        json={"username": "alice", "password": "wrong-password"},
+        json={"student_id": "alice", "password": "wrong-password"},
     )
 
     assert response.status_code == 401
-    assert response.json()["detail"] == "用户名或密码错误"
+    assert response.json()["detail"] == "学号或密码错误"
 
 
-def test_login_unknown_username_fails_with_same_detail(
+def test_login_unknown_student_id_fails_with_same_detail(
     client_and_session: tuple[TestClient, sessionmaker],
 ) -> None:
     client, _ = client_and_session
 
     response = client.post(
         "/api/auth/login",
-        json={"username": "no-such-user", "password": "whatever-pass"},
+        json={"student_id": "no-such-user", "password": "whatever-pass"},
     )
 
     assert response.status_code == 401
-    assert response.json()["detail"] == "用户名或密码错误"
+    assert response.json()["detail"] == "学号或密码错误"
 
 
 def test_authenticate_user_verifies_dummy_hash_when_user_missing(
@@ -190,7 +200,7 @@ def test_authenticate_user_verifies_dummy_hash_when_user_missing(
     with SessionLocal() as session:
         result = authenticate_user(session, "ghost-user", "irrelevant-pw")
 
-    # The unknown-username path must still burn one bcrypt verification so
+    # The unknown-student-ID path must still burn one bcrypt verification so
     # response timing does not reveal whether the account exists.
     assert result is None
     assert calls == [auth_service_module._TIMING_EQUALIZATION_HASH]
@@ -203,7 +213,7 @@ def test_me_with_valid_token_returns_current_user(
     client.post("/api/auth/register", json=register_payload())
     login = client.post(
         "/api/auth/login",
-        json={"username": "alice", "password": "secret123"},
+        json={"student_id": "alice", "password": "secret123"},
     )
     token = login.json()["access_token"]
 
@@ -213,7 +223,66 @@ def test_me_with_valid_token_returns_current_user(
     )
 
     assert response.status_code == 200
-    assert response.json()["username"] == "alice"
+    assert response.json()["student_id"] == "alice"
+
+
+def test_access_token_uses_stable_random_account_subject(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    from app.core.config import settings
+
+    client, SessionLocal = client_and_session
+    client.post("/api/auth/register", json=register_payload())
+    response = client.post(
+        "/api/auth/login",
+        json={"student_id": "alice", "password": "secret123"},
+    )
+    with SessionLocal() as session:
+        token_subject = session.scalar(
+            select(User.token_subject).where(User.student_id == "alice")
+        )
+
+    claims = jwt.decode(
+        response.json()["access_token"],
+        settings.jwt_secret_key,
+        algorithms=[settings.jwt_algorithm],
+        audience="campusmind-client",
+        issuer="campusmind-api",
+    )
+
+    assert claims["sub"] == f"account:{token_subject}"
+    assert claims["sub_kind"] == "account"
+
+
+def test_me_accepts_unexpired_legacy_username_subject_token(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    from app.core.config import settings
+
+    client, _ = client_and_session
+    client.post("/api/auth/register", json=register_payload())
+    now = datetime.now(timezone.utc)
+    legacy_token = jwt.encode(
+        {
+            "sub": "alice",
+            "typ": "access",
+            "iss": "campusmind-api",
+            "aud": "campusmind-client",
+            "jti": "legacy-token-test",
+            "iat": now,
+            "exp": now + timedelta(minutes=5),
+        },
+        settings.jwt_secret_key,
+        algorithm=settings.jwt_algorithm,
+    )
+
+    response = client.get(
+        "/api/auth/me",
+        headers={"Authorization": f"Bearer {legacy_token}"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["student_id"] == "alice"
 
 
 def test_me_without_token_returns_401(
@@ -246,7 +315,7 @@ def test_update_profile_changes_nickname_and_avatar(
     client.post("/api/auth/register", json=register_payload())
     login = client.post(
         "/api/auth/login",
-        json={"username": "alice", "password": "secret123"},
+        json={"student_id": "alice", "password": "secret123"},
     )
     token = login.json()["access_token"]
 
@@ -268,7 +337,7 @@ def test_update_profile_changes_nickname_and_avatar(
     assert "password_hash" not in data
 
     with SessionLocal() as session:
-        user = session.query(User).filter(User.username == "alice").one()
+        user = session.query(User).filter(User.student_id == "alice").one()
         assert user.nickname == "小智同学"
         assert user.avatar_text == "智"
         assert user.avatar_color == "#0b766f"
@@ -294,7 +363,7 @@ def test_update_profile_rejects_blank_nickname(
     client.post("/api/auth/register", json=register_payload())
     login = client.post(
         "/api/auth/login",
-        json={"username": "alice", "password": "secret123"},
+        json={"student_id": "alice", "password": "secret123"},
     )
 
     response = client.patch(
@@ -317,7 +386,12 @@ def test_verify_password_rejects_invalid_hash_without_raising() -> None:
 def test_demo_seed_user_can_login(
     client_and_session: tuple[TestClient, sessionmaker],
 ) -> None:
-    from app.db.seed import DEMO_PASSWORD, DEMO_USERNAME, seed_demo_data
+    from app.db.seed import (
+        DEMO_PASSWORD,
+        DEMO_STUDENT_ID,
+        DEMO_USERNAME,
+        seed_demo_data,
+    )
 
     client, SessionLocal = client_and_session
     with SessionLocal() as session:
@@ -325,11 +399,11 @@ def test_demo_seed_user_can_login(
 
     response = client.post(
         "/api/auth/login",
-        json={"username": DEMO_USERNAME, "password": DEMO_PASSWORD},
+        json={"student_id": DEMO_USERNAME, "password": DEMO_PASSWORD},
     )
 
     assert response.status_code == 200
-    assert response.json()["user"]["username"] == DEMO_USERNAME
+    assert response.json()["user"]["student_id"] == DEMO_STUDENT_ID
 
 
 @pytest.mark.parametrize(
@@ -407,7 +481,7 @@ def test_native_login_returns_refresh_token_but_never_stores_it_raw(
     response = client.post(
         "/api/auth/login",
         json={
-            "username": "alice",
+            "student_id": "alice",
             "password": "secret123",
             "client_kind": "native",
         },
@@ -429,7 +503,7 @@ def test_new_login_removes_refresh_families_past_absolute_expiry(
     client, SessionLocal = client_and_session
     client.post("/api/auth/register", json=register_payload())
     payload = {
-        "username": "alice",
+            "student_id": "alice",
         "password": "secret123",
         "client_kind": "native",
     }
@@ -452,7 +526,7 @@ def test_new_logins_cap_active_refresh_families_per_user(
     client, SessionLocal = client_and_session
     client.post("/api/auth/register", json=register_payload())
     payload = {
-        "username": "alice",
+            "student_id": "alice",
         "password": "secret123",
         "client_kind": "native",
     }
@@ -461,7 +535,7 @@ def test_new_logins_cap_active_refresh_families_per_user(
         assert client.post("/api/auth/login", json=payload).status_code == 200
 
     with SessionLocal() as session:
-        user_id = session.scalar(select(User.id).where(User.username == "alice"))
+        user_id = session.scalar(select(User.id).where(User.student_id == "alice"))
         active_families = session.scalar(
             select(func.count(func.distinct(RefreshSession.family_id))).where(
                 RefreshSession.user_id == user_id,
@@ -487,7 +561,7 @@ def test_native_refresh_rotates_token_and_rejects_replay(
     login = client.post(
         "/api/auth/login",
         json={
-            "username": "alice",
+            "student_id": "alice",
             "password": "secret123",
             "client_kind": "native",
         },
@@ -545,7 +619,7 @@ def test_delete_account_rejects_wrong_password_without_removing_data(
     login = client.post(
         "/api/auth/login",
         json={
-            "username": "alice",
+            "student_id": "alice",
             "password": "secret123",
             "client_kind": "native",
         },
@@ -561,7 +635,7 @@ def test_delete_account_rejects_wrong_password_without_removing_data(
 
     assert response.status_code == 401
     with SessionLocal() as session:
-        assert session.scalar(select(User).where(User.username == "alice")) is not None
+        assert session.scalar(select(User).where(User.student_id == "alice")) is not None
         assert session.scalar(select(func.count(RefreshSession.id))) == 1
 
 
@@ -573,7 +647,7 @@ def test_delete_account_removes_owned_data_and_revokes_sessions(
     login = client.post(
         "/api/auth/login",
         json={
-            "username": "alice",
+            "student_id": "alice",
             "password": "secret123",
             "client_kind": "native",
         },
@@ -582,7 +656,7 @@ def test_delete_account_removes_owned_data_and_revokes_sessions(
     refresh_token = login.json()["refresh_token"]
 
     with SessionLocal() as session:
-        user = session.scalar(select(User).where(User.username == "alice"))
+        user = session.scalar(select(User).where(User.student_id == "alice"))
         assert user is not None
         building = Building(
             name="账号删除测试楼",
@@ -669,6 +743,41 @@ def test_delete_account_removes_owned_data_and_revokes_sessions(
         # Shared campus reference data is not user-owned and must remain.
         assert session.scalar(select(func.count(Building.id))) == 1
 
+    recreated = client.post(
+        "/api/auth/register",
+        json={
+            "student_id": "alice",
+            "password": "new-secret123",
+            "nickname": "New Alice",
+        },
+    )
+    assert recreated.status_code == 201
+    # SQLite may reuse an integer primary key after deletion. The per-account
+    # random subject prevents the old access token from authenticating as the
+    # newly created account even when that happens.
+    assert client.get(
+        "/api/auth/me",
+        headers={"Authorization": f"Bearer {access_token}"},
+    ).status_code == 401
+    replacement_login = client.post(
+        "/api/auth/login",
+        json={"student_id": "alice", "password": "new-secret123"},
+    )
+    assert replacement_login.status_code == 200
+    assert replacement_login.json()["access_token"] != access_token
+
+
+def test_openapi_exposes_only_student_id_as_login_identity(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    client, _ = client_and_session
+    schemas = client.get("/openapi.json").json()["components"]["schemas"]
+
+    for schema_name in ("RegisterRequest", "LoginRequest"):
+        properties = schemas[schema_name]["properties"]
+        assert "student_id" in properties
+        assert "username" not in properties
+
 
 def test_web_refresh_uses_httponly_cookie_and_logout_revokes_session(
     client_and_session: tuple[TestClient, sessionmaker],
@@ -677,7 +786,7 @@ def test_web_refresh_uses_httponly_cookie_and_logout_revokes_session(
     client.post("/api/auth/register", json=register_payload())
     login = client.post(
         "/api/auth/login",
-        json={"username": "alice", "password": "secret123"},
+        json={"student_id": "alice", "password": "secret123"},
     )
     first_cookie = login.cookies.get("campusmind_refresh")
     assert first_cookie
@@ -704,7 +813,7 @@ def test_web_refresh_rejects_untrusted_origin_without_rotating_cookie(
     client.post("/api/auth/register", json=register_payload())
     client.post(
         "/api/auth/login",
-        json={"username": "alice", "password": "secret123"},
+        json={"student_id": "alice", "password": "secret123"},
     )
 
     rejected = client.post(
@@ -759,13 +868,13 @@ def test_login_rate_limited_after_repeated_failures(
     for _ in range(5):
         response = client.post(
             "/api/auth/login",
-            json={"username": "alice", "password": "wrong-password"},
+            json={"student_id": "alice", "password": "wrong-password"},
         )
         assert response.status_code == 401
 
     throttled = client.post(
         "/api/auth/login",
-        json={"username": "alice", "password": "wrong-password"},
+        json={"student_id": "alice", "password": "wrong-password"},
     )
     assert throttled.status_code == 429
     assert throttled.json()["detail"] == "登录尝试过于频繁，请稍后再试"
@@ -773,12 +882,12 @@ def test_login_rate_limited_after_repeated_failures(
     # Even the correct password is refused while the window is saturated.
     correct = client.post(
         "/api/auth/login",
-        json={"username": "alice", "password": "secret123"},
+        json={"student_id": "alice", "password": "secret123"},
     )
     assert correct.status_code == 429
 
 
-def test_login_rate_limit_covers_other_usernames_from_same_ip(
+def test_login_rate_limit_covers_other_student_ids_from_same_ip(
     client_and_session: tuple[TestClient, sessionmaker],
 ) -> None:
     client, _ = client_and_session
@@ -786,19 +895,19 @@ def test_login_rate_limit_covers_other_usernames_from_same_ip(
     for index in range(5):
         response = client.post(
             "/api/auth/login",
-            json={"username": f"spray-{index}", "password": "wrong-password"},
+            json={"student_id": f"spray-{index}", "password": "wrong-password"},
         )
         assert response.status_code == 401
 
     throttled = client.post(
         "/api/auth/login",
-        json={"username": "fresh-username", "password": "wrong-password"},
+        json={"student_id": "fresh-student-id", "password": "wrong-password"},
     )
     assert throttled.status_code == 429
     assert throttled.json()["detail"] == "登录尝试过于频繁，请稍后再试"
 
 
-def test_successful_login_clears_username_failure_count(
+def test_successful_login_clears_student_id_failure_count(
     client_and_session: tuple[TestClient, sessionmaker],
 ) -> None:
     client, _ = client_and_session
@@ -807,26 +916,26 @@ def test_successful_login_clears_username_failure_count(
     for _ in range(4):
         response = client.post(
             "/api/auth/login",
-            json={"username": "alice", "password": "wrong-password"},
+            json={"student_id": "alice", "password": "wrong-password"},
         )
         assert response.status_code == 401
 
     success = client.post(
         "/api/auth/login",
-        json={"username": "alice", "password": "secret123"},
+        json={"student_id": "alice", "password": "secret123"},
     )
     assert success.status_code == 200
 
-    # Isolate the username dimension: the shared test-client IP keeps its
-    # failure history, so drop it before probing the username counter.
+    # Isolate the student-ID dimension: the shared test-client IP keeps its
+    # failure history, so drop it before probing the identity counter.
     rate_limit.login_ip_limiter.reset()
 
-    # Had the username counter survived the successful login, the second
+    # Had the student-ID counter survived the successful login, the second
     # failure below would already be the fifth in the window and return 429.
     for _ in range(2):
         response = client.post(
             "/api/auth/login",
-            json={"username": "alice", "password": "wrong-password"},
+            json={"student_id": "alice", "password": "wrong-password"},
         )
         assert response.status_code == 401
 

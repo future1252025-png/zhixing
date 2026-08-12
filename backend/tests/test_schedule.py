@@ -62,16 +62,15 @@ def auth_headers(client: TestClient, username: str, *, configure: bool = True) -
     register = client.post(
         "/api/auth/register",
         json={
-            "username": username,
+            "student_id": username,
             "password": "secret123",
             "nickname": username.title(),
-            "student_id": f"{username}-2026",
         },
     )
     assert register.status_code == 201
     login = client.post(
         "/api/auth/login",
-        json={"username": username, "password": "secret123"},
+        json={"student_id": username, "password": "secret123"},
     )
     assert login.status_code == 200
     headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
@@ -102,7 +101,7 @@ def create_service_user(
         username=username,
         password_hash="test-hash",
         nickname=username.title(),
-        student_id=f"{username}-2026",
+        student_id=username,
     )
     session.add(user)
     session.flush()

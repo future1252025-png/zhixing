@@ -12,9 +12,9 @@ from app.db.database import create_sqlite_engine, upgrade_database
 from app.models import Building, Course, CourseImportSource, LocationPreset, Message, User
 
 
-DEMO_USERNAME = "demo"
-DEMO_PASSWORD = "demo123"
 DEMO_STUDENT_ID = "20240001"
+DEMO_USERNAME = DEMO_STUDENT_ID
+DEMO_PASSWORD = "demo123"
 DEMO_NICKNAME = "演示同学"
 LEGACY_DEMO_PASSWORD_PLACEHOLDER = "demo-password-hash-placeholder"
 
@@ -152,11 +152,27 @@ DEMO_MESSAGES = [
 ]
 
 def _get_or_create_demo_user(session: Session) -> tuple[User, bool]:
-    user = session.scalar(select(User).where(User.username == DEMO_USERNAME))
+    user = session.scalar(select(User).where(User.student_id == DEMO_STUDENT_ID))
+    username_owner = session.scalar(
+        select(User).where(User.username == DEMO_USERNAME)
+    )
+    if user is None and username_owner is not None:
+        # A pre-existing owner of the reserved demo login is real data.  Never
+        # collide with it or rewrite its student ID merely to install samples.
+        if username_owner.password_hash == LEGACY_DEMO_PASSWORD_PLACEHOLDER:
+            username_owner.password_hash = hash_password(DEMO_PASSWORD)
+            session.add(username_owner)
+            session.flush()
+            return username_owner, True
+        return username_owner, False
     if user is not None:
         # Repair the one known pre-hashing placeholder only. Any other value may
         # be a real user-selected password and must never be reset by seeding.
         if user.password_hash == LEGACY_DEMO_PASSWORD_PLACEHOLDER:
+            if user.username != DEMO_USERNAME and (
+                username_owner is None or username_owner.id == user.id
+            ):
+                user.username = DEMO_USERNAME
             user.password_hash = hash_password(DEMO_PASSWORD)
             session.add(user)
             session.flush()

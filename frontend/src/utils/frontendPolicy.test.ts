@@ -91,12 +91,15 @@ describe('native safe-area policy', () => {
   it('reserves Android status-bar and consistent post-navigation spacing only in Capacitor', () => {
     const source = frontendFile('src/styles/fresh.css')
     expect(source).toMatch(/html\.capacitor-android \{[\s\S]*?--app-safe-area-top:\s*max\(env\(safe-area-inset-top, 0px\), 32px\);/)
+    expect(source).toMatch(/html\.capacitor-android \{[\s\S]*?--app-native-nav-inset-top:\s*var\(--safe-area-inset-top, env\(safe-area-inset-top, 0px\)\);/)
+    expect(source).toMatch(/html\.capacitor-android \.van-nav-bar \{[\s\S]*?top:\s*var\(--app-native-nav-inset-top\);[\s\S]*?margin-top:\s*calc\(var\(--app-native-nav-inset-top\) \+ 12px\);/)
     expect(source).toMatch(/html\.capacitor-android \.home-content \{[\s\S]*?padding-top:\s*calc\(var\(--app-safe-area-top\) \+ 18px\);/)
     expect(source).toMatch(/html\.capacitor-android \.page > \.van-nav-bar \+ \.page-content,[\s\S]*?padding-top:\s*32px;/)
     expect(source).toContain('html.capacitor-android .page > .van-nav-bar + .message-content,')
     expect(source).toContain('html.capacitor-android .page > .van-nav-bar + .collector-layout {')
     expect(source).toMatch(/html\.capacitor-android #semester-settings \{[\s\S]*?margin-top:\s*12px;/)
     expect(source).toMatch(/html\.capacitor-android #semester-settings \{[\s\S]*?scroll-margin-top:\s*calc\(var\(--app-safe-area-top\) \+ var\(--nav-height, 58px\) \+ 44px\);/)
+    expect(source).toMatch(/html\.capacitor-android \.courses-page > \.van-nav-bar \+ \.page-content,[\s\S]*?html\.capacitor-android \.schedule-page > \.van-nav-bar \+ \.page-content \{[\s\S]*?padding-top:\s*40px;/)
   })
 
   it('keeps mobile login validation below a full-width input body', () => {

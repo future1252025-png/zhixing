@@ -37,7 +37,7 @@ export const useAuthStore = defineStore('auth', {
   getters: {
     isAuthenticated: (state) => Boolean(state.token),
     displayName: (state) =>
-      state.currentUser?.nickname || state.currentUser?.username || '未登录'
+      state.currentUser?.nickname || state.currentUser?.student_id || '未登录'
   },
   actions: {
     setToken(token: string) {

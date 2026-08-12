@@ -35,10 +35,8 @@ class BusinessError(Exception):
 """Stable API error details (Chinese, user-facing)."""
 
 # Auth
-USERNAME_EXISTS = "用户名已存在"
-STUDENT_ID_EXISTS = "学号已存在"
-DUPLICATE_USER = "用户名或学号已存在"
-INVALID_CREDENTIALS = "用户名或密码错误"
+DUPLICATE_USER = "学号已存在"
+INVALID_CREDENTIALS = "学号或密码错误"
 TOKEN_EXPIRED = "登录已过期，请重新登录"
 TOKEN_INVALID = "登录无效，请重新登录"
 REFRESH_TOKEN_INVALID = "登录状态已失效，请重新登录"

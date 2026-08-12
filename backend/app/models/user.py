@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
+from uuid import uuid4
 
-from sqlalchemy import String
+from sqlalchemy import CheckConstraint, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.database import Base
@@ -9,15 +10,28 @@ from app.db.types import TZDateTime
 
 class User(Base):
     __tablename__ = "users"
+    __table_args__ = (
+        CheckConstraint(
+            "username = student_id",
+            name="ck_users_username_matches_student_id",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
-    student_id: Mapped[str | None] = mapped_column(
+    student_id: Mapped[str] = mapped_column(
         String(32),
         unique=True,
         index=True,
-        nullable=True,
+        nullable=False,
     )
     username: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    token_subject: Mapped[str] = mapped_column(
+        String(32),
+        unique=True,
+        index=True,
+        nullable=False,
+        default=lambda: uuid4().hex,
+    )
     password_hash: Mapped[str] = mapped_column(String(255))
     nickname: Mapped[str] = mapped_column(String(64))
     avatar_text: Mapped[str | None] = mapped_column(String(4), nullable=True)

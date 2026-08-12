@@ -112,15 +112,14 @@ def auth_headers(client: TestClient, username: str = "alice") -> dict[str, str]:
     client.post(
         "/api/auth/register",
         json={
-            "username": username,
+            "student_id": username,
             "password": "secret123",
             "nickname": "Alice",
-            "student_id": f"{username}-2024",
         },
     )
     login = client.post(
         "/api/auth/login",
-        json={"username": username, "password": "secret123"},
+        json={"student_id": username, "password": "secret123"},
     )
     return {"Authorization": f"Bearer {login.json()['access_token']}"}
 

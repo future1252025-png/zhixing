@@ -34,15 +34,14 @@ def auth_headers(
     client.post(
         "/api/auth/register",
         json={
-            "username": "importer",
+            "student_id": "importer",
             "password": "secret123",
             "nickname": "Importer",
-            "student_id": "importer-2024",
         },
     )
     login = client.post(
         "/api/auth/login",
-        json={"username": "importer", "password": "secret123"},
+        json={"student_id": "importer", "password": "secret123"},
     )
     assert login.status_code == 200
     headers = {"Authorization": f"Bearer {login.json()['access_token']}"}

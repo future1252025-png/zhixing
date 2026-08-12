@@ -22,6 +22,7 @@ from app.db.seed import (
     DEMO_COURSES,
     DEMO_MESSAGES,
     DEMO_PASSWORD,
+    DEMO_STUDENT_ID,
     DEMO_USERNAME,
     MAP_POINTS_SEED_FILE,
     initialize_database,
@@ -366,6 +367,28 @@ def test_seed_demo_data_is_idempotent(tmp_path: Path) -> None:
         assert second_counts == first_counts
 
 
+def test_current_schema_rejects_a_second_account_identity(tmp_path: Path) -> None:
+    engine = create_sqlite_engine(make_test_database_url(tmp_path / "identity-check.db"))
+    init_db(engine)
+    SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+
+    with SessionLocal() as session:
+        session.add(
+            User(
+                student_id="20240001",
+                username="different-login",
+                password_hash="hash",
+                nickname="Invalid identity",
+            )
+        )
+        with pytest.raises(IntegrityError):
+            session.commit()
+        session.rollback()
+        assert session.scalar(select(User.id)) is None
+
+    engine.dispose()
+
+
 def test_seed_demo_data_preserves_real_demo_account_password_hash(tmp_path: Path) -> None:
     engine = create_sqlite_engine(make_test_database_url(tmp_path / "real-demo.db"))
     init_db(engine)
@@ -374,7 +397,7 @@ def test_seed_demo_data_preserves_real_demo_account_password_hash(tmp_path: Path
 
     with SessionLocal() as session:
         user = User(
-            student_id="existing-demo",
+            student_id=DEMO_STUDENT_ID,
             username=DEMO_USERNAME,
             password_hash=real_hash,
             nickname="Real demo owner",
@@ -413,7 +436,7 @@ def test_seed_demo_data_preserves_real_demo_account_password_hash(tmp_path: Path
         private_message_id = private_message.id
         seed_demo_data(session)
         session.expire_all()
-        user = session.scalar(select(User).where(User.username == DEMO_USERNAME))
+        user = session.scalar(select(User).where(User.student_id == DEMO_STUDENT_ID))
 
         assert user is not None
         assert user.password_hash == real_hash
@@ -441,7 +464,7 @@ def test_seed_demo_data_repairs_only_known_legacy_placeholder(tmp_path: Path) ->
     with SessionLocal() as session:
         session.add(
             User(
-                student_id="legacy-demo",
+                student_id=DEMO_STUDENT_ID,
                 username=DEMO_USERNAME,
                 password_hash="demo-password-hash-placeholder",
                 nickname="Legacy demo",
@@ -450,7 +473,7 @@ def test_seed_demo_data_repairs_only_known_legacy_placeholder(tmp_path: Path) ->
         session.commit()
         seed_demo_data(session)
         session.expire_all()
-        user = session.scalar(select(User).where(User.username == DEMO_USERNAME))
+        user = session.scalar(select(User).where(User.student_id == DEMO_STUDENT_ID))
 
         assert user is not None
         assert verify_password(DEMO_PASSWORD, user.password_hash)
@@ -462,6 +485,72 @@ def test_seed_demo_data_repairs_only_known_legacy_placeholder(tmp_path: Path) ->
         ) == len(DEMO_MESSAGES)
 
 
+def test_seed_demo_data_reuses_mirrored_demo_identity_without_duplicate(
+    tmp_path: Path,
+) -> None:
+    engine = create_sqlite_engine(make_test_database_url(tmp_path / "old-demo.db"))
+    init_db(engine)
+    SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+
+    with SessionLocal() as session:
+        session.add(
+            User(
+                student_id=DEMO_STUDENT_ID,
+                username=DEMO_STUDENT_ID,
+                password_hash="demo-password-hash-placeholder",
+                nickname="Legacy demo",
+            )
+        )
+        session.commit()
+
+        seed_demo_data(session)
+        session.expire_all()
+        users = session.scalars(select(User)).all()
+
+        assert len(users) == 1
+        assert users[0].student_id == DEMO_STUDENT_ID
+        assert users[0].username == DEMO_USERNAME == DEMO_STUDENT_ID
+        assert verify_password(DEMO_PASSWORD, users[0].password_hash)
+
+
+def test_seed_demo_data_preserves_real_user_with_demo_student_id(
+    tmp_path: Path,
+) -> None:
+    engine = create_sqlite_engine(make_test_database_url(tmp_path / "real-student.db"))
+    init_db(engine)
+    SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
+    real_hash = hash_password("owner-chosen-password")
+
+    with SessionLocal() as session:
+        session.add(
+            User(
+                student_id=DEMO_STUDENT_ID,
+                username=DEMO_STUDENT_ID,
+                password_hash=real_hash,
+                nickname="Real student",
+            )
+        )
+        session.commit()
+
+        seed_demo_data(session)
+        session.expire_all()
+        user = session.scalar(
+            select(User).where(User.student_id == DEMO_STUDENT_ID)
+        )
+
+        assert user is not None
+        assert user.username == DEMO_STUDENT_ID
+        assert user.password_hash == real_hash
+        assert verify_password("owner-chosen-password", user.password_hash)
+        assert not verify_password(DEMO_PASSWORD, user.password_hash)
+        assert session.scalars(
+            select(Course).where(Course.user_id == user.id)
+        ).all() == []
+        assert session.scalars(
+            select(Message).where(Message.user_id == user.id)
+        ).all() == []
+
+
 def test_seed_demo_data_preserves_unknown_invalid_demo_hash(tmp_path: Path) -> None:
     engine = create_sqlite_engine(make_test_database_url(tmp_path / "unknown-demo.db"))
     init_db(engine)
@@ -471,7 +560,7 @@ def test_seed_demo_data_preserves_unknown_invalid_demo_hash(tmp_path: Path) -> N
     with SessionLocal() as session:
         session.add(
             User(
-                student_id="unknown-demo",
+                student_id=DEMO_STUDENT_ID,
                 username=DEMO_USERNAME,
                 password_hash=unknown_value,
                 nickname="Unknown demo",
@@ -480,7 +569,7 @@ def test_seed_demo_data_preserves_unknown_invalid_demo_hash(tmp_path: Path) -> N
         session.commit()
         seed_demo_data(session)
         session.expire_all()
-        user = session.scalar(select(User).where(User.username == DEMO_USERNAME))
+        user = session.scalar(select(User).where(User.student_id == DEMO_STUDENT_ID))
 
         assert user is not None
         assert user.password_hash == unknown_value
@@ -638,7 +727,7 @@ def test_core_journey_one_to_one_relationships_persist_and_delete_orphans(
     with SessionLocal() as session:
         user = User(
             student_id="20240002",
-            username="core-relations",
+            username="20240002",
             password_hash="hash",
             nickname="Core relations",
         )
@@ -732,13 +821,13 @@ def test_database_cascades_delete_unloaded_core_journey_children(tmp_path: Path)
     with SessionLocal() as session:
         semester_user = User(
             student_id="20240003",
-            username="semester-cascade",
+            username="20240003",
             password_hash="hash",
             nickname="Semester cascade",
         )
         course_user = User(
             student_id="20240004",
-            username="course-cascade",
+            username="20240004",
             password_hash="hash",
             nickname="Course cascade",
         )
