@@ -2,7 +2,7 @@
 
 本地验证日期：2026-08-12
 
-上一次完整 CI 基线：提交 [`8c4d82d`](https://github.com/future1252025-png/zhixing/commit/8c4d82d218e1d1d081b3db1b8dae4f3e8196da53) 的 [GitHub Actions run 31456824549](https://github.com/future1252025-png/zhixing/actions/runs/31456824549)。
+完整 CI 基线：提交 [`466faa5`](https://github.com/future1252025-png/zhixing/commit/466faa5e1d8cc60c15869d2137f926b772972899) 的 [GitHub Actions run 31577607219](https://github.com/future1252025-png/zhixing/actions/runs/31577607219)。
 
 ## 自动化结果
 
