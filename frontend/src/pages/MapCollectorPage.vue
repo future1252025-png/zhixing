@@ -567,12 +567,12 @@ function buildSeedData(source: CollectedPoint[]): string {
     source.map((point) => ({
       name: point.name,
       type: point.type,
-      description: `${point.name}，来源于高德地图采点工具。`,
+      description: point.name,
       latitude: point.latitude,
       longitude: point.longitude,
       map_x: estimateMapX(point.longitude),
       map_y: estimateMapY(point.latitude),
-      walk_hint: '来自真实地图采点，建议演示前人工确认名称和位置。'
+      walk_hint: null
     })),
     null,
     2

@@ -5,18 +5,18 @@
 - Python 3.11+
 - Node.js 22+、npm 10+
 - Android 构建：JDK 21 和 Android SDK
-- Windows、macOS 或 Linux
+- Windows、macOS 或 Linux；下文命令以 Windows PowerShell 为例，macOS/Linux 对应使用 `.venv/bin/python` 和 `./gradlew`
 
 ## 后端
 
 ```powershell
 cd backend
 python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe -m pip install --require-hashes -r requirements.lock
 .\.venv\Scripts\python.exe -m alembic upgrade head
 ```
 
-开发环境首次启动会自动生成 `backend/data/.jwt-secret`（已被 Git 忽略），后续重启继续使用同一密钥。也可以显式覆盖：
+开发环境首次启动会自动生成 `backend/data/.jwt-secret`，后续重启继续使用同一密钥；该本地文件位于 `.gitignore` 排除范围内。也可以显式覆盖：
 
 ```powershell
 $env:JWT_SECRET_KEY="请替换为足够长的随机值"
@@ -122,7 +122,7 @@ cd frontend\android
 .\gradlew.bat test assembleDebug
 ```
 
-CodeQL 默认在 Actions 内完成分析并保留 SARIF artifact，因此私有仓库未开启 Code Scanning 时不会因上传被拒绝而报红。仓库日后启用 GitHub Code Scanning/GitHub Code Security 后，可将 `.github/workflows/codeql.yml` 中的 `upload: never` 改为 `upload: always`，恢复 Security 面板上传。
+当前 CodeQL 工作流在 Actions 内完成分析并保留 SARIF artifact，因此私有仓库未开启 Code Scanning 时不会因上传被拒绝而报红。仓库日后启用 GitHub Code Scanning/GitHub Code Security 后，可将 `.github/workflows/codeql.yml` 中的 `upload: never` 改为 `upload: always`，并在工作流权限中加入 `security-events: write`，恢复 Security 面板上传。
 
 ## 常见问题
 

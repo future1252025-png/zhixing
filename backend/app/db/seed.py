@@ -63,6 +63,13 @@ def load_map_points_seed(
         if name_totals[name] > 1:
             name = f"{name}（{name_seen[name]}）"
 
+        raw_walk_hint = item["walk_hint"]
+        walk_hint = (
+            str(raw_walk_hint).strip() or None
+            if raw_walk_hint is not None
+            else None
+        )
+
         points.append(
             {
                 "name": name,
@@ -72,7 +79,7 @@ def load_map_points_seed(
                 "longitude": float(item["longitude"]),
                 "map_x": float(item["map_x"]),
                 "map_y": float(item["map_y"]),
-                "walk_hint": str(item["walk_hint"]).strip() or None,
+                "walk_hint": walk_hint,
             }
         )
 

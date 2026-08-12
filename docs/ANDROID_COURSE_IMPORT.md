@@ -6,8 +6,8 @@
 2. App 内打开湖北大学官方教务系统：`https://jwxt.hubu.edu.cn/jsxsd/`。
 3. 学生在学校页面完成登录，进入“学期理论课表”并选择学年学期。
 4. 点击右下角“导入课表”。App 只提取当前课表表格的可见文字。
-5. 智行解析完成后直接整批导入，并以本次教务课表覆盖原课表。
-6. 缺少上课时间或地点、无法形成有效排课的单条记录会被跳过，不阻断其余课程。
+5. 智行解析完成后自动排除不可用条目并直接整批导入，以本次教务课表覆盖原课表。
+6. 上课时间和地点同时缺失，或课程名、星期、周次等关键排课字段无法识别的条目会被排除；仅缺时间或仅缺地点的条目会保留可用原文并继续导入。
 
 ## 隐私与安全边界
 
@@ -38,7 +38,7 @@ VITE_AMAP_SECURITY_CODE=
 VITE_AMAP_SERVICE_HOST=https://你的前端域名/_AMapService
 ```
 
-不要使用 `127.0.0.1` 或 `localhost`：在实体手机上它们指向手机本身。调试 Android 模拟器时可按本机网络配置使用专用宿主地址，但发布包必须使用 HTTPS 后端。
+实体手机中的 `127.0.0.1` 和 `localhost` 均指向手机本身，不是电脑后端。Android 模拟器可按本机网络配置使用专用宿主地址；发布配置仅接受公网 HTTPS 后端。
 
 构建并同步：
 
@@ -47,6 +47,6 @@ npm run android:sync
 npm run android:test
 ```
 
-`android:sync` 会校验公网 HTTPS API、高德 Key 和代理地址，并在同步后反向检查实际 Android 资源。正式 App 的 Axios 请求由 Capacitor 原生 HTTP 透明承载，包括 Authorization 头与刷新令牌 POST，不依赖 WebView CORS 放行。若是在同一 Wi-Fi 下连接电脑后端进行开发调试，请配置 `http://<电脑IPv4>:8000` 并使用 `npm run android:sync:dev`；不要把该调试配置用于发布包。
+`android:sync` 会校验公网 HTTPS API、高德 Key 和代理地址，并在同步后反向检查实际 Android 资源。正式 App 的 Axios 请求由 Capacitor 原生 HTTP 透明承载，包括 Authorization 头与刷新令牌 POST，不依赖 WebView CORS 放行。同一 Wi-Fi 下连接电脑后端属于开发调试配置，可使用 `http://<电脑IPv4>:8000` 和 `npm run android:sync:dev`；发布配置由 `android:sync` 的公网 HTTPS 校验约束。
 
 Android 工程位于 `frontend/android`，应用 ID 为 `com.campusmind.zhixing`，最低 Android API 为 24。

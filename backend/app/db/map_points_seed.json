@@ -2,1021 +2,1021 @@
   {
     "name": "湖北大学(武昌校区)",
     "type": "校园地点",
-    "description": "湖北大学(武昌校区)，来源于高德地图采点工具。",
+    "description": "湖北大学(武昌校区)",
     "latitude": 30.579833,
     "longitude": 114.328253,
     "map_x": 52.2,
     "map_y": 51.4,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "湖北大学武昌校区生命科学学院",
     "type": "校园地点",
-    "description": "湖北大学武昌校区生命科学学院，来源于高德地图采点工具。",
+    "description": "湖北大学武昌校区生命科学学院",
     "latitude": 30.582913,
     "longitude": 114.328053,
     "map_x": 50.2,
     "map_y": 20.8,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "湖北大学武昌校区国际教育学院",
     "type": "校园地点",
-    "description": "湖北大学武昌校区国际教育学院，来源于高德地图采点工具。",
+    "description": "湖北大学武昌校区国际教育学院",
     "latitude": 30.580369,
     "longitude": 114.326941,
     "map_x": 39.4,
     "map_y": 46.1,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "湖北大学武昌校区艺术学院",
     "type": "校园地点",
-    "description": "湖北大学武昌校区艺术学院，来源于高德地图采点工具。",
+    "description": "湖北大学武昌校区艺术学院",
     "latitude": 30.579338,
     "longitude": 114.327366,
     "map_x": 43.5,
     "map_y": 56.3,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "湖北大学武昌校区化学化工学院",
     "type": "校园地点",
-    "description": "湖北大学武昌校区化学化工学院，来源于高德地图采点工具。",
+    "description": "湖北大学武昌校区化学化工学院",
     "latitude": 30.58221,
     "longitude": 114.328128,
     "map_x": 50.9,
     "map_y": 27.8,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "湖北大学曼城联合学院",
     "type": "校园地点",
-    "description": "湖北大学曼城联合学院，来源于高德地图采点工具。",
+    "description": "湖北大学曼城联合学院",
     "latitude": 30.580292,
     "longitude": 114.326884,
     "map_x": 38.8,
     "map_y": 46.9,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "湖北大学武昌校区体育学院",
     "type": "校园地点",
-    "description": "湖北大学武昌校区体育学院，来源于高德地图采点工具。",
+    "description": "湖北大学武昌校区体育学院",
     "latitude": 30.581765,
     "longitude": 114.327123,
     "map_x": 41.2,
     "map_y": 32.2,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "湖北大学武昌校区计算机学院",
     "type": "校园地点",
-    "description": "湖北大学武昌校区计算机学院，来源于高德地图采点工具。",
+    "description": "湖北大学武昌校区计算机学院",
     "latitude": 30.580086,
     "longitude": 114.32662,
     "map_x": 36.3,
     "map_y": 48.9,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "湖北大学生物制造大楼",
     "type": "校园地点",
-    "description": "湖北大学生物制造大楼，来源于高德地图采点工具。",
+    "description": "湖北大学生物制造大楼",
     "latitude": 30.582937,
     "longitude": 114.328037,
     "map_x": 50.1,
     "map_y": 20.6,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "湖北大学-会议中心(宝积路)",
     "type": "校园地点",
-    "description": "湖北大学-会议中心(宝积路)，来源于高德地图采点工具。",
+    "description": "湖北大学-会议中心(宝积路)",
     "latitude": 30.580687,
     "longitude": 114.329203,
     "map_x": 61.4,
     "map_y": 42.9,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "湖北大学武昌校区资源环境学院",
     "type": "校园地点",
-    "description": "湖北大学武昌校区资源环境学院，来源于高德地图采点工具。",
+    "description": "湖北大学武昌校区资源环境学院",
     "latitude": 30.579718,
     "longitude": 114.327715,
     "map_x": 46.9,
     "map_y": 52.6,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "湖北大学武昌校区材料科学与工程学院",
     "type": "校园地点",
-    "description": "湖北大学武昌校区材料科学与工程学院，来源于高德地图采点工具。",
+    "description": "湖北大学武昌校区材料科学与工程学院",
     "latitude": 30.583204,
     "longitude": 114.328467,
     "map_x": 54.3,
     "map_y": 17.9,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "湖北大学幼儿园",
     "type": "校园地点",
-    "description": "湖北大学幼儿园，来源于高德地图采点工具。",
+    "description": "湖北大学幼儿园",
     "latitude": 30.578915,
     "longitude": 114.328768,
     "map_x": 57.2,
     "map_y": 60.5,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "湖北大学武昌校区学生宿舍(建设中)",
     "type": "宿舍",
-    "description": "湖北大学武昌校区学生宿舍(建设中)，来源于高德地图采点工具。",
+    "description": "湖北大学武昌校区学生宿舍(建设中)",
     "latitude": 30.582605,
     "longitude": 114.331009,
     "map_x": 79,
     "map_y": 23.9,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "湖北大学武昌校区马克思主义学院",
     "type": "校园地点",
-    "description": "湖北大学武昌校区马克思主义学院，来源于高德地图采点工具。",
+    "description": "湖北大学武昌校区马克思主义学院",
     "latitude": 30.580809,
     "longitude": 114.326379,
     "map_x": 33.9,
     "map_y": 41.7,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "湖北大学外国语学院逸夫楼",
     "type": "校园地点",
-    "description": "湖北大学外国语学院逸夫楼，来源于高德地图采点工具。",
+    "description": "湖北大学外国语学院逸夫楼",
     "latitude": 30.579139,
     "longitude": 114.327938,
     "map_x": 49.1,
     "map_y": 58.3,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "湖北大学武昌校区武汉粘接学会",
     "type": "校园地点",
-    "description": "湖北大学武昌校区武汉粘接学会，来源于高德地图采点工具。",
+    "description": "湖北大学武昌校区武汉粘接学会",
     "latitude": 30.582329,
     "longitude": 114.328273,
     "map_x": 52.4,
     "map_y": 26.6,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "湖北大学(武昌主校区四区5栋)",
     "type": "校园地点",
-    "description": "湖北大学(武昌主校区四区5栋)，来源于高德地图采点工具。",
+    "description": "湖北大学(武昌主校区四区5栋)",
     "latitude": 30.578693,
     "longitude": 114.328945,
     "map_x": 58.9,
     "map_y": 62.8,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "湖北大学健康科学与工程学院",
     "type": "校园地点",
-    "description": "湖北大学健康科学与工程学院，来源于高德地图采点工具。",
+    "description": "湖北大学健康科学与工程学院",
     "latitude": 30.583136,
     "longitude": 114.328387,
     "map_x": 53.5,
     "map_y": 18.6,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "湖北大学生命科学学院研究生院",
     "type": "校园地点",
-    "description": "湖北大学生命科学学院研究生院，来源于高德地图采点工具。",
+    "description": "湖北大学生命科学学院研究生院",
     "latitude": 30.58285,
     "longitude": 114.327994,
     "map_x": 49.6,
     "map_y": 21.4,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "湖北大学武昌校区图书馆",
     "type": "校园地点",
-    "description": "湖北大学武昌校区图书馆，来源于高德地图采点工具。",
+    "description": "湖北大学武昌校区图书馆",
     "latitude": 30.581091,
     "longitude": 114.329114,
     "map_x": 60.6,
     "map_y": 38.9,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "湖北大学武昌校区内部地面停车场",
     "type": "交通设施服务",
-    "description": "湖北大学武昌校区内部地面停车场，来源于高德地图采点工具。",
+    "description": "湖北大学武昌校区内部地面停车场",
     "latitude": 30.58077,
     "longitude": 114.327402,
     "map_x": 43.9,
     "map_y": 42.1,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "湖北大学武昌校区内部地面停车场",
     "type": "交通设施服务",
-    "description": "湖北大学武昌校区内部地面停车场，来源于高德地图采点工具。",
+    "description": "湖北大学武昌校区内部地面停车场",
     "latitude": 30.580266,
     "longitude": 114.328134,
     "map_x": 51,
     "map_y": 47.1,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "湖北大学英语语言学习中心",
     "type": "校园地点",
-    "description": "湖北大学英语语言学习中心，来源于高德地图采点工具。",
+    "description": "湖北大学英语语言学习中心",
     "latitude": 30.580258,
     "longitude": 114.326751,
     "map_x": 37.5,
     "map_y": 47.2,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "湖北大学红墙琴园酒店",
     "type": "宿舍",
-    "description": "湖北大学红墙琴园酒店，来源于高德地图采点工具。",
+    "description": "湖北大学红墙琴园酒店",
     "latitude": 30.578058,
     "longitude": 114.324544,
     "map_x": 16,
     "map_y": 69.1,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "湖北大学-习坎楼",
     "type": "校园地点",
-    "description": "湖北大学-习坎楼，来源于高德地图采点工具。",
+    "description": "湖北大学-习坎楼",
     "latitude": 30.578604,
     "longitude": 114.324881,
     "map_x": 19.3,
     "map_y": 63.6,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "湖北大学(武昌主校区)创新创业大楼",
     "type": "校园地点",
-    "description": "湖北大学(武昌主校区)创新创业大楼，来源于高德地图采点工具。",
+    "description": "湖北大学(武昌主校区)创新创业大楼",
     "latitude": 30.57948,
     "longitude": 114.324395,
     "map_x": 14.6,
     "map_y": 54.9,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "湖北大学(武昌主校区)双创大楼A座",
     "type": "商务住宅",
-    "description": "湖北大学(武昌主校区)双创大楼A座，来源于高德地图采点工具。",
+    "description": "湖北大学(武昌主校区)双创大楼A座",
     "latitude": 30.579096,
     "longitude": 114.323894,
     "map_x": 9.7,
     "map_y": 58.7,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "海文考研·保研(湖北大学校区)",
     "type": "校园地点",
-    "description": "海文考研·保研(湖北大学校区)，来源于高德地图采点工具。",
+    "description": "海文考研·保研(湖北大学校区)",
     "latitude": 30.578047,
     "longitude": 114.327709,
     "map_x": 46.9,
     "map_y": 69.2,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "湖北大学教育超市(天猫校园中商湖大店)",
     "type": "购物服务",
-    "description": "湖北大学教育超市(天猫校园中商湖大店)，来源于高德地图采点工具。",
+    "description": "湖北大学教育超市(天猫校园中商湖大店)",
     "latitude": 30.578089,
     "longitude": 114.327324,
     "map_x": 43.1,
     "map_y": 68.8,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "华图教育(湖北大学学习中心)",
     "type": "校园地点",
-    "description": "华图教育(湖北大学学习中心)，来源于高德地图采点工具。",
+    "description": "华图教育(湖北大学学习中心)",
     "latitude": 30.579244,
     "longitude": 114.324281,
     "map_x": 13.5,
     "map_y": 57.3,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "湖北大学(武昌主校区)-教4",
     "type": "校园地点",
-    "description": "湖北大学(武昌主校区)-教4，来源于高德地图采点工具。",
+    "description": "湖北大学(武昌主校区)-教4",
     "latitude": 30.579603,
     "longitude": 114.324753,
     "map_x": 18.1,
     "map_y": 53.7,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "新文道考研四六级(湖大校区)",
     "type": "校园地点",
-    "description": "新文道考研四六级(湖大校区)，来源于高德地图采点工具。",
+    "description": "新文道考研四六级(湖大校区)",
     "latitude": 30.579345,
     "longitude": 114.324394,
     "map_x": 14.6,
     "map_y": 56.3,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "湖北大学档案馆",
     "type": "校园地点",
-    "description": "湖北大学档案馆，来源于高德地图采点工具。",
+    "description": "湖北大学档案馆",
     "latitude": 30.58102,
     "longitude": 114.326694,
     "map_x": 37,
     "map_y": 39.6,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "湖北大学武昌校区校史馆",
     "type": "校园地点",
-    "description": "湖北大学武昌校区校史馆，来源于高德地图采点工具。",
+    "description": "湖北大学武昌校区校史馆",
     "latitude": 30.580551,
     "longitude": 114.329238,
     "map_x": 61.8,
     "map_y": 44.3,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "湖北大学武昌校区历史文化学院",
     "type": "校园地点",
-    "description": "湖北大学武昌校区历史文化学院，来源于高德地图采点工具。",
+    "description": "湖北大学武昌校区历史文化学院",
     "latitude": 30.577993,
     "longitude": 114.325041,
     "map_x": 20.9,
     "map_y": 69.7,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "湖北大学武昌校区物理学与电子科学学院",
     "type": "校园地点",
-    "description": "湖北大学武昌校区物理学与电子科学学院，来源于高德地图采点工具。",
+    "description": "湖北大学武昌校区物理学与电子科学学院",
     "latitude": 30.579419,
     "longitude": 114.325977,
     "map_x": 30,
     "map_y": 55.5,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "湖北大学艺术学院音乐系办公室",
     "type": "校园地点",
-    "description": "湖北大学艺术学院音乐系办公室，来源于高德地图采点工具。",
+    "description": "湖北大学艺术学院音乐系办公室",
     "latitude": 30.576592,
     "longitude": 114.326391,
     "map_x": 34,
     "map_y": 83.6,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "湖北大学(武昌主校区)-嘉会园小吃城",
     "type": "餐饮服务",
-    "description": "湖北大学(武昌主校区)-嘉会园小吃城，来源于高德地图采点工具。",
+    "description": "湖北大学(武昌主校区)-嘉会园小吃城",
     "latitude": 30.577602,
     "longitude": 114.327062,
     "map_x": 40.6,
     "map_y": 73.6,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "湖北大学-风华园",
     "type": "餐饮服务",
-    "description": "湖北大学-风华园，来源于高德地图采点工具。",
+    "description": "湖北大学-风华园",
     "latitude": 30.582087,
     "longitude": 114.331956,
     "map_x": 88.2,
     "map_y": 29,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "风华园食堂",
     "type": "餐饮服务",
-    "description": "风华园食堂，来源于高德地图采点工具。",
+    "description": "风华园食堂",
     "latitude": 30.577688,
     "longitude": 114.328337,
     "map_x": 53,
     "map_y": 72.7,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "湖北大学后勤集团饮食中心采购部",
     "type": "生活服务",
-    "description": "湖北大学后勤集团饮食中心采购部，来源于高德地图采点工具。",
+    "description": "湖北大学后勤集团饮食中心采购部",
     "latitude": 30.577689,
     "longitude": 114.327888,
     "map_x": 48.6,
     "map_y": 72.7,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "塔斯汀中国汉堡(武汉市武昌湖北大学校内店)",
     "type": "餐饮服务",
-    "description": "塔斯汀中国汉堡(武汉市武昌湖北大学校内店)，来源于高德地图采点工具。",
+    "description": "塔斯汀中国汉堡(武汉市武昌湖北大学校内店)",
     "latitude": 30.57624,
     "longitude": 114.326562,
     "map_x": 35.7,
     "map_y": 87.1,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "KSAK炸鸡汉堡(湖北大学店)",
     "type": "餐饮服务",
-    "description": "KSAK炸鸡汉堡(湖北大学店)，来源于高德地图采点工具。",
+    "description": "KSAK炸鸡汉堡(湖北大学店)",
     "latitude": 30.5779,
     "longitude": 114.326903,
     "map_x": 39,
     "map_y": 70.6,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "MINI-CO小咖咖啡(武汉湖北大学店)",
     "type": "餐饮服务",
-    "description": "MINI-CO小咖咖啡(武汉湖北大学店)，来源于高德地图采点工具。",
+    "description": "MINI-CO小咖咖啡(武汉湖北大学店)",
     "latitude": 30.57624,
     "longitude": 114.326562,
     "map_x": 35.7,
     "map_y": 87.1,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "大嘴正传砂锅鸡(湖北大学店)",
     "type": "餐饮服务",
-    "description": "大嘴正传砂锅鸡(湖北大学店)，来源于高德地图采点工具。",
+    "description": "大嘴正传砂锅鸡(湖北大学店)",
     "latitude": 30.576587,
     "longitude": 114.32632,
     "map_x": 33.3,
     "map_y": 83.7,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "小礼堂美食城",
     "type": "餐饮服务",
-    "description": "小礼堂美食城，来源于高德地图采点工具。",
+    "description": "小礼堂美食城",
     "latitude": 30.578089,
     "longitude": 114.327324,
     "map_x": 43.1,
     "map_y": 68.8,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "蜜雪冰城湖北大学后街店",
     "type": "餐饮服务",
-    "description": "蜜雪冰城湖北大学后街店，来源于高德地图采点工具。",
+    "description": "蜜雪冰城湖北大学后街店",
     "latitude": 30.581076,
     "longitude": 114.332339,
     "map_x": 92,
     "map_y": 39.1,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "贵州羊肉粉",
     "type": "餐饮服务",
-    "description": "贵州羊肉粉，来源于高德地图采点工具。",
+    "description": "贵州羊肉粉",
     "latitude": 30.577545,
     "longitude": 114.327217,
     "map_x": 42.1,
     "map_y": 74.2,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "舌尖大师铁板锅(湖北大学店)",
     "type": "餐饮服务",
-    "description": "舌尖大师铁板锅(湖北大学店)，来源于高德地图采点工具。",
+    "description": "舌尖大师铁板锅(湖北大学店)",
     "latitude": 30.576515,
     "longitude": 114.32625,
     "map_x": 32.7,
     "map_y": 84.4,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "九久煮艺(湖大店)",
     "type": "餐饮服务",
-    "description": "九久煮艺(湖大店)，来源于高德地图采点工具。",
+    "description": "九久煮艺(湖大店)",
     "latitude": 30.58143,
     "longitude": 114.332181,
     "map_x": 90.4,
     "map_y": 35.5,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "马记广式烧腊饭(湖大二分店)",
     "type": "餐饮服务",
-    "description": "马记广式烧腊饭(湖大二分店)，来源于高德地图采点工具。",
+    "description": "马记广式烧腊饭(湖大二分店)",
     "latitude": 30.581101,
     "longitude": 114.332105,
     "map_x": 89.7,
     "map_y": 38.8,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "睦记饭爷",
     "type": "餐饮服务",
-    "description": "睦记饭爷，来源于高德地图采点工具。",
+    "description": "睦记饭爷",
     "latitude": 30.575257,
     "longitude": 114.326343,
     "map_x": 33.6,
     "map_y": 96.9,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "肯德基(湖大外卖点店)",
     "type": "餐饮服务",
-    "description": "肯德基(湖大外卖点店)，来源于高德地图采点工具。",
+    "description": "肯德基(湖大外卖点店)",
     "latitude": 30.582043,
     "longitude": 114.331842,
     "map_x": 87.1,
     "map_y": 29.4,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "湖北大学团结学生公寓",
     "type": "商务住宅",
-    "description": "湖北大学团结学生公寓，来源于高德地图采点工具。",
+    "description": "湖北大学团结学生公寓",
     "latitude": 30.576011,
     "longitude": 114.328231,
     "map_x": 52,
     "map_y": 89.4,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "湖北大学团结学生公寓2栋",
     "type": "宿舍",
-    "description": "湖北大学团结学生公寓2栋，来源于高德地图采点工具。",
+    "description": "湖北大学团结学生公寓2栋",
     "latitude": 30.576154,
     "longitude": 114.327397,
     "map_x": 43.8,
     "map_y": 88,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "湖北大学武昌校区诚信公寓",
     "type": "宿舍",
-    "description": "湖北大学武昌校区诚信公寓，来源于高德地图采点工具。",
+    "description": "湖北大学武昌校区诚信公寓",
     "latitude": 30.58063,
     "longitude": 114.332431,
     "map_x": 92.9,
     "map_y": 43.5,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "湖北大学武昌校区二期公寓",
     "type": "宿舍",
-    "description": "湖北大学武昌校区二期公寓，来源于高德地图采点工具。",
+    "description": "湖北大学武昌校区二期公寓",
     "latitude": 30.576399,
     "longitude": 114.326738,
     "map_x": 37.4,
     "map_y": 85.6,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "湖北大学学术交流中心国际学生公寓管理服务部",
     "type": "校园地点",
-    "description": "湖北大学学术交流中心国际学生公寓管理服务部，来源于高德地图采点工具。",
+    "description": "湖北大学学术交流中心国际学生公寓管理服务部",
     "latitude": 30.577207,
     "longitude": 114.328017,
     "map_x": 49.9,
     "map_y": 77.5,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "林成快印(湖北大学一期学生公寓店)",
     "type": "生活服务",
-    "description": "林成快印(湖北大学一期学生公寓店)，来源于高德地图采点工具。",
+    "description": "林成快印(湖北大学一期学生公寓店)",
     "latitude": 30.581289,
     "longitude": 114.331633,
     "map_x": 85.1,
     "map_y": 36.9,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "祝芝兰·手作东方茶(湖北大学店)",
     "type": "餐饮服务",
-    "description": "祝芝兰·手作东方茶(湖北大学店)，来源于高德地图采点工具。",
+    "description": "祝芝兰·手作东方茶(湖北大学店)",
     "latitude": 30.58138,
     "longitude": 114.332131,
     "map_x": 89.9,
     "map_y": 36,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "luckin coffee 瑞幸咖啡(湖北大学风华店)",
     "type": "餐饮服务",
-    "description": "luckin coffee 瑞幸咖啡(湖北大学风华店)，来源于高德地图采点工具。",
+    "description": "luckin coffee 瑞幸咖啡(湖北大学风华店)",
     "latitude": 30.581822,
     "longitude": 114.331607,
     "map_x": 84.8,
     "map_y": 31.6,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "蒸福包子(湖北大学东门店)",
     "type": "餐饮服务",
-    "description": "蒸福包子(湖北大学东门店)，来源于高德地图采点工具。",
+    "description": "蒸福包子(湖北大学东门店)",
     "latitude": 30.581581,
     "longitude": 114.331582,
     "map_x": 84.6,
     "map_y": 34,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "茶百道(武汉湖北大学校内店)",
     "type": "餐饮服务",
-    "description": "茶百道(武汉湖北大学校内店)，来源于高德地图采点工具。",
+    "description": "茶百道(武汉湖北大学校内店)",
     "latitude": 30.58209,
     "longitude": 114.331986,
     "map_x": 88.5,
     "map_y": 29,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "正新鸡排(武昌校区湖北大学店)",
     "type": "餐饮服务",
-    "description": "正新鸡排(武昌校区湖北大学店)，来源于高德地图采点工具。",
+    "description": "正新鸡排(武昌校区湖北大学店)",
     "latitude": 30.581769,
     "longitude": 114.331723,
     "map_x": 86,
     "map_y": 32.2,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "HiFitness嗨健身(湖大校园店)",
     "type": "体育设施",
-    "description": "HiFitness嗨健身(湖大校园店)，来源于高德地图采点工具。",
+    "description": "HiFitness嗨健身(湖大校园店)",
     "latitude": 30.581723,
     "longitude": 114.331803,
     "map_x": 86.7,
     "map_y": 32.6,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "湖北大学武昌校区1号体育馆",
     "type": "体育设施",
-    "description": "湖北大学武昌校区1号体育馆，来源于高德地图采点工具。",
+    "description": "湖北大学武昌校区1号体育馆",
     "latitude": 30.579271,
     "longitude": 114.330728,
     "map_x": 76.3,
     "map_y": 57,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "湖北大学武昌校区2号体育馆",
     "type": "体育设施",
-    "description": "湖北大学武昌校区2号体育馆，来源于高德地图采点工具。",
+    "description": "湖北大学武昌校区2号体育馆",
     "latitude": 30.582267,
     "longitude": 114.329697,
     "map_x": 66.2,
     "map_y": 27.2,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "湖北大学武昌校区3号体育馆",
     "type": "体育设施",
-    "description": "湖北大学武昌校区3号体育馆，来源于高德地图采点工具。",
+    "description": "湖北大学武昌校区3号体育馆",
     "latitude": 30.583726,
     "longitude": 114.330122,
     "map_x": 70.4,
     "map_y": 12.7,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "湖北大学校内训练场",
     "type": "体育设施",
-    "description": "湖北大学校内训练场，来源于高德地图采点工具。",
+    "description": "湖北大学校内训练场",
     "latitude": 30.584769,
     "longitude": 114.330226,
     "map_x": 71.4,
     "map_y": 2.3,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "湖北大学武昌校区网球场",
     "type": "体育设施",
-    "description": "湖北大学武昌校区网球场，来源于高德地图采点工具。",
+    "description": "湖北大学武昌校区网球场",
     "latitude": 30.584205,
     "longitude": 114.329537,
     "map_x": 64.7,
     "map_y": 8,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "湖北大学武昌校区排球场",
     "type": "体育设施",
-    "description": "湖北大学武昌校区排球场，来源于高德地图采点工具。",
+    "description": "湖北大学武昌校区排球场",
     "latitude": 30.580459,
     "longitude": 114.331723,
     "map_x": 86,
     "map_y": 45.2,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "湖北大学武昌校区1号篮球场",
     "type": "体育设施",
-    "description": "湖北大学武昌校区1号篮球场，来源于高德地图采点工具。",
+    "description": "湖北大学武昌校区1号篮球场",
     "latitude": 30.579624,
     "longitude": 114.329772,
     "map_x": 67,
     "map_y": 53.5,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "奥雅网球培训中心(湖北大学店)",
     "type": "校园地点",
-    "description": "奥雅网球培训中心(湖北大学店)，来源于高德地图采点工具。",
+    "description": "奥雅网球培训中心(湖北大学店)",
     "latitude": 30.578981,
     "longitude": 114.328581,
     "map_x": 55.4,
     "map_y": 59.9,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "湖悦健身",
     "type": "体育设施",
-    "description": "湖悦健身，来源于高德地图采点工具。",
+    "description": "湖悦健身",
     "latitude": 30.577602,
     "longitude": 114.327062,
     "map_x": 40.6,
     "map_y": 73.6,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "求索广场",
     "type": "风景名胜",
-    "description": "求索广场，来源于高德地图采点工具。",
+    "description": "求索广场",
     "latitude": 30.580464,
     "longitude": 114.32834,
     "map_x": 53,
     "map_y": 45.1,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "菜鸟驿站(武昌校区湖北大学店)",
     "type": "生活服务",
-    "description": "菜鸟驿站(武昌校区湖北大学店)，来源于高德地图采点工具。",
+    "description": "菜鸟驿站(武昌校区湖北大学店)",
     "latitude": 30.577513,
     "longitude": 114.325345,
     "map_x": 23.8,
     "map_y": 74.5,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "诚信公寓菜鸟驿站(七星路店)",
     "type": "生活服务",
-    "description": "诚信公寓菜鸟驿站(七星路店)，来源于高德地图采点工具。",
+    "description": "诚信公寓菜鸟驿站(七星路店)",
     "latitude": 30.580789,
     "longitude": 114.332968,
     "map_x": 98.1,
     "map_y": 41.9,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "顺丰速运(武昌校区湖北大学店)",
     "type": "生活服务",
-    "description": "顺丰速运(武昌校区湖北大学店)，来源于高德地图采点工具。",
+    "description": "顺丰速运(武昌校区湖北大学店)",
     "latitude": 30.577744,
     "longitude": 114.325292,
     "map_x": 23.3,
     "map_y": 72.2,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "学府尚成超市(湖北大学店)",
     "type": "购物服务",
-    "description": "学府尚成超市(湖北大学店)，来源于高德地图采点工具。",
+    "description": "学府尚成超市(湖北大学店)",
     "latitude": 30.576443,
     "longitude": 114.326291,
     "map_x": 33.1,
     "map_y": 85.1,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "湖北大学教育超市炫彩屋",
     "type": "生活服务",
-    "description": "湖北大学教育超市炫彩屋，来源于高德地图采点工具。",
+    "description": "湖北大学教育超市炫彩屋",
     "latitude": 30.578123,
     "longitude": 114.32719,
     "map_x": 41.8,
     "map_y": 68.4,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "有家便利店(湖北大学店)",
     "type": "购物服务",
-    "description": "有家便利店(湖北大学店)，来源于高德地图采点工具。",
+    "description": "有家便利店(湖北大学店)",
     "latitude": 30.576383,
     "longitude": 114.326532,
     "map_x": 35.4,
     "map_y": 85.7,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "爱便利(武昌校区湖北大学店)",
     "type": "购物服务",
-    "description": "爱便利(武昌校区湖北大学店)，来源于高德地图采点工具。",
+    "description": "爱便利(武昌校区湖北大学店)",
     "latitude": 30.575677,
     "longitude": 114.327512,
     "map_x": 45,
     "map_y": 92.7,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "乐尔乐特价批发超市(湖北大学店)",
     "type": "购物服务",
-    "description": "乐尔乐特价批发超市(湖北大学店)，来源于高德地图采点工具。",
+    "description": "乐尔乐特价批发超市(湖北大学店)",
     "latitude": 30.581571,
     "longitude": 114.332429,
     "map_x": 92.8,
     "map_y": 34.1,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "可多便利湖北大学店(团结大道店)",
     "type": "购物服务",
-    "description": "可多便利湖北大学店(团结大道店)，来源于高德地图采点工具。",
+    "description": "可多便利湖北大学店(团结大道店)",
     "latitude": 30.576242,
     "longitude": 114.32679,
     "map_x": 37.9,
     "map_y": 87.1,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "中百罗森(湖北大学店)",
     "type": "购物服务",
-    "description": "中百罗森(湖北大学店)，来源于高德地图采点工具。",
+    "description": "中百罗森(湖北大学店)",
     "latitude": 30.576375,
     "longitude": 114.326352,
     "map_x": 33.7,
     "map_y": 85.8,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "湖北大学联通校园网办理点",
     "type": "生活服务",
-    "description": "湖北大学联通校园网办理点，来源于高德地图采点工具。",
+    "description": "湖北大学联通校园网办理点",
     "latitude": 30.57803,
     "longitude": 114.327214,
     "map_x": 42,
     "map_y": 69.3,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "库迪咖啡(湖北大学武昌校区店)",
     "type": "餐饮服务",
-    "description": "库迪咖啡(湖北大学武昌校区店)，来源于高德地图采点工具。",
+    "description": "库迪咖啡(湖北大学武昌校区店)",
     "latitude": 30.578267,
     "longitude": 114.327281,
     "map_x": 42.7,
     "map_y": 67,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "有家便利店(湖大二店)",
     "type": "购物服务",
-    "description": "有家便利店(湖大二店)，来源于高德地图采点工具。",
+    "description": "有家便利店(湖大二店)",
     "latitude": 30.581649,
     "longitude": 114.331648,
     "map_x": 85.2,
     "map_y": 33.4,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "湖北大学文创中心",
     "type": "生活服务",
-    "description": "湖北大学文创中心，来源于高德地图采点工具。",
+    "description": "湖北大学文创中心",
     "latitude": 30.577743,
     "longitude": 114.326094,
     "map_x": 31.1,
     "map_y": 72.2,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "湖大数码文印中心",
     "type": "生活服务",
-    "description": "湖大数码文印中心，来源于高德地图采点工具。",
+    "description": "湖大数码文印中心",
     "latitude": 30.578087,
     "longitude": 114.32735,
     "map_x": 43.4,
     "map_y": 68.8,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "兄弟广告(团结大道店)",
     "type": "生活服务",
-    "description": "兄弟广告(团结大道店)，来源于高德地图采点工具。",
+    "description": "兄弟广告(团结大道店)",
     "latitude": 30.575591,
     "longitude": 114.327254,
     "map_x": 42.4,
     "map_y": 93.6,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "捷力图文广告",
     "type": "生活服务",
-    "description": "捷力图文广告，来源于高德地图采点工具。",
+    "description": "捷力图文广告",
     "latitude": 30.575502,
     "longitude": 114.326986,
     "map_x": 39.8,
     "map_y": 94.5,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "湖北大学武昌校区内部地面停车场",
     "type": "交通设施服务",
-    "description": "湖北大学武昌校区内部地面停车场，来源于高德地图采点工具。",
+    "description": "湖北大学武昌校区内部地面停车场",
     "latitude": 30.578069,
     "longitude": 114.327781,
     "map_x": 47.6,
     "map_y": 69,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "文汇书店(湖北大学武昌校区店)",
     "type": "购物服务",
-    "description": "文汇书店(湖北大学武昌校区店)，来源于高德地图采点工具。",
+    "description": "文汇书店(湖北大学武昌校区店)",
     "latitude": 30.577745,
     "longitude": 114.326105,
     "map_x": 31.2,
     "map_y": 72.2,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "湖北大学武昌校区南门外卖柜",
     "type": "校园地点",
-    "description": "湖北大学武昌校区南门外卖柜，来源于高德地图采点工具。",
+    "description": "湖北大学武昌校区南门外卖柜",
     "latitude": 30.576039,
     "longitude": 114.328487,
     "map_x": 54.4,
     "map_y": 89.1,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "湖大驾校(青盟总校)报名处",
     "type": "生活服务",
-    "description": "湖大驾校(青盟总校)报名处，来源于高德地图采点工具。",
+    "description": "湖大驾校(青盟总校)报名处",
     "latitude": 30.584783,
     "longitude": 114.330187,
     "map_x": 71,
     "map_y": 2.2,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "湖北大学武昌校区综合实训大楼",
     "type": "实验楼",
-    "description": "湖北大学武昌校区综合实训大楼，来源于高德地图采点工具。",
+    "description": "湖北大学武昌校区综合实训大楼",
     "latitude": 30.582532,
     "longitude": 114.328883,
     "map_x": 58.3,
     "map_y": 24.6,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "3号教学楼",
     "type": "教学楼",
-    "description": "3号教学楼，来源于高德地图采点工具。",
+    "description": "3号教学楼",
     "latitude": 30.579106,
     "longitude": 114.325606,
     "map_x": 26.4,
     "map_y": 58.6,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "一号体育场",
     "type": "体育设施",
-    "description": "一号体育场，来源于高德地图采点工具。",
+    "description": "一号体育场",
     "latitude": 30.579942,
     "longitude": 114.330802,
     "map_x": 77,
     "map_y": 50.3,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "5号教学楼",
     "type": "教学楼",
-    "description": "5号教学楼，来源于高德地图采点工具。",
+    "description": "5号教学楼",
     "latitude": 30.580204,
     "longitude": 114.3253,
     "map_x": 23.4,
     "map_y": 47.7,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   },
   {
     "name": "6号教学楼",
     "type": "教学楼",
-    "description": "6号教学楼，来源于高德地图采点工具。",
+    "description": "6号教学楼",
     "latitude": 30.580178,
     "longitude": 114.326507,
     "map_x": 35.2,
     "map_y": 48,
-    "walk_hint": "来自真实地图采点，建议演示前人工确认名称和位置。"
+    "walk_hint": null
   }
 ]

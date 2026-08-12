@@ -23,7 +23,7 @@ export default mergeConfig(
           'src/main.ts'
         ],
         thresholds: {
-          // 以当前全量统计结果作为诚实基线，后续只允许提高，不允许回退。
+          // 覆盖率门槛基于全量生产源码统计。
           statements: 60,
           branches: 62,
           functions: 57,

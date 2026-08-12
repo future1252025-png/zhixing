@@ -38,11 +38,4 @@
 
 ## 测试体系
 
-```text
-backend: 379 passed, 2 skipped
-frontend: 46 files, 312 passed
-desktop/mobile Playwright core journey: passed
-Android unit tests and debug APK build: passed
-```
-
-测试覆盖 API、数据库迁移、周次解析、导入策略、地图交互、定位、UI 核心状态和真实用户流程。
+测试覆盖 API、数据库迁移、周次解析、导入策略、地图交互、定位、UI 核心状态和桌面/手机核心用户旅程，并验证 Android Release lint、APK 与 AAB 构建。当前精确基线见 [测试报告](TEST_REPORT.md)。

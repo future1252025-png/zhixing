@@ -41,8 +41,8 @@ describe('Android production build policy', () => {
   })
 
   it('requires a non-placeholder AMap key and a public proxy endpoint', () => {
-    expect(validateProductionAmapKey('0123456789abcdef0123456789abcdef')).toBe(
-      '0123456789abcdef0123456789abcdef'
+    expect(validateProductionAmapKey('valid_amap_key_for_tests')).toBe(
+      'valid_amap_key_for_tests'
     )
     expect(
       validateProductionAmapServiceHost('https://app.campusmind.cn/_AMapService/')
@@ -64,7 +64,7 @@ describe('Android production build policy', () => {
   it('rejects a production bundle that embeds the AMap security code', () => {
     expect(() => validateProductionAndroidEnv({
       VITE_API_BASE_URL: 'https://api.campusmind.cn',
-      VITE_AMAP_KEY: '0123456789abcdef0123456789abcdef',
+      VITE_AMAP_KEY: 'valid_amap_key_for_tests',
       VITE_AMAP_SECURITY_CODE: 'must-not-be-bundled',
       VITE_AMAP_SERVICE_HOST: 'https://app.campusmind.cn/_AMapService'
     })).toThrow(/VITE_AMAP_SECURITY_CODE/)
@@ -181,7 +181,7 @@ describe('Android production build policy', () => {
   it('reverse-checks the generated production bundle configuration', () => {
     const env = {
       VITE_API_BASE_URL: 'https://api.campusmind.cn',
-      VITE_AMAP_KEY: '0123456789abcdef0123456789abcdef',
+      VITE_AMAP_KEY: 'valid_amap_key_for_tests',
       VITE_AMAP_SECURITY_CODE: '',
       VITE_AMAP_SERVICE_HOST: 'https://app.campusmind.cn/_AMapService'
     }

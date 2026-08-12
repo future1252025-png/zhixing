@@ -34,9 +34,7 @@ campusmind/
 │   ├── src/                 Vue 应用
 │   ├── e2e/                 Playwright 核心流程
 │   └── android/             Capacitor Android 工程
-├── docs/                    当前运行、架构、测试与演示文档
-├── deliverables/            课程设计交付材料
-└── tools/                   交付材料辅助脚本
+└── docs/                    当前运行、架构、测试与演示文档
 ```
 
 ## 快速启动
@@ -46,14 +44,14 @@ campusmind/
 ```powershell
 cd backend
 python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe -m pip install --require-hashes -r requirements.lock
 .\.venv\Scripts\python.exe -m alembic upgrade head
 .\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
 健康检查：`http://127.0.0.1:8000/health`
 
-开发环境首次启动会在忽略提交的 `backend/data/.jwt-secret` 中生成本地持久密钥，后端重启不会再让登录立即失效。生产环境仍必须显式设置 `JWT_SECRET_KEY`。
+开发环境首次启动会在 `backend/data/.jwt-secret` 中生成本地持久密钥，后端重启不会再让登录立即失效；该本地文件位于 `.gitignore` 排除范围内。生产环境仍必须显式设置 `JWT_SECRET_KEY`。
 
 ### 网页前端
 
@@ -68,7 +66,7 @@ npm run dev
 
 ### Android
 
-实体手机必须使用手机能够访问的后端地址，不能把 `127.0.0.1` 当作电脑：
+实体手机访问电脑后端时需要使用手机可达的地址；手机内的 `127.0.0.1` 指向手机自身：
 
 ```powershell
 cd frontend
@@ -96,12 +94,7 @@ cd android
 
 ## 当前验证基线
 
-截至 2026-08-07：
-
-- 后端：`389 passed, 2 skipped`
-- 前端：`50` 个测试文件、`329 passed`，覆盖率门槛通过
-- Playwright：桌面与手机视口核心用户流程通过
-- Android：JUnit、Debug/Release 单元测试任务和 Debug APK 构建通过
+自动化验证覆盖后端、前端、桌面与手机视口核心旅程，以及 Android Release 构建。当前提交对应的精确结果和验证链接统一记录在 [测试报告](docs/TEST_REPORT.md) 中。
 
 ## 文档入口
 
@@ -114,10 +107,10 @@ cd android
 
 ## 配置安全
 
-- 不提交 `.env.local`、`.env.android.local`、数据库、日志、APK 和构建目录。
-- Android 发布包应连接 HTTPS 后端。
+- `.env.local`、`.env.android.local`、数据库、日志、APK 和构建目录均位于版本控制排除范围内。
+- Android 发布配置使用 HTTPS 后端。
 - 访问令牌默认 30 分钟且只驻留内存；刷新会话空闲 30 天、最长 90 天。网页刷新令牌使用 `HttpOnly + SameSite=Strict` Cookie，Android 使用 Keystore 加密存储，并在每次续期后轮换。
-- 高德生产环境推荐使用 `VITE_AMAP_SERVICE_HOST` 代理安全密钥，不把安全密钥写入客户端。
+- 高德生产环境通过 `VITE_AMAP_SERVICE_HOST` 使用服务端代理，安全密钥仅保存在服务端。
 
 ## License
 

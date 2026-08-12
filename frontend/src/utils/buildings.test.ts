@@ -45,13 +45,10 @@ describe('building helpers', () => {
     expect(formatBuildingDisplayName('湖北大学（武昌校区）')).toBe('湖北大学（武昌校区）')
   })
 
-  it('filters internal collection notes from user-facing detail copy only', () => {
-    expect(formatBuildingDescription('双创大楼A座，来源于高德地图采点工具。'))
-      .toBe('双创大楼A座')
-    expect(formatBuildingDescription('来源于高德地图采点工具。'))
-      .toBe('校园里的常用地点。')
-    expect(formatBuildingWalkHint('来自真实地图采点，建议演示前人工确认名称和位置。'))
-      .toBe('校园内步行可达')
+  it('normalizes optional detail copy and provides readable fallbacks', () => {
+    expect(formatBuildingDescription('  双创大楼A座  ')).toBe('双创大楼A座')
+    expect(formatBuildingDescription(null)).toBe('校园里的常用地点。')
+    expect(formatBuildingWalkHint('')).toBe('校园内步行可达')
     expect(formatBuildingWalkHint('从南门沿主路步行约 5 分钟。'))
       .toBe('从南门沿主路步行约 5 分钟。')
   })

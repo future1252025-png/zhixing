@@ -72,6 +72,12 @@ describe('mobile input policy', () => {
     expect(source.match(/class="collector-input"/g)).toHaveLength(4)
     expect(source).toMatch(/\.collector-input \{[\s\S]*?min-height:\s*44px;[\s\S]*?font-size:\s*16px;/)
   })
+
+  it('exports map points without internal collection notes', () => {
+    const source = frontendFile('src/pages/MapCollectorPage.vue')
+    expect(source).toContain('description: point.name')
+    expect(source).toContain('walk_hint: null')
+  })
 })
 
 describe('native safe-area policy', () => {

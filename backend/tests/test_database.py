@@ -1,5 +1,6 @@
 from datetime import date
 import errno
+import json
 import os
 from pathlib import Path
 from threading import Event, Thread
@@ -319,6 +320,7 @@ def test_migration_lock_does_not_turn_permanent_os_error_into_timeout(
 
 def test_map_points_seed_file_loads_common_campus_points() -> None:
     points = load_map_points_seed()
+    raw_points = json.loads(MAP_POINTS_SEED_FILE.read_text(encoding="utf-8"))
 
     assert MAP_POINTS_SEED_FILE.exists()
     assert len(points) >= 60
@@ -326,6 +328,9 @@ def test_map_points_seed_file_loads_common_campus_points() -> None:
     assert len(DEMO_BUILDINGS) == len(points)
     assert "湖北大学武昌校区图书馆" in {point["name"] for point in points}
     assert "湖北大学武昌校区计算机学院" in {point["name"] for point in points}
+    assert all(point["description"] == point["name"] for point in raw_points)
+    assert all(point["walk_hint"] is None for point in raw_points)
+    assert all(point["walk_hint"] is None for point in points)
 
 
 def test_seed_demo_data_writes_core_records(tmp_path: Path) -> None:

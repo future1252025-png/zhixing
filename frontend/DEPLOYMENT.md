@@ -11,7 +11,7 @@ X-Content-Type-Options: nosniff
 Referrer-Policy: strict-origin-when-cross-origin
 ```
 
-当前 CSP 只限制 `frame-ancestors`，不会拦截高德地图脚本、地图资源或浏览器定位。不要用 `<meta>` 声明 `frame-ancestors`；浏览器只在 HTTP 响应头中执行该指令。
+当前 CSP 只限制 `frame-ancestors`，不会拦截高德地图脚本、地图资源或浏览器定位。浏览器只在 HTTP 响应头中执行 `frame-ancestors`，`<meta>` 声明不会生效。
 
 ## 高德安全密钥代理模式（生产推荐）
 

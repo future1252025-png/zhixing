@@ -21,10 +21,9 @@
 
 ## 工程验证
 
-- 后端 `379 passed, 2 skipped`。
-- 前端 `46` 个测试文件、`312 passed`。
+- 后端与前端自动化测试结果，精确基线见 [测试报告](TEST_REPORT.md)。
 - Playwright 桌面与手机核心流程。
-- Android Gradle 测试和 Debug APK 构建。
+- Android Gradle 测试、Release lint、APK 与 AAB 构建。
 - 干净的 `git status -sb`。
 
-截图中的账号、学号、真实姓名、头像、IP、API Key 和定位坐标应先脱敏。
+公开截图范围不包含账号、学号、真实姓名、头像、IP、API Key 或精确定位坐标。
