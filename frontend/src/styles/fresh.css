@@ -205,8 +205,7 @@ html.capacitor-android #semester-settings {
   scroll-margin-top: calc(var(--app-safe-area-top) + var(--nav-height, 58px) + 44px);
 }
 
-/* Keep the three primary section titles close to the system bar while leaving
-   a clear, consistent break before their first content card. */
+/* Keep only the three primary section titles at a consistent native top gap. */
 html.capacitor-android .courses-page > .van-nav-bar,
 html.capacitor-android .schedule-page > .van-nav-bar,
 html.capacitor-android .profile-page > .van-nav-bar {
@@ -216,13 +215,8 @@ html.capacitor-android .profile-page > .van-nav-bar {
 }
 
 html.capacitor-android .courses-page > .van-nav-bar + .page-content,
-html.capacitor-android .schedule-page > .van-nav-bar + .page-content,
-html.capacitor-android .profile-page > .van-nav-bar + .page-content {
-  padding-top: 20px;
-}
-
-html.capacitor-android .courses-page #semester-settings {
-  margin-top: 0;
+html.capacitor-android .schedule-page > .van-nav-bar + .page-content {
+  padding-top: 40px;
 }
 
 .van-nav-bar::after {

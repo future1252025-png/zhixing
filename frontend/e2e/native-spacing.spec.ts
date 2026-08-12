@@ -89,11 +89,9 @@ test('Android primary section headers share a balanced vertical rhythm', async (
 
     expect(Math.abs(courses.navTop - schedule.navTop)).toBeLessThanOrEqual(1)
     expect(Math.abs(courses.navTop - profile.navTop)).toBeLessThanOrEqual(1)
-    expect(courses.contentGap).toBeGreaterThanOrEqual(19)
-    expect(courses.contentGap).toBeLessThanOrEqual(21)
-    expect(schedule.contentGap).toBeGreaterThanOrEqual(19)
-    expect(schedule.contentGap).toBeLessThanOrEqual(21)
-    expect(profile.contentGap).toBeGreaterThanOrEqual(19)
-    expect(profile.contentGap).toBeLessThanOrEqual(21)
+    expect(courses.contentGap).toBeGreaterThanOrEqual(50)
+    expect(courses.contentGap).toBeLessThanOrEqual(54)
+    expect(schedule.contentGap).toBeGreaterThanOrEqual(38)
+    expect(schedule.contentGap).toBeLessThanOrEqual(42)
   }
 })

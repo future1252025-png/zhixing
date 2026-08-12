@@ -100,8 +100,7 @@ describe('native safe-area policy', () => {
     expect(source).toMatch(/html\.capacitor-android #semester-settings \{[\s\S]*?margin-top:\s*12px;/)
     expect(source).toMatch(/html\.capacitor-android #semester-settings \{[\s\S]*?scroll-margin-top:\s*calc\(var\(--app-safe-area-top\) \+ var\(--nav-height, 58px\) \+ 44px\);/)
     expect(source).toMatch(/html\.capacitor-android \.courses-page > \.van-nav-bar,[\s\S]*?html\.capacitor-android \.schedule-page > \.van-nav-bar,[\s\S]*?html\.capacitor-android \.profile-page > \.van-nav-bar \{[\s\S]*?position:\s*sticky;[\s\S]*?top:\s*var\(--app-native-nav-inset-top\);[\s\S]*?margin-top:\s*calc\(var\(--app-native-nav-inset-top\) \+ 20px\);/)
-    expect(source).toMatch(/html\.capacitor-android \.courses-page > \.van-nav-bar \+ \.page-content,[\s\S]*?html\.capacitor-android \.schedule-page > \.van-nav-bar \+ \.page-content,[\s\S]*?html\.capacitor-android \.profile-page > \.van-nav-bar \+ \.page-content \{[\s\S]*?padding-top:\s*20px;/)
-    expect(source).toMatch(/html\.capacitor-android \.courses-page #semester-settings \{[\s\S]*?margin-top:\s*0;/)
+    expect(source).toMatch(/html\.capacitor-android \.courses-page > \.van-nav-bar \+ \.page-content,[\s\S]*?html\.capacitor-android \.schedule-page > \.van-nav-bar \+ \.page-content \{[\s\S]*?padding-top:\s*40px;/)
   })
 
   it('keeps mobile login validation below a full-width input body', () => {
