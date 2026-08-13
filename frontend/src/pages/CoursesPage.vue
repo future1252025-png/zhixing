@@ -140,19 +140,13 @@ function isNowSlot(weekday: number, slot: { start_time: string; end_time: string
 // 左右滑动切周：横向位移明显大于纵向才触发，避免与纵向滚动打架
 let touchStartX = 0
 let touchStartY = 0
-let touchCanChangeWeek = true
 
 function handleWeekTouchStart(event: TouchEvent) {
   touchStartX = event.touches[0]?.clientX ?? 0
   touchStartY = event.touches[0]?.clientY ?? 0
-  const stage = event.currentTarget as HTMLElement | null
-  const viewport = stage?.querySelector<HTMLElement>('.timetable-viewport')
-  // 手机课表用横向滚动阅读七天；此时横向手势只滚表格，不再偷偷切周。
-  touchCanChangeWeek = !viewport || viewport.scrollWidth <= viewport.clientWidth + 1
 }
 
 function handleWeekTouchEnd(event: TouchEvent) {
-  if (!touchCanChangeWeek) return
   const touch = event.changedTouches[0]
   if (!touch) return
   const deltaX = touch.clientX - touchStartX
@@ -596,8 +590,6 @@ onBeforeUnmount(() => {
           <span><i></i> {{ courseCountText }}</span>
         </header>
 
-        <p class="timetable-scroll-hint">左右滑动课表，查看周一到周日</p>
-
         <div
           ref="timetableTransitionFrameRef"
           class="timetable-transition-frame"
@@ -617,7 +609,7 @@ onBeforeUnmount(() => {
               @touchstart.passive="handleWeekTouchStart"
               @touchend.passive="handleWeekTouchEnd"
             >
-              <div class="timetable-viewport" aria-label="周课表，手机端可横向滑动查看周一到周日">
+              <div class="timetable-viewport" aria-label="完整展示周一到周日的周课表">
               <div class="week-head" aria-hidden="true">
                 <div class="time-head"><span>时间</span></div>
                 <div
@@ -1240,10 +1232,6 @@ onBeforeUnmount(() => {
   background: var(--fresh-leaf);
 }
 
-.timetable-scroll-hint {
-  display: none;
-}
-
 .timetable-viewport {
   border-top: 1px solid var(--fresh-line);
   overflow: visible;
@@ -1699,36 +1687,6 @@ onBeforeUnmount(() => {
     padding: 0;
   }
 
-  .timetable-scroll-hint {
-    display: flex;
-    min-height: 36px;
-    align-items: center;
-    margin: 0;
-    border-top: 1px solid var(--fresh-line);
-    background: #f6f7fb;
-    color: #536158;
-    font-size: 12px;
-    padding: 0 13px;
-  }
-
-  .timetable-viewport {
-    overflow-x: auto;
-    overflow-y: hidden;
-    overscroll-behavior-inline: contain;
-    scrollbar-width: thin;
-    touch-action: pan-x pan-y;
-  }
-
-  .week-head,
-  .timetable-grid {
-    width: 780px;
-    min-width: 780px;
-  }
-
-  .week-head {
-    position: relative;
-    top: auto;
-  }
 }
 
 @media (max-width: 370px) {

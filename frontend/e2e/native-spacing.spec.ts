@@ -29,7 +29,7 @@ async function measureVerticalRhythm(
   }, { pageSelector, firstContentSelector })
 }
 
-test('Android course and departure headers share a balanced vertical rhythm', async ({ page }) => {
+test('Android primary headers keep a compact top gap and equal content gaps', async ({ page }) => {
   await page.addInitScript(() => {
     document.documentElement.classList.add('capacitor-native', 'capacitor-android')
   })
@@ -66,17 +66,30 @@ test('Android course and departure headers share a balanced vertical rhythm', as
       '.schedule-content > .journey-hero'
     )
 
-    for (const rhythm of [courses, schedule]) {
+    await page.evaluate(() => {
+      document.body.innerHTML = `
+        <section class="page profile-page">
+          <div class="van-nav-bar"><div class="van-nav-bar__content"></div></div>
+          <div class="page-content profile-content"><div class="profile-hero"></div></div>
+        </section>
+      `
+    })
+    const profile = await measureVerticalRhythm(
+      page,
+      '.profile-page',
+      '.profile-content > .profile-hero'
+    )
+
+    for (const rhythm of [courses, schedule, profile]) {
       expect(rhythm.navTop - nativeInset).toBeGreaterThanOrEqual(10)
-      expect(rhythm.navTop - nativeInset).toBeLessThanOrEqual(16)
+      expect(rhythm.navTop - nativeInset).toBeLessThanOrEqual(14)
       expect(rhythm.navHeight).toBeGreaterThanOrEqual(58)
       expect(rhythm.navHeight).toBeLessThanOrEqual(62)
+      expect(rhythm.contentGap).toBeGreaterThanOrEqual(7)
+      expect(rhythm.contentGap).toBeLessThanOrEqual(9)
     }
 
     expect(Math.abs(courses.navTop - schedule.navTop)).toBeLessThanOrEqual(1)
-    expect(courses.contentGap).toBeGreaterThanOrEqual(50)
-    expect(courses.contentGap).toBeLessThanOrEqual(54)
-    expect(schedule.contentGap).toBeGreaterThanOrEqual(38)
-    expect(schedule.contentGap).toBeLessThanOrEqual(42)
+    expect(Math.abs(courses.navTop - profile.navTop)).toBeLessThanOrEqual(1)
   }
 })

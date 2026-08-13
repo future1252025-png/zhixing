@@ -203,26 +203,10 @@ test('core journey keeps weeks, locations, sessions, text, and actions trustwort
   ])
   await expect(page.locator('.timetable-slot').first().locator('.course-cell')).toHaveCount(7)
   await expect(page.locator('.week-head .weekday-head:visible')).toHaveCount(7)
-  const timetableMetrics = await page.locator('.timetable-viewport').evaluate((viewport) => ({
-    clientWidth: viewport.clientWidth,
-    scrollWidth: viewport.scrollWidth,
-    firstDayWidth: viewport.querySelector('.weekday-head')?.getBoundingClientRect().width ?? 0
-  }))
-  if (projectSuffix === 'mobile') {
-    expect(timetableMetrics.scrollWidth).toBeGreaterThan(timetableMetrics.clientWidth + 100)
-    expect(timetableMetrics.firstDayWidth).toBeGreaterThanOrEqual(90)
-    await expect(page.locator('.timetable-scroll-hint')).toBeVisible()
-    const sundayIsReachable = await page.locator('.timetable-viewport').evaluate((viewport) => {
-      viewport.scrollLeft = viewport.scrollWidth
-      const sunday = viewport.querySelectorAll('.weekday-head')[6]?.getBoundingClientRect()
-      const bounds = viewport.getBoundingClientRect()
-      return Boolean(sunday && sunday.left >= bounds.left - 1 && sunday.right <= bounds.right + 1)
-    })
-    expect(sundayIsReachable).toBe(true)
-  } else {
-    expect(timetableMetrics.scrollWidth).toBeLessThanOrEqual(timetableMetrics.clientWidth + 1)
-    await expect(page.locator('.timetable-scroll-hint')).toBeHidden()
-  }
+  const timetableFitsViewport = await page.locator('.timetable-viewport').evaluate((viewport) =>
+    viewport.scrollWidth <= viewport.clientWidth + 1
+  )
+  expect(timetableFitsViewport).toBe(true)
   const timetableBounds = await page.locator('.timetable-shell').evaluate((timetable) => {
     const bounds = timetable.getBoundingClientRect()
     return { left: bounds.left, right: bounds.right, viewportWidth: window.innerWidth }

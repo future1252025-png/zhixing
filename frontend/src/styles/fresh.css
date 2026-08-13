@@ -205,10 +205,27 @@ html.capacitor-android #semester-settings {
   scroll-margin-top: calc(var(--app-safe-area-top) + var(--nav-height, 58px) + 44px);
 }
 
-/* Give the course and departure content clearer separation from their titles. */
+/* The Android WebView already starts below the system bar. Keep the primary
+   title cards close to that boundary, then give all three first cards the same
+   visible break. The inset in the content padding offsets Vant's relative top
+   shift, so the course page keeps its existing lower gap while schedule and
+   profile receive the missing space. */
+html.capacitor-android .courses-page > .van-nav-bar,
+html.capacitor-android .schedule-page > .van-nav-bar,
+html.capacitor-android .profile-page > .van-nav-bar {
+  position: relative;
+  top: var(--app-native-nav-inset-top);
+  margin-top: 12px;
+}
+
 html.capacitor-android .courses-page > .van-nav-bar + .page-content,
-html.capacitor-android .schedule-page > .van-nav-bar + .page-content {
-  padding-top: 40px;
+html.capacitor-android .schedule-page > .van-nav-bar + .page-content,
+html.capacitor-android .profile-page > .van-nav-bar + .page-content {
+  padding-top: calc(var(--app-native-nav-inset-top) + 8px);
+}
+
+html.capacitor-android .courses-page #semester-settings {
+  margin-top: 0;
 }
 
 .van-nav-bar::after {
