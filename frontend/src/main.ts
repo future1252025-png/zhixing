@@ -15,6 +15,7 @@ import router from './router'
 import { setUnauthorizedHandler } from './api/errors'
 import { useAuthStore } from './stores/auth'
 import { installVanFieldFocusDelegation } from './utils/vanFieldFocus'
+import { installAndroidBackButton } from './utils/nativeBackButton'
 import './styles/base.css'
 import './styles/fresh.css'
 
@@ -56,6 +57,8 @@ async function bootstrap() {
 
   app.use(router)
   app.mount('#app')
+
+  await installAndroidBackButton(router)
 }
 
 void bootstrap()

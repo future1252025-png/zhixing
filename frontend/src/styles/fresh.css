@@ -212,15 +212,37 @@ html.capacitor-android #semester-settings {
    profile receive the missing space. */
 html.capacitor-android .courses-page > .van-nav-bar,
 html.capacitor-android .schedule-page > .van-nav-bar,
-html.capacitor-android .profile-page > .van-nav-bar {
+html.capacitor-android .profile-page > .van-nav-bar,
+html.capacitor-android .course-import-page > .van-nav-bar {
   position: relative;
   top: var(--app-native-nav-inset-top);
   margin-top: 12px;
 }
 
+/* On Android the course title card scrolls away with the page. Keep the
+   weekday/date strip at the real top safe area instead of reserving another
+   58px for a navigation card that is no longer visible. */
+html.capacitor-android .courses-page .week-head {
+  top: var(--app-native-nav-inset-top, env(safe-area-inset-top, 0px));
+}
+
+/* Once the weekday strip sticks, extend its paper surface through the status
+   bar safe area. Earlier course cards must not remain visible above it. */
+html.capacitor-android .courses-page .week-head.is-stuck::before {
+  position: absolute;
+  right: 0;
+  bottom: 100%;
+  left: 0;
+  height: var(--app-native-nav-inset-top, env(safe-area-inset-top, 0px));
+  background: rgba(246, 247, 252, 0.98);
+  content: "";
+  pointer-events: none;
+}
+
 html.capacitor-android .courses-page > .van-nav-bar + .page-content,
 html.capacitor-android .schedule-page > .van-nav-bar + .page-content,
-html.capacitor-android .profile-page > .van-nav-bar + .page-content {
+html.capacitor-android .profile-page > .van-nav-bar + .page-content,
+html.capacitor-android .course-import-page > .van-nav-bar + .page-content {
   padding-top: calc(var(--app-native-nav-inset-top) + 8px);
 }
 

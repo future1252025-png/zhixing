@@ -38,6 +38,8 @@ const activeCourse = ref<Course | null>(null)
 const actionSheetVisible = ref(false)
 const timetableGridRef = ref<HTMLElement | null>(null)
 const timetableTransitionFrameRef = ref<HTMLElement | null>(null)
+const weekHeadRef = ref<HTMLElement | null>(null)
+const weekHeadStuck = ref(false)
 const courseCardHeight = ref(170)
 const weekStageLockedHeight = ref<number | null>(null)
 const weekTransitionName = ref<'week-forward' | 'week-backward'>('week-forward')
@@ -117,6 +119,7 @@ const nowMinutes = ref(getMinutesOfDay())
 let nowTimer: ReturnType<typeof setInterval> | undefined
 let timetableResizeObserver: ResizeObserver | undefined
 let courseHeightFrame: number | undefined
+let weekHeadScrollFrame: number | undefined
 let observedGridWidth = 0
 
 function getMinutesOfDay(): number {
@@ -284,6 +287,25 @@ function scheduleCourseCardHeightSync() {
   })
 }
 
+function syncWeekHeadStuckState() {
+  const weekHead = weekHeadRef.value
+  if (!weekHead || !document.documentElement.classList.contains('capacitor-android')) {
+    weekHeadStuck.value = false
+    return
+  }
+
+  const stickyTop = Number.parseFloat(window.getComputedStyle(weekHead).top) || 0
+  weekHeadStuck.value = window.scrollY > 0 && weekHead.getBoundingClientRect().top <= stickyTop + 0.5
+}
+
+function scheduleWeekHeadStuckSync() {
+  if (weekHeadScrollFrame !== undefined) return
+  weekHeadScrollFrame = window.requestAnimationFrame(() => {
+    weekHeadScrollFrame = undefined
+    syncWeekHeadStuckState()
+  })
+}
+
 function prepareWeekTransition() {
   weekScrollTop = window.scrollY
   weekStageLockedHeight.value =
@@ -405,6 +427,9 @@ watch(timetableGridRef, (grid) => {
 
 onMounted(() => {
   void Promise.all([loadCourses(), loadSemester()])
+  window.addEventListener('scroll', scheduleWeekHeadStuckSync, { passive: true })
+  window.addEventListener('resize', scheduleWeekHeadStuckSync)
+  void nextTick().then(scheduleWeekHeadStuckSync)
   nowTimer = setInterval(() => {
     nowMinutes.value = getMinutesOfDay()
   }, 60_000)
@@ -412,12 +437,17 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   if (nowTimer) clearInterval(nowTimer)
+  window.removeEventListener('scroll', scheduleWeekHeadStuckSync)
+  window.removeEventListener('resize', scheduleWeekHeadStuckSync)
   timetableResizeObserver?.disconnect()
   if (courseHeightFrame !== undefined) {
     window.cancelAnimationFrame(courseHeightFrame)
   }
   if (weekScrollRestoreFrame !== undefined) {
     window.cancelAnimationFrame(weekScrollRestoreFrame)
+  }
+  if (weekHeadScrollFrame !== undefined) {
+    window.cancelAnimationFrame(weekHeadScrollFrame)
   }
 })
 </script>
@@ -610,7 +640,12 @@ onBeforeUnmount(() => {
               @touchend.passive="handleWeekTouchEnd"
             >
               <div class="timetable-viewport" aria-label="完整展示周一到周日的周课表">
-              <div class="week-head" aria-hidden="true">
+              <div
+                ref="weekHeadRef"
+                class="week-head"
+                :class="{ 'is-stuck': weekHeadStuck }"
+                aria-hidden="true"
+              >
                 <div class="time-head"><span>时间</span></div>
                 <div
                   v-for="weekday in WEEKDAYS"
