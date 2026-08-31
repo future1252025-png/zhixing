@@ -494,7 +494,9 @@ export function findNextCourse(courses: Course[], now = new Date()): Course | nu
         if (startMinutes === null) {
           return false
         }
-        return dayOffset > 0 || startMinutes > currentMinutes
+        // Course times are stored with minute precision. Keep a course that
+        // starts during the current minute so 14:00 does not jump to tomorrow.
+        return dayOffset > 0 || startMinutes >= currentMinutes
       })
       .sort((left, right) => {
         if (left.dayOffset !== right.dayOffset) {

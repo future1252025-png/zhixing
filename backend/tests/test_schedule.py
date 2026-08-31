@@ -265,6 +265,80 @@ def test_find_next_course_can_find_later_day_in_current_teaching_week(
     assert result.teaching_week == 2
 
 
+def test_find_next_course_keeps_course_starting_in_current_minute(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    _, SessionLocal = client_and_session
+    with SessionLocal() as session:
+        user = create_service_user(session, "current_start_minute")
+        _, building = first_two_buildings(session)
+        current_course = add_course(
+            session,
+            user,
+            building,
+            course_name="周一下午课",
+            weekday=1,
+            start_time="14:00",
+            end_time="15:40",
+            weeks="1",
+        )
+        add_course(
+            session,
+            user,
+            building,
+            course_name="周二第一节",
+            weekday=2,
+            start_time="08:00",
+            weeks="1",
+        )
+
+        result = find_next_course(
+            session,
+            user.id,
+            now=datetime(2026, 8, 31, 14, 0, 45, tzinfo=SHANGHAI_TZ),
+        )
+
+    assert result is not None
+    assert result.course.id == current_course.id
+
+
+def test_find_next_course_moves_on_after_course_start_minute(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    _, SessionLocal = client_and_session
+    with SessionLocal() as session:
+        user = create_service_user(session, "after_start_minute")
+        _, building = first_two_buildings(session)
+        add_course(
+            session,
+            user,
+            building,
+            course_name="周一下午课",
+            weekday=1,
+            start_time="14:00",
+            end_time="15:40",
+            weeks="1",
+        )
+        next_course = add_course(
+            session,
+            user,
+            building,
+            course_name="周二第一节",
+            weekday=2,
+            start_time="08:00",
+            weeks="1",
+        )
+
+        result = find_next_course(
+            session,
+            user.id,
+            now=datetime(2026, 8, 31, 14, 1, tzinfo=SHANGHAI_TZ),
+        )
+
+    assert result is not None
+    assert result.course.id == next_course.id
+
+
 def test_find_next_course_filters_out_courses_not_active_this_week(
     client_and_session: tuple[TestClient, sessionmaker],
 ) -> None:

@@ -343,6 +343,30 @@ describe('course helpers', () => {
     expect(result?.id).toBe(4)
   })
 
+  it('keeps a course starting in the current minute ahead of the next day', () => {
+    const result = findNextCourse(
+      [
+        { ...baseCourse, id: 2, weekday: 2, start_time: '08:00' },
+        { ...baseCourse, id: 3, weekday: 1, start_time: '14:00' }
+      ],
+      new Date('2026-08-31T14:00:45')
+    )
+
+    expect(result?.id).toBe(3)
+  })
+
+  it('moves on after the course start minute has passed', () => {
+    const result = findNextCourse(
+      [
+        { ...baseCourse, id: 2, weekday: 2, start_time: '08:00' },
+        { ...baseCourse, id: 3, weekday: 1, start_time: '14:00' }
+      ],
+      new Date('2026-08-31T14:01:00')
+    )
+
+    expect(result?.id).toBe(2)
+  })
+
   it('ignores pending-time imports when looking for the next departure', () => {
     const now = new Date('2026-06-15T10:00:00')
     const result = findNextCourse(

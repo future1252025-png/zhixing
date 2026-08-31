@@ -128,6 +128,33 @@ describe('HomePage', () => {
     wrapper.unmount()
   })
 
+  it('shows the Monday 14:00 course throughout its start minute instead of Tuesday', async () => {
+    vi.setSystemTime(new Date('2026-08-31T14:00:45+08:00'))
+    vi.mocked(fetchSemester).mockResolvedValue({
+      status: 'active',
+      start_date: '2026-08-31',
+      total_weeks: 20,
+      current_week: 1
+    })
+    vi.mocked(getCourses).mockResolvedValue([
+      course({
+        id: 1,
+        course_name: '周一下午课',
+        weekday: 1,
+        start_time: '14:00',
+        end_time: '15:40',
+        weeks: '1'
+      }),
+      course({ id: 2, course_name: '周二第一节', weekday: 2, start_time: '08:00', weeks: '1' })
+    ])
+
+    const wrapper = await mountHome()
+
+    expect(wrapper.text()).toContain('周一下午课')
+    expect(wrapper.text()).not.toContain('周二第一节')
+    wrapper.unmount()
+  })
+
   it('opens course editing instead of an invalid building route for an unmapped location', async () => {
     vi.mocked(getCourses).mockResolvedValue([
       course({

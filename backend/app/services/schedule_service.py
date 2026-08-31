@@ -184,6 +184,9 @@ def find_next_course(
     now: datetime,
 ) -> NextCourseCandidate | None:
     current = _normalize_now(now)
+    # Course times have minute precision. Treat the whole displayed start
+    # minute as current instead of skipping it because the clock has seconds.
+    current_minute = current.replace(second=0, microsecond=0)
     setting, teaching_week = _get_active_semester(session, user_id, current)
     week_start = setting.start_date + timedelta(weeks=teaching_week - 1)
     week_end = week_start + timedelta(days=6)
@@ -219,7 +222,7 @@ def find_next_course(
             continue
         start_time = _parse_course_start_time(course)
         starts_at = _course_start_datetime(target_date, start_time)
-        if starts_at <= current:
+        if starts_at < current_minute:
             continue
         candidates.append(
             NextCourseCandidate(
