@@ -16,13 +16,13 @@ python -m venv .venv
 .\.venv\Scripts\python.exe -m alembic upgrade head
 ```
 
-开发环境首次启动会自动生成 `backend/data/.jwt-secret`，后续重启继续使用同一密钥；该本地文件位于 `.gitignore` 排除范围内。也可以显式覆盖：
+开发模式会在 `backend/data/.jwt-secret` 生成持久化密钥，后续启动沿用该值。`JWT_SECRET_KEY` 环境变量可覆盖默认行为：
 
 ```powershell
-$env:JWT_SECRET_KEY="请替换为足够长的随机值"
+$env:JWT_SECRET_KEY="<32-byte-or-longer-random-secret>"
 ```
 
-默认登录策略：访问令牌 30 分钟、刷新令牌空闲有效期 30 天、会话绝对上限 90 天。需要调整时在启动后端前设置：
+默认登录策略为访问令牌 30 分钟、刷新令牌空闲有效期 30 天、会话绝对上限 90 天。对应环境变量如下：
 
 ```powershell
 $env:ACCESS_TOKEN_EXPIRE_MINUTES="30"
@@ -30,7 +30,7 @@ $env:REFRESH_TOKEN_EXPIRE_DAYS="30"
 $env:REFRESH_SESSION_ABSOLUTE_DAYS="90"
 ```
 
-生产环境必须设置固定且不少于 32 字节的 `JWT_SECRET_KEY`。网页前端与 API 应部署在同一站点的 HTTPS 域名下，并把网页 Origin 精确加入 `CORS_ALLOW_ORIGINS`，以便安全发送 `HttpOnly + SameSite=Strict` 刷新 Cookie。
+生产配置使用固定且不少于 32 字节的 `JWT_SECRET_KEY`。网页前端与 API 采用同站点 HTTPS 部署，网页 Origin 通过 `CORS_ALLOW_ORIGINS` 配置；刷新会话由 `HttpOnly + SameSite=Strict` Cookie 承载。
 
 只供本机网页访问：
 
@@ -66,7 +66,7 @@ VITE_AMAP_SERVICE_HOST=
 
 开发地址：`http://127.0.0.1:5173`
 
-生产环境应使用 HTTPS API，并按 [DEPLOYMENT.md](../frontend/DEPLOYMENT.md) 配置高德服务代理。
+生产环境对应 HTTPS API 和 [前端部署](../frontend/DEPLOYMENT.md) 中的高德服务代理配置。
 
 ## Android
 
@@ -75,7 +75,7 @@ cd frontend
 Copy-Item .env.android.example .env.android.local
 ```
 
-局域网调试时可临时使用 `http://<电脑IPv4>:8000`，但必须使用开发同步命令并只生成 Debug APK：
+局域网调试使用 `http://<电脑IPv4>:8000`、开发同步脚本和 Debug APK：
 
 ```powershell
 npm ci
@@ -84,15 +84,15 @@ cd android
 .\gradlew.bat test assembleDebug
 ```
 
-正式配置必须同时填写公网 HTTPS API、高德 Web Key 和自有域名的 `/_AMapService` 代理，且 `VITE_AMAP_SECURITY_CODE` 必须为空。可先严格同步与校验：
+发布配置由公网 HTTPS API、高德 Web Key 和自有域名的 `/_AMapService` 代理组成；安全密钥由代理持有，因此 `VITE_AMAP_SECURITY_CODE` 为空。同步脚本同时校验这些配置：
 
 ```powershell
 npm run android:sync
 ```
 
-可发布产物必须使用显式版本号和发布密钥签名。推荐在 GitHub Actions 手动运行 **Android Release** 并下载已签名 AAB；本地可在配置 `ANDROID_VERSION_CODE`、`ANDROID_VERSION_NAME`、`ANDROID_RELEASE_KEYSTORE`、`ANDROID_RELEASE_STORE_PASSWORD`、`ANDROID_RELEASE_KEY_ALIAS` 和 `ANDROID_RELEASE_KEY_PASSWORD` 后执行 `npm run android:release`。
+发布产物使用显式版本号和发布密钥签名。GitHub Actions 的 **Android Release** 工作流生成已签名 AAB；本地发布使用 `ANDROID_VERSION_CODE`、`ANDROID_VERSION_NAME`、`ANDROID_RELEASE_KEYSTORE`、`ANDROID_RELEASE_STORE_PASSWORD`、`ANDROID_RELEASE_KEY_ALIAS`、`ANDROID_RELEASE_KEY_PASSWORD` 和 `npm run android:release`。
 
-CI Android 任务使用临时非发布配置运行正式校验、JUnit、Release Lint、APK/AAB 编译，但不会上传该临时产物。
+CI Android 任务使用隔离配置运行环境校验、JUnit、Release Lint 和 APK/AAB 编译。
 
 安装到已授权 USB 调试的手机：
 
@@ -101,7 +101,7 @@ adb devices
 adb install -r app\build\outputs\apk\debug\app-debug.apk
 ```
 
-手机 Wi-Fi 连通只解决 API 网络访问，不等于 ADB 已连接；安装仍需要 USB 调试授权或已配对的无线调试。
+Wi-Fi 连通性与 ADB 连接相互独立。APK 安装通过已授权的 USB 调试或已配对的无线调试完成。
 
 ## 验证
 
@@ -122,11 +122,9 @@ cd frontend\android
 .\gradlew.bat test assembleDebug
 ```
 
-当前 CodeQL 工作流在 Actions 内完成分析并保留 SARIF artifact，因此私有仓库未开启 Code Scanning 时不会因上传被拒绝而报红。仓库日后启用 GitHub Code Scanning/GitHub Code Security 后，可将 `.github/workflows/codeql.yml` 中的 `upload: never` 改为 `upload: always`，并在工作流权限中加入 `security-events: write`，恢复 Security 面板上传。
-
 ## 常见问题
 
-- **`JWT_SECRET_KEY 未设置`**：开发后端正在使用 `backend/data/.jwt-secret` 的本地持久密钥；这是正常提示。生产环境必须显式设置环境变量。
+- **`JWT_SECRET_KEY 未设置`**：开发后端正在使用 `backend/data/.jwt-secret` 的本地持久密钥；生产部署读取显式环境变量。
 - **手机访问 `127.0.0.1` 失败**：手机中的 `127.0.0.1` 指向手机，不是电脑。
 - **`adb devices` 显示 offline**：解锁手机，重新确认“允许 USB 调试”，必要时拔插数据线。
 - **地图不显示**：检查高德 Key、服务代理、域名白名单和网络。

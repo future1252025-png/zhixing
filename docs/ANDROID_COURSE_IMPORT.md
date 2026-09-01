@@ -22,14 +22,14 @@
 
 ## Android 构建配置
 
-Capacitor App 内的网页运行在本地容器中，不能依赖网页部署时的同源反向代理。复制 Android 环境变量模板并填写可由手机访问的 HTTPS 后端：
+Capacitor App 内的网页运行在本地容器中，不使用网页部署时的同源反向代理。Android 环境变量模板用于配置设备可访问的 HTTPS 后端：
 
 ```powershell
 cd frontend
 Copy-Item .env.android.example .env.android.local
 ```
 
-正式构建至少需要配置：
+发布构建配置：
 
 ```env
 VITE_API_BASE_URL=https://你的后端域名
