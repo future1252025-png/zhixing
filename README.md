@@ -28,7 +28,7 @@ GitHub 仓库：[future1252025-png/zhixing](https://github.com/future1252025-png
 ## 项目结构
 
 ```text
-campusmind/
+.
 ├── backend/                 FastAPI API、迁移与测试
 ├── frontend/
 │   ├── src/                 Vue 应用
@@ -83,6 +83,7 @@ cd android
 调试 APK：`frontend/android/app/build/outputs/apk/debug/app-debug.apk`
 
 完整说明见 [Android 教务导入](docs/ANDROID_COURSE_IMPORT.md) 和 [运行指南](docs/RUNNING_GUIDE.md)。
+Linux / macOS：虚拟环境用 `.venv/bin/python`，复制环境文件用 `cp`，Gradle 用 `./gradlew`。
 
 ## 当前验证基线
 
