@@ -111,6 +111,14 @@ cd android
 - [演示脚本](docs/DEMO_SCRIPT.md)
 - [技术亮点](docs/TECHNICAL_HIGHLIGHTS.md)
 
+## 配置安全
+
+- 不提交 `.env.local`、`.env.android.local`、`backend/data/`、数据库、日志、APK、keystore 和构建目录。
+- 生产环境必须显式配置不少于 32 字节的 `JWT_SECRET_KEY`；开发模式使用 `backend/data/.jwt-secret` 本地持久密钥。
+- 网页与 API 采用同站点 HTTPS；刷新会话由 `HttpOnly + SameSite=Strict` Cookie 承载。Android 发布包只连接 HTTPS 后端。
+- 高德生产环境使用 `VITE_AMAP_SERVICE_HOST` 代理安全密钥，不要把安全密钥写入客户端构建产物。
+详细约定见 [运行指南](docs/RUNNING_GUIDE.md) 和 [前端部署](frontend/DEPLOYMENT.md)。
+
 ## License
 
 [MIT](LICENSE)
