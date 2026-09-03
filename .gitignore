@@ -47,3 +47,9 @@ logs/
 
 # Isolated feature worktrees
 .worktrees/
+
+# Android / signing
+*.apk
+*.aab
+*.jks
+*.keystore

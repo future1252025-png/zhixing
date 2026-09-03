@@ -39,7 +39,7 @@
 ## 项目结构
 
 ```text
-campusmind/
+.
 ├── backend/                 FastAPI API、迁移与测试
 ├── frontend/
 │   ├── src/                 Vue 应用
@@ -49,6 +49,8 @@ campusmind/
 ```
 
 ## 快速启动
+
+以下示例使用 Windows PowerShell；Linux / macOS 对应使用 `.venv/bin/python`、`cp` 和 `./gradlew`。
 
 ### 后端
 
