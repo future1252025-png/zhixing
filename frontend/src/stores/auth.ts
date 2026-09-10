@@ -21,6 +21,8 @@ import {
 } from '@/auth/sessionTokens'
 import { extractBusinessError, resetUnauthorizedState } from '@/api/errors'
 import { useSemesterStore } from '@/stores/semester'
+import { useCampusMapStore } from '@/stores/campusMap'
+import { cancelDeviceReminders, clearReminderCache } from '@/services/reminderNotifications'
 
 type AuthState = {
   token: string | null
@@ -68,15 +70,14 @@ export const useAuthStore = defineStore('auth', {
     },
     async deleteAccount(payload: DeleteAccountPayload) {
       await deleteAccountRequest(payload)
+      if (this.currentUser) clearReminderCache(this.currentUser.id)
       this.clearSession()
     },
     async restoreSession() {
-      const restored = await restoreSession()
+      const result = await restoreSession()
       this.token = getAccessToken()
-      if (!restored) {
-        this.setCurrentUser(null)
-      }
-      return restored
+      this.setCurrentUser(result.user)
+      return result.restored
     },
     async loadCurrentUser() {
       if (!this.token) {
@@ -98,11 +99,13 @@ export const useAuthStore = defineStore('auth', {
       }
     },
     clearSession() {
+      void cancelDeviceReminders().catch(() => {})
       this.token = null
       this.currentUser = null
       setAccessToken(null)
       void setRefreshToken(null).catch(() => {})
       useSemesterStore().reset()
+      useCampusMapStore().attachUser(null)
     },
     async logout() {
       try {

@@ -10,6 +10,12 @@ export type Building = {
   map_x: number
   map_y: number
   walk_hint: string | null
+  map_pois?: { provider: 'amap'; poi_id: string; name: string }[]
+}
+
+export async function bindBuildingMapPoi(buildingId: number, poi: { poi_id: string; name: string }) {
+  const response = await request.put(`/api/buildings/${buildingId}/map-pois`, { provider: 'amap', ...poi })
+  return response.data
 }
 
 export type LocationPreset = {

@@ -2,6 +2,7 @@ import json
 import os
 from collections import Counter
 from pathlib import Path
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
@@ -9,7 +10,8 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.core.config import settings
 from app.core.security import hash_password
 from app.db.database import create_sqlite_engine, upgrade_database
-from app.models import Building, Course, CourseImportSource, LocationPreset, Message, User
+from app.models import Building, BuildingMapPoi, Course, CourseImportSource, LocationPreset, Message, User
+from app.schemas.building import BuildingMapPoiBind
 
 
 DEMO_STUDENT_ID = "20240001"
@@ -34,7 +36,7 @@ MAP_POINT_REQUIRED_FIELDS = {
 
 def load_map_points_seed(
     path: Path = MAP_POINTS_SEED_FILE,
-) -> list[dict[str, str | float | None]]:
+) -> list[dict[str, Any]]:
     raw_points = json.loads(path.read_text(encoding="utf-8-sig"))
     if not isinstance(raw_points, list):
         raise ValueError("Map points seed file must contain a JSON array")
@@ -45,7 +47,7 @@ def load_map_points_seed(
         if isinstance(item, dict)
     )
     name_seen: Counter[str] = Counter()
-    points: list[dict[str, str | float | None]] = []
+    points: list[dict[str, Any]] = []
 
     for index, item in enumerate(raw_points, start=1):
         if not isinstance(item, dict):
@@ -82,6 +84,12 @@ def load_map_points_seed(
                 "walk_hint": walk_hint,
             }
         )
+
+        if item.get("map_pois"):
+            points[-1]["map_pois"] = [
+                BuildingMapPoiBind.model_validate(poi).model_dump()
+                for poi in item["map_pois"]
+            ]
 
     return points
 
@@ -198,18 +206,32 @@ def _seed_buildings(session: Session) -> dict[str, Building]:
         for building in session.scalars(select(Building)).all()
     }
     for item in DEMO_BUILDINGS:
+        fields = {key: value for key, value in item.items() if key != "map_pois"}
         building = existing.get(item["name"])
         if building is None:
-            building = Building(**item)
+            building = Building(**fields)
             session.add(building)
             session.flush()
         else:
-            for field, value in item.items():
+            for field, value in fields.items():
                 if field == "name":
                     continue
                 setattr(building, field, value)
             session.flush()
         existing[building.name] = building
+        # Missing POI metadata must not delete admin-maintained mappings. Never
+        # move a POI to another building or renumber historical channel IDs.
+        for raw_poi in item.get("map_pois", []):
+            poi = BuildingMapPoiBind.model_validate(raw_poi)
+            mapping = session.scalar(select(BuildingMapPoi).where(
+                BuildingMapPoi.provider == poi.provider,
+                BuildingMapPoi.poi_id == poi.poi_id,
+            ))
+            if mapping and mapping.building_id != building.id:
+                raise ValueError(f"POI {poi.poi_id} already belongs to another building")
+            if mapping is None:
+                session.add(BuildingMapPoi(building_id=building.id, **poi.model_dump()))
+                session.flush()
     return existing
 
 

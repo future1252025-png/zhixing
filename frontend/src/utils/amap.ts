@@ -1,4 +1,4 @@
-import { load as loadAMap } from '@amap/amap-jsapi-loader'
+import { load as loadAMap, reset as resetAMap } from '@amap/amap-jsapi-loader'
 import { gcj02ToWgs84 } from '@/utils/geo'
 
 declare global {
@@ -21,7 +21,6 @@ const pluginConstructors: Record<string, string> = {
   'AMap.Scale': 'Scale',
   'AMap.ToolBar': 'ToolBar',
   'AMap.PlaceSearch': 'PlaceSearch',
-  'AMap.Walking': 'Walking',
   'AMap.Geolocation': 'Geolocation'
 }
 
@@ -54,9 +53,34 @@ export async function loadAMapSdk(): Promise<any> {
     key: amapKey,
     version: '2.0',
     plugins: []
+  }).catch((error: unknown) => {
+    // The loader itself caches its failed state. Clear it only after initial
+    // loading failed (there cannot be a successfully constructed map yet).
+    amapPromise = null; pluginPromises.clear(); resetAMap(); throw error
   })
 
-  return amapPromise
+  // A blocked SDK request must not leave either map page permanently loading.
+  // Keep the underlying loader promise: a retry can reuse its late success.
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([amapPromise, new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error('AMap SDK load timed out')), 12_000)
+    })])
+  } finally { clearTimeout(timer) }
+}
+
+/** Fetch data only: supplying `map` to PlaceSearch would add unwanted result pins. */
+export async function getAMapPoiDetails(poiId: string): Promise<{ name: string; location: unknown } | null> {
+  const AMap = await loadAMapPlugin('AMap.PlaceSearch')
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(null), 6000)
+    const search = new AMap.PlaceSearch({ city: '武汉', citylimit: true, pageSize: 1 })
+    search.getDetails(poiId, (status: string, result: any) => {
+      clearTimeout(timer)
+      const poi = status === 'complete' ? result?.poiList?.pois?.[0] : null
+      resolve(poi && poi.id === poiId ? { name: String(poi.name || ''), location: poi.location } : null)
+    })
+  })
 }
 
 export function preloadAMapSdk(): void {

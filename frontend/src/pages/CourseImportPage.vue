@@ -40,6 +40,7 @@ const router = useRouter()
 const coursesStore = useCoursesStore()
 const selectedFile = ref<File | null>(null)
 const preview = ref<ImportPreviewResponse | null>(null)
+const timeDrafts = ref<Record<string, { start_time: string; end_time: string }>>({})
 const excludedRowRefs = ref<string[]>([])
 const serverIssues = ref<Record<string, ImportIssue[]>>({})
 const highlightedRowRefs = ref<string[]>([])
@@ -71,9 +72,10 @@ const resolvedCount = computed(() =>
   activeCandidates.value.filter((candidate) => isCandidateImportable(candidate)).length
 )
 const unresolvedCount = computed(() => activeCandidates.value.length - resolvedCount.value)
+const invalidTimeCount = computed(() => activeCandidates.value.filter((candidate) => timeError(candidate)).length)
 const pendingCompletionCount = computed(() =>
   activeCandidates.value.filter((candidate) =>
-    candidate.errors.some((issue) => NON_BLOCKING_ERROR_CODES.has(issue.code))
+    candidate.errors.some((issue) => LOCATION_ERROR_CODES.has(issue.code)) || candidateHasScheduleNote(candidate)
   ).length
 )
 const conflictCount = computed(() =>
@@ -87,7 +89,7 @@ const canCommit = computed(() =>
     selectedFile.value &&
       preview.value &&
       activeCandidates.value.length > 0 &&
-      unresolvedCount.value === 0
+      unresolvedCount.value === 0 && invalidTimeCount.value === 0
   )
 )
 const isBusy = computed(() =>
@@ -136,6 +138,9 @@ function candidateSkipReasons(candidate: ImportCandidate): string[] {
 }
 
 function prepareAutomaticImportSelection() {
+  timeDrafts.value = Object.fromEntries(candidates.value.map((candidate) => [candidate.row_ref, {
+    start_time: candidate.start_time ?? '', end_time: candidate.end_time ?? ''
+  }]))
   excludedRowRefs.value = candidates.value
     .filter((candidate) => shouldSkipCandidateAutomatically(candidate))
     .map((candidate) => candidate.row_ref)
@@ -149,6 +154,7 @@ function syncPreviewState() {
 }
 
 function resetPreview() {
+  timeDrafts.value = {}
   preview.value = null
   excludedRowRefs.value = []
   serverIssues.value = {}
@@ -181,6 +187,7 @@ async function previewFile() {
       state.value = 'failed'
       return
     }
+    state.value = 'needs_resolution'
     prepareAutomaticImportSelection()
     if (activeCandidates.value.length === 0) {
       errorMessage.value = '当前课表没有可导入的有效课程。'
@@ -220,8 +227,7 @@ async function startHubuImport() {
     importSource.value = 'hubu'
     captureSourceUrl.value = capture.sourceUrl ?? ''
     await previewFile()
-    if (canCommit.value) await commitImport()
-    else if (preview.value && activeCandidates.value.length === 0) {
+    if (preview.value && activeCandidates.value.length === 0) {
       errorMessage.value = '当前课表没有可导入的有效课程。'
       state.value = 'failed'
       showFailToast(errorMessage.value)
@@ -342,7 +348,23 @@ function toggleCandidateExclusion(candidate: ImportCandidate) {
 }
 
 function candidateHasScheduleNote(candidate: ImportCandidate): boolean {
-  return candidate.errors.some((issue) => issue.code === 'time_unrecognized')
+  return !timeDrafts.value[candidate.row_ref]?.start_time && !timeDrafts.value[candidate.row_ref]?.end_time
+}
+
+function timeError(candidate: ImportCandidate): string {
+  const draft = timeDrafts.value[candidate.row_ref]
+  if (!draft) return ''
+  if (!draft.start_time && !draft.end_time && !candidate.start_time && !candidate.end_time) return ''
+  if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(draft.start_time) || !/^([01]\d|2[0-3]):[0-5]\d$/.test(draft.end_time)) return '请填写完整的开始和结束时间'
+  return draft.end_time > draft.start_time ? '' : '结束时间必须晚于开始时间'
+}
+
+function timeChanged(candidate: ImportCandidate) {
+  const remaining = { ...serverIssues.value }
+  delete remaining[candidate.row_ref]
+  serverIssues.value = remaining
+  errorMessage.value = ''
+  syncPreviewState()
 }
 
 function candidateHasLocationNote(candidate: ImportCandidate): boolean {
@@ -366,7 +388,13 @@ async function commitImport() {
     const result = await commitCourseImport(
       selectedFile.value,
       preview.value.file.sha256,
-      excludedRowRefs.value
+      excludedRowRefs.value,
+      activeCandidates.value.flatMap((candidate) => {
+        const draft = timeDrafts.value[candidate.row_ref]
+        return draft?.start_time && draft.end_time &&
+          (draft.start_time !== candidate.start_time || draft.end_time !== candidate.end_time)
+          ? [{ row_ref: candidate.row_ref, ...draft }] : []
+      })
     )
     createdCount.value = result.created_count
     coursesStore.invalidate()
@@ -416,7 +444,7 @@ async function commitImport() {
         <ol class="hubu-import-steps">
           <li><i>1</i><span><strong>进入官方页面</strong><small>学号和密码只在湖北大学页面输入</small></span></li>
           <li><i>2</i><span><strong>打开学期理论课表</strong><small>先选好学年学期，确认课表已经完整显示</small></span></li>
-          <li><i>3</i><span><strong>点击“导入课表”</strong><small>返回后自动覆盖当前课表，无需逐门确认</small></span></li>
+          <li><i>3</i><span><strong>核对上课时间</strong><small>返回后可修改时间，确认后再覆盖当前课表</small></span></li>
         </ol>
 
         <button
@@ -530,7 +558,7 @@ async function commitImport() {
             <div>
               <h2>导入内容预览</h2>
               <p>
-                课程、地点和已有时间按原文保存；无法导入的单门课程可以先排除。
+                优先读取原课表的实际时间，请核对后再导入；可直接修改时间，只有节次时请手动补充。
                 <b v-if="excludedCount">当前已排除 {{ excludedCount }} 门。</b>
               </p>
             </div>
@@ -585,12 +613,29 @@ async function commitImport() {
             </dl>
             <p v-if="candidateHasLocationNote(candidate)" class="location-note">
               <span aria-hidden="true">i</span>
-              地点会照原文导入，不影响课表查看；发起路线时若仍未匹配地图，再提示补全。
+              地点会照原文导入，不影响课表查看和课程提醒；打开地点频道时若未匹配建筑，再提示补全。
             </p>
             <p v-if="candidateHasScheduleNote(candidate)" class="location-note schedule-note">
               <span aria-hidden="true">i</span>
-              上课时间暂未识别，仍会导入到“待补全课程”；之后可以手动补时间或直接删除。
+              上课时间暂未识别，可在下方直接补充。也可先导入到“待补全课程”，之后再点“补全时间”。
             </p>
+            <fieldset v-if="timeDrafts[candidate.row_ref]" class="import-time-editor" :disabled="isBusy">
+              <legend>实际保存的上课时间</legend>
+              <label>
+                <span>开始时间</span>
+                <input v-model="timeDrafts[candidate.row_ref]!.start_time" type="time" step="60"
+                  :aria-label="`${candidate.course_name}开始时间`" :data-testid="`start-${candidate.row_ref}`"
+                  @input="timeChanged(candidate)" />
+              </label>
+              <label>
+                <span>结束时间</span>
+                <input v-model="timeDrafts[candidate.row_ref]!.end_time" type="time" step="60"
+                  :aria-label="`${candidate.course_name}结束时间`" :data-testid="`end-${candidate.row_ref}`"
+                  @input="timeChanged(candidate)" />
+              </label>
+              <p v-if="timeError(candidate)" role="alert">{{ timeError(candidate) }}</p>
+              <small v-else>可直接修改，不受固定节次限制。未识别的时间留空后，将导入到“待补全课程”。</small>
+            </fieldset>
             <ul v-if="candidateBlockingIssues(candidate).length" class="candidate-issues">
               <li v-for="issue in candidateBlockingIssues(candidate)" :key="`${issue.code}-${issue.field}-${issue.message}`">
                 {{ issue.message }}
@@ -605,6 +650,7 @@ async function commitImport() {
               已排除 {{ excludedCount }} 门，本次导入 {{ activeCandidates.length }} 门
             </strong>
             <strong v-else-if="canCommit">全部课程都可按原文导入</strong>
+            <strong v-else-if="invalidTimeCount">请检查 {{ invalidTimeCount }} 门课程的起止时间</strong>
             <strong v-else>还有 {{ unresolvedCount }} 门课程的排课信息无法识别</strong>
             <p>提交后会替换当前课表；地点或时间缺失不会阻止整批导入。</p>
           </div>
@@ -626,6 +672,23 @@ async function commitImport() {
 </template>
 
 <style scoped>
+.import-time-editor {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  min-width: 0;
+  margin: 12px 0;
+  padding: 12px;
+  border: 1px solid var(--fresh-line-strong);
+  border-radius: 16px;
+  background: var(--fresh-mint);
+}
+.import-time-editor legend { padding: 0 6px; font-size: 13px; font-weight: 700; }
+.import-time-editor label { display: grid; gap: 6px; min-width: 0; font-size: 12px; }
+.import-time-editor input { box-sizing: border-box; width: 100%; min-width: 0; min-height: 46px; padding: 8px; border: 1px solid var(--fresh-line); border-radius: 10px; background: var(--fresh-paper); font: inherit; font-size: 16px; }
+.import-time-editor input:focus { outline: 2px solid var(--fresh-green-dark); outline-offset: 1px; }
+.import-time-editor small, .import-time-editor p { grid-column: 1 / -1; margin: 0; font-size: 12px; line-height: 1.5; }
+.import-time-editor p { color: #934b40; }
 .course-import-page {
   --page-max: 780px;
 }

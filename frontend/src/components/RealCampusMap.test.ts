@@ -1,455 +1,139 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { createApp, defineComponent, h, nextTick, ref } from 'vue'
-
+import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { isAMapConfigured, loadAMapPlugin, loadAMapSdk } from '@/utils/amap'
+import { wgs84ToGcj02 } from '@/utils/geo'
 import RealCampusMap from './RealCampusMap.vue'
 
+vi.mock('@/utils/amap', () => ({ isAMapConfigured: vi.fn(), loadAMapSdk: vi.fn(), loadAMapPlugin: vi.fn() }))
+function deferred<T>() { let resolve!: (v: T) => void; const promise = new Promise<T>(r => { resolve = r }); return { promise, resolve } }
+const events: Record<string, (event?: any) => void> = {}
+const instance = { on: vi.fn((name, cb) => { events[name] = cb }), off: vi.fn(),
+  add: vi.fn(), remove: vi.fn(), addControl: vi.fn(), destroy: vi.fn(),
+  getCenter: vi.fn(() => ({ lng: 114.33, lat: 30.58 })), getZoom: vi.fn(() => 18),
+  setZoomAndCenter: vi.fn(), setFitView: vi.fn() }
+const sdk = { Map: vi.fn(function () { return instance }), Marker: vi.fn(),
+  CircleMarker: vi.fn(function (options) { return { kind: 'position', options } }),
+  Circle: vi.fn(function (options) { return { kind: 'accuracy', options } }),
+  Scale: vi.fn(function () {}), ToolBar: vi.fn(function () {}) }
+let wrapper: VueWrapper | undefined
 
-vi.mock('@/utils/amap', () => ({
-  isAMapConfigured: vi.fn(),
-  loadAMapSdk: vi.fn(),
-  loadAMapPlugin: vi.fn()
-}))
+beforeEach(() => {
+  vi.useFakeTimers(); vi.clearAllMocks()
+  Object.keys(events).forEach(key => { delete events[key] })
+  vi.mocked(isAMapConfigured).mockReturnValue(true)
+  vi.mocked(loadAMapSdk).mockResolvedValue(sdk)
+  vi.mocked(loadAMapPlugin).mockResolvedValue(sdk)
+})
+afterEach(() => { wrapper?.unmount(); wrapper = undefined; vi.useRealTimers(); vi.unstubAllGlobals() })
+async function render(props = {}) { wrapper = mount(RealCampusMap, { props }); await flushPromises(); return wrapper }
 
-
-type Deferred<T> = {
-  promise: Promise<T>
-  resolve: (value: T) => void
-}
-
-function deferred<T>(): Deferred<T> {
-  let resolve!: (value: T) => void
-  const promise = new Promise<T>((resolver) => {
-    resolve = resolver
+describe('native campus map', () => {
+  it('uses the original map style and hotspot system with no building overlays', async () => {
+    await render({ buildings: [{ id: 1, latitude: 30.58, longitude: 114.32 }] })
+    expect(sdk.Map).toHaveBeenCalledWith(expect.any(HTMLElement), expect.objectContaining({
+      isHotspot: true, resizeEnable: true, mapStyle: 'amap://styles/normal', rotateEnable: false
+    }))
+    expect(sdk.Marker).not.toHaveBeenCalled(); expect(instance.add).not.toHaveBeenCalled()
   })
-  return { promise, resolve }
-}
-
-async function settle(): Promise<void> {
-  await Promise.resolve()
-  await Promise.resolve()
-  await nextTick()
-}
-
-
-describe('RealCampusMap async lifecycle', () => {
-  let host: HTMLDivElement
-
-  beforeEach(() => {
-    vi.mocked(isAMapConfigured).mockReturnValue(true)
-    host = document.createElement('div')
-    document.body.append(host)
+  it('uses the POI identity from the native event and suppresses the duplicate generic click', async () => {
+    await render()
+    events.click({ lnglat: { lng: 114.3, lat: 30.5 } })
+    events.hotspotclick({ id: 'B000TEST', name: '四号教学楼', lnglat: { lng: 114.3, lat: 30.5 } })
+    await vi.advanceTimersByTimeAsync(500)
+    expect(wrapper!.emitted('poiClick')).toEqual([[{ id: 'B000TEST', name: '四号教学楼', coordinate: { longitude: 114.3, latitude: 30.5 } }]])
+    expect(wrapper!.emitted('mapClick')).toBeUndefined()
   })
-
-  afterEach(() => {
-    host.remove()
-    vi.clearAllMocks()
+  it('also suppresses click when the hotspot event arrives first', async () => {
+    await render()
+    events.hotspotclick({ id: 'B000TEST', name: 'Library' })
+    events.click({ lnglat: { lng: 114.3, lat: 30.5 } })
+    await vi.advanceTimersByTimeAsync(300)
+    expect(wrapper!.emitted('poiClick')).toHaveLength(1)
+    expect(wrapper!.emitted('mapClick')).toBeUndefined()
   })
-
-  it('does not construct a map when the SDK resolves after unmount', async () => {
-    const sdk = deferred<any>()
-    const MapConstructor = vi.fn(function FakeMap() {})
-    vi.mocked(loadAMapSdk).mockReturnValue(sdk.promise)
-
-    const application = createApp(RealCampusMap)
-    application.mount(host)
-    await nextTick()
-    application.unmount()
-
-    sdk.resolve({ Map: MapConstructor })
-    await settle()
-
-    expect(MapConstructor).not.toHaveBeenCalled()
+  it('passes plain SDK coordinates unchanged for explicit building candidates', async () => {
+    await render()
+    events.click({ lnglat: { getLng: () => 114.3, getLat: () => 30.5 } })
+    await vi.advanceTimersByTimeAsync(250)
+    expect(wrapper!.emitted('mapClick')).toEqual([[{ longitude: 114.3, latitude: 30.5 }]])
+    expect(wrapper!.emitted('poiClick')).toBeUndefined()
+  })
+  it('ignores drag and pinch completion taps without refitting or recreating the map', async () => {
+    await render()
+    for (let i = 0; i < 5; i++) {
+      events.zoomstart()
+      events.hotspotclick({ id: 'B000TEST' })
+      events.zoomend()
+      events.click({ lnglat: { lng: 114.3, lat: 30.5 } })
+      await vi.advanceTimersByTimeAsync(300)
+    }
+    await wrapper!.setProps({ buildings: [{ id: 3, latitude: 30.5, longitude: 114.3 }] as any, activeBuildingId: 3, camera: { center: [114.3, 30.5], zoom: 10 } })
+    expect(wrapper!.emitted('poiClick')).toBeUndefined()
+    expect(wrapper!.emitted('mapClick')).toBeUndefined()
+    expect(instance.setFitView).not.toHaveBeenCalled()
+    expect(instance.setZoomAndCenter).not.toHaveBeenCalled()
+    expect(sdk.Map).toHaveBeenCalledTimes(1)
+    expect(wrapper!.emitted('cameraChange')).toHaveLength(6)
+  })
+  it('restores a saved camera without adding a selection marker', async () => {
+    await render({ camera: { center: [114.31, 30.57], zoom: 19 } })
+    expect(sdk.Map).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ center: [114.31, 30.57], zoom: 19 }))
+    expect(sdk.Marker).not.toHaveBeenCalled()
+  })
+  it('draws only user location, converting GPS once, and does not recenter on a location update', async () => {
+    await render()
+    await wrapper!.setProps({ position: { latitude: 30.58, longitude: 114.32, accuracy: 15, locatedAt: new Date().toISOString(), source: 'browser' } })
+    expect(sdk.CircleMarker).toHaveBeenCalledWith(expect.objectContaining({ center: wgs84ToGcj02(30.58, 114.32) }))
+    expect(sdk.Circle).toHaveBeenCalledTimes(1)
+    expect(sdk.Marker).not.toHaveBeenCalled()
+    expect(instance.setZoomAndCenter).not.toHaveBeenCalled()
+    await wrapper!.setProps({ position: null })
+    expect(instance.remove).toHaveBeenCalled()
+  })
+  it('makes the mini map non-draggable and still emits tap-to-expand', async () => {
+    await render({ interactive: false })
+    expect(sdk.Map).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ isHotspot: false, dragEnable: false, zoomEnable: false, scrollWheel: false }))
     expect(loadAMapPlugin).not.toHaveBeenCalled()
+    events.click({ lnglat: { lng: 114.3, lat: 30.5 } })
+    await vi.advanceTimersByTimeAsync(250)
+    expect(wrapper!.emitted('mapClick')).toHaveLength(1)
   })
-
-  it('destroys map state and ignores controls that finish loading after unmount', async () => {
-    const controls = deferred<any>()
-    const marker = { on: vi.fn() }
-    const routePlanner = { search: vi.fn(), clear: vi.fn() }
-    const mapInstance = {
-      add: vi.fn(),
-      remove: vi.fn(),
-      addControl: vi.fn(),
-      on: vi.fn(),
-      off: vi.fn(),
-      getZoom: vi.fn(() => 16),
-      setFitView: vi.fn(),
-      destroy: vi.fn()
-    }
-    const amap = {
-      Map: vi.fn(function FakeMap() {
-        return mapInstance
-      }),
-      Marker: vi.fn(function FakeMarker() {
-        return marker
-      }),
-      Walking: vi.fn(function FakeWalking() {
-        return routePlanner
-      }),
-      Scale: vi.fn(),
-      ToolBar: vi.fn()
-    }
-    vi.mocked(loadAMapSdk).mockResolvedValue(amap)
-    vi.mocked(loadAMapPlugin).mockImplementation((name) => {
-      if (name === 'AMap.Walking') return Promise.resolve(amap)
-      return controls.promise
-    })
-
-    const application = createApp(RealCampusMap, {
-      buildings: [{
-        id: 1,
-        name: '教学楼',
-        type: '教学楼',
-        description: '',
-        latitude: 30.59,
-        longitude: 114.33,
-        map_x: 0,
-        map_y: 0,
-        walk_hint: null
-      }],
-      fromPoint: { name: '图书馆', latitude: 30.58, longitude: 114.32 },
-      toPoint: { name: '教学楼', latitude: 30.59, longitude: 114.33 },
-      walkingRoute: true
-    })
-    application.mount(host)
-    await settle()
-    await settle()
-
-    expect(amap.Map).toHaveBeenCalledOnce()
-    expect(routePlanner.search).toHaveBeenCalledOnce()
-    application.unmount()
-
-    expect(routePlanner.clear).toHaveBeenCalledOnce()
-    expect(mapInstance.remove).toHaveBeenCalled()
-    expect(mapInstance.off).toHaveBeenCalled()
-    expect(mapInstance.destroy).toHaveBeenCalledOnce()
-
-    controls.resolve(amap)
-    await settle()
-    expect(mapInstance.addControl).not.toHaveBeenCalled()
+  it('does not construct after unmount while the SDK is pending', async () => {
+    const pending = deferred<any>(); vi.mocked(loadAMapSdk).mockReturnValue(pending.promise)
+    wrapper = mount(RealCampusMap); wrapper.unmount(); wrapper = undefined
+    pending.resolve(sdk); await flushPromises()
+    expect(sdk.Map).not.toHaveBeenCalled()
   })
-
-  it('shows route failure feedback and clears it after a successful retry', async () => {
-    let attempt = 0
-    const routePlanner = {
-      clear: vi.fn(),
-      search: vi.fn((
-        _from: [number, number],
-        _to: [number, number],
-        callback: (status: string) => void
-      ) => {
-        attempt += 1
-        callback(attempt === 1 ? 'error' : 'complete')
-      })
-    }
-    const mapInstance = {
-      add: vi.fn(),
-      remove: vi.fn(),
-      addControl: vi.fn(),
-      on: vi.fn(),
-      off: vi.fn(),
-      getZoom: vi.fn(() => 16),
-      setFitView: vi.fn(),
-      destroy: vi.fn()
-    }
-    const amap = {
-      Map: vi.fn(function FakeMap() {
-        return mapInstance
-      }),
-      Marker: vi.fn(function FakeMarker() {
-        return { on: vi.fn() }
-      }),
-      Walking: vi.fn(function FakeWalking() {
-        return routePlanner
-      }),
-      Scale: vi.fn(),
-      ToolBar: vi.fn()
-    }
-    vi.mocked(loadAMapSdk).mockResolvedValue(amap)
-    vi.mocked(loadAMapPlugin).mockResolvedValue(amap)
-
-    const application = createApp(RealCampusMap, {
-      fromPoint: { name: '图书馆', latitude: 30.58, longitude: 114.32 },
-      toPoint: { name: '教学楼', latitude: 30.59, longitude: 114.33 },
-      walkingRoute: true
-    })
-    application.mount(host)
-    await settle()
-    await settle()
-
-    const feedback = host.querySelector<HTMLElement>('[role="alert"]')
-    expect(feedback?.textContent).toContain('步行路线暂时规划失败')
-    expect(routePlanner.search).toHaveBeenCalledOnce()
-
-    feedback?.querySelector<HTMLButtonElement>('button')?.click()
-    await settle()
-
-    expect(routePlanner.search).toHaveBeenCalledTimes(2)
-    expect(host.querySelector('[role="alert"]')).toBeNull()
-    application.unmount()
+  it('remembers a building selected while the SDK is still loading', async () => {
+    const pending = deferred<any>(); vi.mocked(loadAMapSdk).mockReturnValue(pending.promise)
+    await render({ camera: { center: [114.31, 30.57], zoom: 16 } })
+    ;(wrapper!.vm as any).focusCoordinate({ longitude: 114.3346, latitude: 30.579 }, 18)
+    pending.resolve(sdk); await flushPromises()
+    expect(sdk.Map).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ center: [114.3346, 30.579], zoom: 18 }))
   })
-
-  it('adds accessible names to frames and images generated by the map SDK', async () => {
-    const mapInstance = {
-      add: vi.fn(),
-      remove: vi.fn(),
-      addControl: vi.fn(),
-      on: vi.fn(),
-      off: vi.fn(),
-      getZoom: vi.fn(() => 16),
-      setFitView: vi.fn(),
-      destroy: vi.fn()
-    }
-    const amap = {
-      Map: vi.fn(function FakeMap(container: HTMLElement) {
-        const frame = document.createElement('iframe')
-        const logo = document.createElement('a')
-        logo.className = 'amap-logo'
-        logo.append(document.createElement('img'))
-        const tile = document.createElement('img')
-        container.append(frame, logo, tile)
-        return mapInstance
-      }),
-      Marker: vi.fn(),
-      Scale: vi.fn(),
-      ToolBar: vi.fn()
-    }
-    vi.mocked(loadAMapSdk).mockResolvedValue(amap)
-    vi.mocked(loadAMapPlugin).mockResolvedValue(amap)
-
-    const application = createApp(RealCampusMap, { title: '路线地图' })
-    application.mount(host)
-    await settle()
-
-    expect(host.querySelector('iframe')?.title).toBe('路线地图交互辅助框架')
-    expect(host.querySelector('.amap-logo img')?.getAttribute('alt')).toBe('高德地图')
-    expect(host.querySelectorAll('img')[1]?.getAttribute('alt')).toBe('')
-
-    application.unmount()
+  it('cleans events and ignores late controls and pending taps after unmount', async () => {
+    const pending = deferred<any>(); vi.mocked(loadAMapPlugin).mockReturnValue(pending.promise)
+    await render(); events.click({ lnglat: { lng: 114.3, lat: 30.5 } })
+    const mounted = wrapper!; mounted.unmount(); wrapper = undefined
+    pending.resolve(sdk); await flushPromises(); await vi.advanceTimersByTimeAsync(500)
+    expect(instance.destroy).toHaveBeenCalledTimes(1); expect(instance.off).toHaveBeenCalled()
+    expect(instance.addControl).not.toHaveBeenCalled(); expect(mounted.emitted('mapClick')).toBeUndefined()
   })
-
-  it('rebuilds markers without moving the view when only the active building changes', async () => {
-    const marker = { on: vi.fn() }
-    const mapInstance = {
-      add: vi.fn(),
-      remove: vi.fn(),
-      addControl: vi.fn(),
-      on: vi.fn(),
-      off: vi.fn(),
-      // 建筑层级 zoom：普通 pin 只在 >=17.5 显示，本测试关注的是标记重建不动视角
-      getZoom: vi.fn(() => 18),
-      setFitView: vi.fn(),
-      setCenter: vi.fn(),
-      destroy: vi.fn()
-    }
-    const amap = {
-      Map: vi.fn(function FakeMap() {
-        return mapInstance
-      }),
-      Marker: vi.fn(function FakeMarker() {
-        return marker
-      }),
-      Scale: vi.fn(),
-      ToolBar: vi.fn()
-    }
-    vi.mocked(loadAMapSdk).mockResolvedValue(amap)
-    vi.mocked(loadAMapPlugin).mockResolvedValue(amap)
-
-    const building = {
-      id: 1,
-      name: '教学楼',
-      type: '教学楼',
-      description: '',
-      latitude: 30.59,
-      longitude: 114.33,
-      map_x: 0,
-      map_y: 0,
-      walk_hint: null
-    }
-    const buildings = ref([building])
-    const activeBuildingId = ref<number | null>(null)
-    const Host = defineComponent({
-      render() {
-        return h(RealCampusMap, {
-          buildings: buildings.value,
-          activeBuildingId: activeBuildingId.value
-        })
-      }
-    })
-    const application = createApp(Host)
-    application.mount(host)
-    await settle()
-
-    expect(mapInstance.add).toHaveBeenCalledTimes(1)
-    expect(mapInstance.setFitView).toHaveBeenCalledTimes(1)
-
-    activeBuildingId.value = 1
-    await settle()
-
-    expect(mapInstance.add).toHaveBeenCalledTimes(2)
-    expect(mapInstance.setFitView).toHaveBeenCalledTimes(1)
-    expect(mapInstance.setCenter).not.toHaveBeenCalled()
-
-    buildings.value = [...buildings.value, { ...building, id: 2, name: '图书馆', latitude: 30.6 }]
-    await settle()
-
-    expect(mapInstance.add).toHaveBeenCalledTimes(3)
-    expect(mapInstance.setFitView).toHaveBeenCalledTimes(2)
-
-    application.unmount()
+  it('offers retry when loading fails and recovers', async () => {
+    vi.mocked(loadAMapSdk).mockRejectedValueOnce(new Error('offline'))
+    await render()
+    expect(wrapper!.text()).toContain('地图暂时打不开')
+    await wrapper!.get('button').trigger('click'); await flushPromises()
+    expect(wrapper!.text()).not.toContain('地图暂时打不开')
+    expect(sdk.Map).toHaveBeenCalledTimes(1)
   })
-
-  it('reveals ordinary pins only after zoomend crosses into building level', async () => {
-    const marker = { on: vi.fn() }
-    let zoom = 16
-    const listeners: Record<string, () => void> = {}
-    const mapInstance = {
-      add: vi.fn(),
-      remove: vi.fn(),
-      addControl: vi.fn(),
-      on: vi.fn((event: string, handler: () => void) => {
-        listeners[event] = handler
-      }),
-      off: vi.fn(),
-      getZoom: vi.fn(() => zoom),
-      setFitView: vi.fn(),
-      setCenter: vi.fn(),
-      destroy: vi.fn()
-    }
-    const amap = {
-      Map: vi.fn(function FakeMap() {
-        return mapInstance
-      }),
-      Marker: vi.fn(function FakeMarker() {
-        return marker
-      }),
-      Scale: vi.fn(),
-      ToolBar: vi.fn()
-    }
-    vi.mocked(loadAMapSdk).mockResolvedValue(amap)
-    vi.mocked(loadAMapPlugin).mockResolvedValue(amap)
-
-    const building = {
-      id: 1,
-      name: '教学楼',
-      type: '教学楼',
-      description: '',
-      latitude: 30.59,
-      longitude: 114.33,
-      map_x: 0,
-      map_y: 0,
-      walk_hint: null
-    }
-    const application = createApp(defineComponent({
-      render() {
-        return h(RealCampusMap, { buildings: [building] })
-      }
-    }))
-    application.mount(host)
-    await settle()
-
-    // mixed 档位（zoom 16）：普通 pin 隐藏，不构造任何标记
-    expect(amap.Marker).not.toHaveBeenCalled()
-
-    zoom = 18
-    listeners.zoomend?.()
-    await settle()
-
-    // 跨入 building 档位：zoomend 驱动重建，普通 pin 出现
-    expect(amap.Marker).toHaveBeenCalledTimes(1)
-    expect(mapInstance.add).toHaveBeenCalledTimes(1)
-
-    application.unmount()
-  })
-
-  it('renders only pins inside the current viewport and embeds hover name tips', async () => {
-    const marker = { on: vi.fn() }
-    const bounds = { contains: vi.fn((lngLat: [number, number]) => lngLat[0] < 114.4) }
-    const mapInstance = {
-      add: vi.fn(),
-      remove: vi.fn(),
-      addControl: vi.fn(),
-      on: vi.fn(),
-      off: vi.fn(),
-      getZoom: vi.fn(() => 18),
-      getBounds: vi.fn(() => bounds),
-      setFitView: vi.fn(),
-      setCenter: vi.fn(),
-      destroy: vi.fn()
-    }
-    const amap = {
-      Map: vi.fn(function FakeMap() {
-        return mapInstance
-      }),
-      Marker: vi.fn(function FakeMarker() {
-        return marker
-      }),
-      Scale: vi.fn(),
-      ToolBar: vi.fn()
-    }
-    vi.mocked(loadAMapSdk).mockResolvedValue(amap)
-    vi.mocked(loadAMapPlugin).mockResolvedValue(amap)
-
-    const base = { type: '教学楼', description: '', map_x: 0, map_y: 0, walk_hint: null }
-    const application = createApp(defineComponent({
-      render() {
-        return h(RealCampusMap, {
-          buildings: [
-            { ...base, id: 1, name: '湖北大学（武昌主校区）教学楼', latitude: 30.59, longitude: 114.33 },
-            { ...base, id: 2, name: '图书馆', latitude: 30.59, longitude: 114.6 }
-          ]
-        })
-      }
-    }))
-    application.mount(host)
-    await settle()
-
-    // 视野外的图书馆不建 pin；视野内的教学楼 pin 自带悬浮名称提示
-    expect(amap.Marker).toHaveBeenCalledTimes(1)
-    const content = String((amap.Marker.mock.calls[0] as unknown[] as [{ content: string }])[0].content)
-    expect(content).toContain('map-pin-tip')
-    expect(content).toContain('教学楼')
-    expect(content).not.toContain('湖北大学')
-
-    application.unmount()
-  })
-
-  it('enables native map dragging immediately without a long-press gate', async () => {
-    const mapInstance = {
-      add: vi.fn(),
-      remove: vi.fn(),
-      addControl: vi.fn(),
-      on: vi.fn(),
-      off: vi.fn(),
-      getZoom: vi.fn(() => 16),
-      setCenter: vi.fn(),
-      destroy: vi.fn()
-    }
-    const amap = {
-      Map: vi.fn(function FakeMap() {
-        return mapInstance
-      }),
-      Marker: vi.fn(),
-      Scale: vi.fn(),
-      ToolBar: vi.fn()
-    }
-    vi.mocked(loadAMapSdk).mockResolvedValue(amap)
-    vi.mocked(loadAMapPlugin).mockResolvedValue(amap)
-    const application = createApp(RealCampusMap)
-
-    try {
-      application.mount(host)
-      await settle()
-      const container = host.querySelector('.real-map-container')!
-
-      expect(amap.Map).toHaveBeenCalledWith(
-        container,
-        expect.objectContaining({ dragEnable: true })
-      )
-      expect(host.textContent).not.toContain('按住以拖动地图')
-    } finally {
-      application.unmount()
-    }
+  it('defers the home mini map until it is near the viewport', async () => {
+    let intersect!: (entries: any[]) => void
+    const disconnect = vi.fn()
+    vi.stubGlobal('IntersectionObserver', class { constructor(cb: any) { intersect = cb } observe() {} disconnect = disconnect })
+    await render({ lazy: true })
+    expect(loadAMapSdk).not.toHaveBeenCalled()
+    intersect([{ isIntersecting: true }]); await flushPromises()
+    expect(loadAMapSdk).toHaveBeenCalledTimes(1); expect(disconnect).toHaveBeenCalled()
   })
 })

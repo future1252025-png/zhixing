@@ -16,6 +16,7 @@ import {
   buildWeeksRange,
   courseToForm,
   formToPayload,
+  getCourseTimeSlots,
   getTeachingWeekOptions,
   parseWeeksRangeToPicker,
   validateCourseForm
@@ -38,8 +39,10 @@ const saveErrorMessage = ref('')
 const saveErrorCode = ref('')
 const conflictNotices = ref<Array<{ courseName: string; overlapWeeks: number[] }>>([])
 const weekOptions = getTeachingWeekOptions()
+const courseTimeSlots = computed(() => getCourseTimeSlots(courses.value))
 const weekRangeStart = ref(1)
 const weekRangeEnd = ref(16)
+const isCompletingImportedSchedule = ref(false)
 const weekdaySelectRef = ref<HTMLSelectElement | null>(null)
 const buildingPickerRef = ref<{ openSheet: () => void } | null>(null)
 const { pageStyle, onFieldFocus } = useKeyboardAwarePage({ basePaddingPx: 34 })
@@ -50,6 +53,37 @@ const courseId = computed(() => {
 })
 const isEdit = computed(() => courseId.value !== null)
 const pageTitle = computed(() => (isEdit.value ? '编辑课程' : '新增课程'))
+const selectedTimeSlot = computed(() =>
+  courseTimeSlots.value.find(
+    (slot) => slot.start_time === form.start_time && slot.end_time === form.end_time
+  ) ?? null
+)
+const timeRangeState = computed(() => {
+  const start = timeToMinutes(form.start_time)
+  const end = timeToMinutes(form.end_time)
+  if (start === null || end === null) {
+    return {
+      kind: 'pending' as const,
+      text: '请选择常用节次，或在下方填写准确的开始与结束时间。'
+    }
+  }
+  if (end <= start) {
+    return {
+      kind: 'error' as const,
+      text: '结束时间需要晚于开始时间，请重新选择。'
+    }
+  }
+  const duration = end - start
+  const hours = Math.floor(duration / 60)
+  const minutes = duration % 60
+  const durationText = [hours ? `${hours} 小时` : '', minutes ? `${minutes} 分钟` : '']
+    .filter(Boolean)
+    .join(' ')
+  return {
+    kind: 'ready' as const,
+    text: `${selectedTimeSlot.value ? `${selectedTimeSlot.value.section} 节 · ` : ''}课程时长 ${durationText}`
+  }
+})
 // 表单里 building_id 用 0 表示未选择，BuildingPicker 的受控值用 null 表示未选择
 const buildingIdModel = computed<number | null>({
   get: () => (Number(form.building_id) > 0 ? Number(form.building_id) : null),
@@ -71,6 +105,20 @@ function applyCreateDefaultsFromQuery() {
     form.weeks = weeks
     syncWeekRangePicker(weeks)
   }
+}
+
+function timeToMinutes(value: string): number | null {
+  if (!/^\d{2}:\d{2}$/.test(value)) return null
+  const [hourText, minuteText] = value.split(':')
+  const hour = Number(hourText)
+  const minute = Number(minuteText)
+  if (hour > 23 || minute > 59) return null
+  return hour * 60 + minute
+}
+
+function applyCourseTimeSlot(slot: { start_time: string; end_time: string }) {
+  form.start_time = slot.start_time
+  form.end_time = slot.end_time
 }
 
 function syncWeekRangePicker(weeks: string | null | undefined) {
@@ -129,6 +177,7 @@ function resetSubmitErrors() {
 async function loadFormData() {
   loading.value = true
   errorMessage.value = ''
+  isCompletingImportedSchedule.value = false
   try {
     const [buildingResult, courseResult] = await Promise.all([
       buildingsStore.ensureLoaded(),
@@ -142,6 +191,8 @@ async function loadFormData() {
         errorMessage.value = '未找到这门课程'
         return
       }
+      isCompletingImportedSchedule.value =
+        course.source_kind === 'import' && (!course.start_time || !course.end_time)
       Object.assign(form, courseToForm(course))
       syncWeekRangePicker(form.weeks)
     } else {
@@ -203,9 +254,17 @@ onMounted(loadFormData)
     <main class="page-content form-content" :style="pageStyle" @focusin="onFieldFocus">
       <header v-reveal="{ from: 'left', distance: 34, stagger: 45 }" class="form-hero">
         <div class="hero-copy">
-          <span class="eyebrow">{{ isEdit ? '整理旧笔记' : '写下一门新课' }}</span>
-          <h1>{{ isEdit ? '把课程信息补充完整' : '给课程留一张卡片' }}</h1>
-          <p>时间、地点和周次写清楚，到点就不慌张。</p>
+          <span class="eyebrow">
+            {{ isCompletingImportedSchedule ? '补全导入课程' : isEdit ? '整理旧笔记' : '写下一门新课' }}
+          </span>
+          <h1>
+            {{ isCompletingImportedSchedule ? '给这门课补上准确时间' : isEdit ? '把课程信息补充完整' : '给课程留一张卡片' }}
+          </h1>
+          <p>
+            {{ isCompletingImportedSchedule
+              ? '文件里的时间没有识别出来，选好节次就能回到课表。'
+              : '时间、地点和周次写清楚，到点就不慌张。' }}
+          </p>
         </div>
         <div class="notebook-art" aria-hidden="true">
           <span class="paper paper-back"></span>
@@ -363,12 +422,74 @@ onMounted(loadFormData)
             <span class="tape tape-green" aria-hidden="true"></span>
           </header>
 
-          <van-cell-group inset>
-            <div class="time-pair">
-              <van-field v-model="form.start_time" required type="time" label="开始时间" />
-              <span class="time-arrow" aria-hidden="true">→</span>
-              <van-field v-model="form.end_time" required type="time" label="结束时间" />
+          <div
+            class="time-planner"
+            :class="`time-planner--${timeRangeState.kind}`"
+            data-testid="course-time-planner"
+          >
+            <header class="time-planner-heading">
+              <span class="time-planner-clock" aria-hidden="true"><i></i></span>
+              <div>
+                <strong>先选上课时段</strong>
+                <small>优先沿用已有课程时间，也可以自由修改开始和结束时间</small>
+              </div>
+              <b>{{ selectedTimeSlot ? `${selectedTimeSlot.section} 节` : '自定义' }}</b>
+            </header>
+
+            <div class="time-slot-grid" aria-label="常用上课节次">
+              <button
+                v-for="slot in courseTimeSlots"
+                :key="slot.section"
+                type="button"
+                :class="{ active: selectedTimeSlot?.section === slot.section }"
+                :aria-pressed="selectedTimeSlot?.section === slot.section"
+                :data-testid="`time-slot-${slot.section}`"
+                @click="applyCourseTimeSlot(slot)"
+              >
+                <strong>{{ slot.section }} 节</strong>
+                <small>{{ slot.start_time }}—{{ slot.end_time }}</small>
+              </button>
             </div>
+
+            <div class="manual-time-heading">
+              <strong>精确时间</strong>
+              <small>点按时间可打开系统时间选择器</small>
+            </div>
+            <div class="manual-time-range">
+              <label>
+                <span>开始时间 <em>必填</em></span>
+                <input
+                  v-model="form.start_time"
+                  name="start_time"
+                  type="time"
+                  step="60"
+                  aria-label="课程开始时间"
+                />
+              </label>
+              <span class="manual-time-connector" aria-hidden="true"><i></i><b>至</b><i></i></span>
+              <label>
+                <span>结束时间 <em>必填</em></span>
+                <input
+                  v-model="form.end_time"
+                  name="end_time"
+                  type="time"
+                  step="60"
+                  aria-label="课程结束时间"
+                />
+              </label>
+            </div>
+            <p
+              class="time-range-feedback"
+              :class="timeRangeState.kind"
+              :role="timeRangeState.kind === 'error' ? 'alert' : 'status'"
+              aria-live="polite"
+            >
+              <span aria-hidden="true">{{ timeRangeState.kind === 'error' ? '!' : timeRangeState.kind === 'ready' ? '✓' : 'i' }}</span>
+              {{ timeRangeState.text }}
+            </p>
+          </div>
+
+          <van-cell-group inset>
 
             <van-field required @click="buildingPickerRef?.openSheet()">
               <template #label><span id="course-building-label">上课建筑</span></template>
@@ -776,13 +897,186 @@ onMounted(loadFormData)
   transform: translateY(-2px);
 }
 
-.time-pair {
+.time-planner {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 26px minmax(0, 1fr);
-  align-items: center;
+  gap: 14px;
+  margin-bottom: 14px;
+  border: 1px solid #d7e2d3;
+  border-radius: 22px;
+  background:
+    radial-gradient(circle at 100% 0, rgba(241, 208, 132, .24), transparent 9rem),
+    linear-gradient(145deg, rgba(249, 251, 241, .97), rgba(237, 246, 235, .96));
+  padding: 16px;
 }
-.time-pair :deep(.van-cell) { min-width: 0; }
-.time-arrow { color: #7c9c76; font-size: 20px; text-align: center; }
+.time-planner--error { border-color: #dba99b; background: linear-gradient(145deg, #fffaf5, #fff3ef); }
+.time-planner-heading {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+}
+.time-planner-heading > div { display: grid; min-width: 0; gap: 3px; }
+.time-planner-heading strong { color: var(--fresh-ink); font-size: 15px; }
+.time-planner-heading small { color: var(--fresh-muted); font-size: 11px; line-height: 1.45; }
+.time-planner-heading > b {
+  border: 1px solid #c8d9c4;
+  border-radius: var(--radius-pill);
+  background: rgba(255, 255, 255, .76);
+  color: #466d48;
+  font-size: 11px;
+  padding: 6px 9px;
+}
+.time-planner-clock {
+  position: relative;
+  display: block;
+  width: 38px;
+  height: 38px;
+  border: 2px solid #6e9871;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, .78);
+  box-shadow: 0 5px 12px rgba(72, 107, 72, .1);
+}
+.time-planner-clock::before,
+.time-planner-clock::after {
+  position: absolute;
+  left: 17px;
+  width: 2px;
+  border-radius: 2px;
+  background: #527a56;
+  content: '';
+  transform-origin: bottom;
+}
+.time-planner-clock::before { top: 8px; height: 10px; }
+.time-planner-clock::after { top: 11px; height: 8px; transform: rotate(125deg); }
+.time-planner-clock i {
+  position: absolute;
+  top: 15px;
+  left: 15px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #527a56;
+}
+.time-slot-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 7px;
+}
+.time-slot-grid button {
+  display: grid;
+  min-width: 0;
+  min-height: 58px;
+  align-content: center;
+  gap: 3px;
+  border: 1px solid #d5dfd1;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, .82);
+  color: #526457;
+  cursor: pointer;
+  padding: 8px 6px;
+  text-align: left;
+  transition: border-color 180ms ease, background 180ms ease, color 180ms ease, transform 180ms ease;
+}
+.time-slot-grid button strong { font-size: 12px; }
+.time-slot-grid button small {
+  overflow: hidden;
+  color: #7c897f;
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.time-slot-grid button.active {
+  border-color: #557d59;
+  background: #557d59;
+  box-shadow: 0 7px 15px rgba(70, 109, 72, .18);
+  color: #fff;
+  transform: translateY(-2px);
+}
+.time-slot-grid button.active small { color: rgba(255, 255, 255, .78); }
+.manual-time-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  border-top: 1px dashed #cbd9c8;
+  padding-top: 13px;
+}
+.manual-time-heading strong { color: #48644c; font-size: 13px; }
+.manual-time-heading small { color: var(--fresh-muted); font-size: 11px; }
+.manual-time-range {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 42px minmax(0, 1fr);
+  align-items: end;
+  gap: 8px;
+}
+.manual-time-range label { display: grid; min-width: 0; gap: 7px; }
+.manual-time-range label > span { color: #526258; font-size: 12px; font-weight: 800; }
+.manual-time-range em { color: #995347; font-size: 10px; font-style: normal; }
+.manual-time-range input {
+  width: 100%;
+  min-width: 0;
+  min-height: 54px;
+  border: 1px solid #cbd9c7;
+  border-radius: 15px;
+  background: #fffef9;
+  color: #304936;
+  font: inherit;
+  font-size: 18px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+  outline: none;
+  padding: 0 12px;
+}
+.manual-time-range input:focus {
+  border-color: #628a66;
+  box-shadow: 0 0 0 4px rgba(98, 138, 102, .13);
+}
+.manual-time-range input::-webkit-calendar-picker-indicator {
+  width: 24px;
+  height: 24px;
+  cursor: pointer;
+  opacity: .68;
+}
+.manual-time-connector {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 4px;
+  height: 54px;
+  color: #78917b;
+  font-size: 11px;
+}
+.manual-time-connector i { height: 1px; background: #b7c9b5; }
+.manual-time-connector b { font-weight: 800; }
+.time-range-feedback {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin: 0;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, .68);
+  color: #647269;
+  font-size: 11px;
+  line-height: 1.5;
+  padding: 9px 10px;
+}
+.time-range-feedback > span {
+  display: grid;
+  width: 17px;
+  height: 17px;
+  flex: 0 0 auto;
+  place-items: center;
+  border-radius: 50%;
+  background: #d9e6d6;
+  color: #426948;
+  font-size: 10px;
+  font-weight: 900;
+}
+.time-range-feedback.error { background: #fff0eb; color: #803e34; }
+.time-range-feedback.error > span { background: #b96554; color: #fff; }
+.time-range-feedback.ready { color: #426148; }
 
 .form-actions {
   display: grid;
@@ -863,6 +1157,7 @@ onMounted(loadFormData)
   .write-range { grid-column: 1 / -1; }
   .form-actions { grid-template-columns: 1fr; }
   .form-actions > div { grid-row: auto; }
+  .time-slot-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 @media (max-width: 390px) {
@@ -870,8 +1165,12 @@ onMounted(loadFormData)
   .notebook-art { position: absolute; right: -2px; bottom: -23px; }
   .hero-copy h1 { font-size: 27px; }
   .form-sheet { padding: 15px 12px; }
-  .time-pair { grid-template-columns: 1fr; }
-  .time-arrow { rotate: 90deg; }
+  .time-planner { padding: 13px; }
+  .time-planner-heading { grid-template-columns: auto minmax(0, 1fr); }
+  .time-planner-heading > b { grid-column: 1 / -1; justify-self: start; }
+  .manual-time-heading { display: grid; gap: 3px; }
+  .manual-time-range { grid-template-columns: 1fr; }
+  .manual-time-connector { width: 100%; height: 24px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

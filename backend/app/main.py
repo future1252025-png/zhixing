@@ -15,6 +15,7 @@ from app.api.health import router as health_router
 from app.api.messages import router as messages_router
 from app.api.schedule import router as schedule_router
 from app.api.semester import router as semester_router
+from app.api.reminders import router as reminders_router
 from app.core.config import settings, validate_settings
 from app.core.errors import BusinessError
 from app.db.database import init_db
@@ -153,6 +154,7 @@ app.include_router(buildings_router)
 app.include_router(messages_router)
 app.include_router(courses_router)
 app.include_router(schedule_router)
+app.include_router(reminders_router)
 app.include_router(semester_router)
 
 

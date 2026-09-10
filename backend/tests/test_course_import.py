@@ -16,10 +16,84 @@ from app.db.seed import seed_demo_data
 from app.main import app
 from app.models import Building, Course, CourseImportSource, User
 from app.api.courses import MAX_IMPORT_FILE_BYTES
-from app.services.course_import_service import parse_course_cell
+from app.services.course_import_service import _parse_time, _read_rows, _rows_to_raw_courses, parse_course_cell
 
 
 FIXTURES = Path(__file__).with_name("fixtures")
+
+
+def afternoon_import_content(axis: str = "第五六节 14:30-16:10", detail: str = "") -> bytes:
+    return f"""
+    <table>
+      <tr><th>节次</th><th>星期一</th><th>星期二</th><th>星期三</th></tr>
+      <tr><td>{axis}</td><td>思想概论<br>杨老师<br>1-16(周)[05-06节]{detail}<br>教3-205</td></tr>
+    </table>
+    """.encode("utf-8")
+
+
+@pytest.mark.parametrize("filename", ["schedule.html", "schedule.htm", "schedule.xls", "schedule.xlsx"])
+def test_actual_afternoon_clocks_survive_all_import_readers(filename: str) -> None:
+    content = afternoon_import_content()
+    if filename.endswith(".xlsx"):
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.append(["节次", "星期一", "星期二", "星期三"])
+        sheet.append(["第五六节 14:30-16:10", "思想概论\n杨老师\n1-16(周)[05-06节]\n教3-205"])
+        output = BytesIO()
+        workbook.save(output)
+        content = output.getvalue()
+    raw = _rows_to_raw_courses(_read_rows(filename, content))[0]
+    start, end = _parse_time(raw.raw_time_or_section)
+    assert start.isoformat(timespec="minutes") == "14:30"
+    assert end.isoformat(timespec="minutes") == "16:10"
+    assert raw.raw_weeks == "1-16(周)"
+
+
+@pytest.mark.parametrize(
+    "axis, detail, expected",
+    [
+        ("第五六节 14:00-15:40", " 14:30-16:10", ("14:30", "16:10")),
+        ("第五六节 14:00-15:40", "<br>14:30-16:10", ("14:30", "16:10")),
+        ("第五六节 14：30 ～ 16：10", "", ("14:30", "16:10")),
+        ("第五六节 9:05 至 10:45", "", ("09:05", "10:45")),
+        ("第五六节", "", (None, None)),
+        ("第三四节 09:55-11:35", "", (None, None)),
+        ("第五六节 14:30-14:00", "", (None, None)),
+        ("第五六节 14:00-15:40", " 25:30-26:10", (None, None)),
+    ],
+)
+def test_import_never_replaces_explicit_or_unknown_clocks_with_section_defaults(axis, detail, expected) -> None:
+    raw = _rows_to_raw_courses(_read_rows("schedule.html", afternoon_import_content(axis, detail)))[0]
+    times = _parse_time(raw.raw_time_or_section)
+    assert tuple(value.isoformat(timespec="minutes") if value else None for value in times) == expected
+    assert raw.raw_location == "教3-205"
+    assert raw.raw_teacher == "杨老师"
+
+
+def test_section_mapping_comes_from_current_file_not_another_row_or_a_default() -> None:
+    rows = [
+        ["时段", "节次", "星期一", "星期二", "星期三"],
+        ["上午", "第三四节 09:55-11:35", "思想概论\n杨老师\n1-16(周)[05-06节]\n教3-205"],
+        ["下午", "第五六节 14:30-16:10", ""],
+    ]
+    raw = _rows_to_raw_courses(rows)[0]
+    assert _parse_time(raw.raw_time_or_section)[0].isoformat(timespec="minutes") == "14:30"
+    rows.append(["下午", "第五六节 14:00-15:40", ""])
+    assert _parse_time(_rows_to_raw_courses(rows)[0].raw_time_or_section) == (None, None)
+
+
+def test_unknown_section_does_not_borrow_the_morning_row_clock() -> None:
+    content = afternoon_import_content("第一二节 08:00-09:40").replace(b"[05-06", "[晚自习".encode())
+    raw = _rows_to_raw_courses(_read_rows("schedule.html", content))[0]
+    assert _parse_time(raw.raw_time_or_section) == (None, None)
+
+
+@pytest.mark.parametrize("schedule", ["1-16 14:30-16:10", "14:30-16:10 1-16(周)[05-06节]"])
+def test_clock_placement_does_not_turn_hours_into_teaching_weeks(schedule: str) -> None:
+    content = afternoon_import_content().replace("1-16(周)[05-06节]".encode(), schedule.encode())
+    raw = _rows_to_raw_courses(_read_rows("schedule.html", content))[0]
+    assert raw.raw_weeks in {"1-16", "1-16(周)"}
+    assert _parse_time(raw.raw_time_or_section)[0].isoformat(timespec="minutes") == "14:30"
 
 
 def make_test_database_url(path: Path) -> str:
@@ -535,6 +609,7 @@ def commit_import_request(
     digest: str,
     resolutions: list[dict[str, object]] | None = None,
     excluded_row_refs: list[str] | None = None,
+    time_resolutions: list[dict[str, object]] | None = None,
     filename: str = "valid.html",
 ):
     manifest_data: dict[str, object] = {"sha256": digest}
@@ -542,6 +617,8 @@ def commit_import_request(
         manifest_data["resolutions"] = resolutions
     if excluded_row_refs is not None:
         manifest_data["excluded_row_refs"] = excluded_row_refs
+    if time_resolutions is not None:
+        manifest_data["time_resolutions"] = time_resolutions
     manifest = json.dumps(manifest_data, ensure_ascii=False)
     return client.post(
         "/api/courses/import",
@@ -565,6 +642,74 @@ def importer_counts(SessionLocal: sessionmaker) -> tuple[int, int]:
             .where(Course.user_id == user_id)
         )
         return int(course_count or 0), int(source_count or 0)
+
+
+@pytest.mark.parametrize("axis", ["第五六节", "第五六节 14:00-15:40", "第五六节 14:30-16:10"])
+def test_confirmed_import_time_is_persisted_without_changing_source(client_and_session, axis) -> None:
+    client, SessionLocal = client_and_session
+    headers = auth_headers(client)
+    content = afternoon_import_content(axis)
+    digest, _, preview = preview_and_resolutions(client, headers, content)
+    response = commit_import_request(
+        client, headers, content, digest=digest,
+        time_resolutions=[{"row_ref": "row-1", "start_time": "14:30", "end_time": "16:10"}],
+    )
+    assert response.status_code == 201, response.text
+    saved = client.get("/api/courses", headers=headers).json()
+    assert len(saved) == 1
+    assert (saved[0]["start_time"], saved[0]["end_time"]) == ("14:30", "16:10")
+    with SessionLocal() as session:
+        source = session.scalar(select(CourseImportSource).where(CourseImportSource.course_id == saved[0]["id"]))
+        assert source.raw_time_or_section == preview["candidates"][0]["source"]["raw_time_or_section"]
+
+
+def test_recognized_afternoon_clocks_persist_without_manual_override(client: TestClient) -> None:
+    headers = auth_headers(client)
+    content = afternoon_import_content()
+    digest, _, _ = preview_and_resolutions(client, headers, content)
+    response = commit_import_request(client, headers, content, digest=digest)
+    assert response.status_code == 201
+    saved = client.get("/api/courses", headers=headers).json()[0]
+    assert (saved["start_time"], saved["end_time"]) == ("14:30", "16:10")
+
+
+@pytest.mark.parametrize(
+    "overrides, status",
+    [
+        ([{"row_ref": "row-1", "start_time": "16:10", "end_time": "14:30"}], 422),
+        ([{"row_ref": "row-1", "start_time": "25:30", "end_time": "26:10"}], 422),
+        ([{"row_ref": "row-1", "start_time": "14:30", "end_time": "14:30"}], 422),
+        ([{"row_ref": "row-99", "start_time": "14:30", "end_time": "16:10"}], 409),
+        ([{"row_ref": "row-1", "start_time": "14:30", "end_time": "16:10"}] * 2, 409),
+    ],
+)
+def test_invalid_import_time_corrections_preserve_existing_courses(client: TestClient, overrides, status) -> None:
+    headers = auth_headers(client)
+    content = afternoon_import_content()
+    digest, _, _ = preview_and_resolutions(client, headers, content)
+    assert commit_import_request(client, headers, content, digest=digest).status_code == 201
+    original = client.get("/api/courses", headers=headers).json()
+    response = commit_import_request(client, headers, content, digest=digest, time_resolutions=overrides)
+    assert response.status_code == status, response.text
+    assert client.get("/api/courses", headers=headers).json() == original
+
+
+def test_import_conflicts_are_checked_after_time_corrections(client: TestClient) -> None:
+    headers = auth_headers(client)
+    content = conflicting_import_content()
+    digest, _, _ = preview_and_resolutions(client, headers, content)
+    response = commit_import_request(
+        client, headers, content, digest=digest,
+        time_resolutions=[{"row_ref": "row-2", "start_time": "14:30", "end_time": "16:10"}],
+    )
+    assert response.status_code == 201, response.text
+    assert response.json()["created_count"] == 2
+    original = client.get("/api/courses", headers=headers).json()
+    conflicting = [{"row_ref": "row-2", "start_time": "08:30", "end_time": "10:10"}]
+    response = commit_import_request(client, headers, content, digest=digest, time_resolutions=conflicting)
+    assert response.status_code == 409
+    assert response.json()["code"] == "course_conflict"
+    assert client.get("/api/courses", headers=headers).json() == original
 
 
 def test_non_timetable_news_table_is_rejected_without_replacing_courses(
@@ -1040,7 +1185,7 @@ def test_import_defers_missing_room_review_until_route_time(
     content = """
     <table>
       <tr><th>节次</th><th>星期四</th><th>星期五</th><th>星期六</th></tr>
-      <tr><td>第一二节</td><td>形势与政策<br>周老师<br>1-4(周)[01-02节]<br>教4</td></tr>
+      <tr><td>第一二节 08:00-09:40</td><td>形势与政策<br>周老师<br>1-4(周)[01-02节]<br>教4</td></tr>
     </table>
     """.encode("utf-8")
     digest, _, preview = preview_and_resolutions(client, headers, content)

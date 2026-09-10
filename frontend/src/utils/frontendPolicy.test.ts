@@ -62,9 +62,9 @@ describe('mobile input policy', () => {
     expect(source).toContain('const composerLift = computed(() => Math.max(0, keyboardInset.value))')
   })
 
-  it('keeps both RealCampusMap search themes at 16px', () => {
-    const matches = frontendFile('src/components/RealCampusMap.vue').match(/\.map-search :deep\(\.van-field__control\) \{[\s\S]*?font-size:\s*16px;/g)
-    expect(matches).toHaveLength(2)
+  it('keeps map and classroom search fields at mobile-safe sizes', () => {
+    expect(frontendFile('src/pages/CampusMapPage.vue')).toMatch(/\.map-building-search input \{[\s\S]*?min-height:\s*48px;[\s\S]*?font-size:\s*16px;/)
+    expect(frontendFile('src/pages/BuildingChatroomsPage.vue')).toMatch(/\.room-search input \{[\s\S]*?min-height:\s*48px;[\s\S]*?font-size:\s*16px;/)
   })
 
   it('overrides MapCollector scoped sizing for all four input and select controls', () => {
@@ -99,10 +99,10 @@ describe('native safe-area policy', () => {
     expect(source).toContain('html.capacitor-android .page > .van-nav-bar + .collector-layout {')
     expect(source).toMatch(/html\.capacitor-android #semester-settings \{[\s\S]*?margin-top:\s*12px;/)
     expect(source).toMatch(/html\.capacitor-android #semester-settings \{[\s\S]*?scroll-margin-top:\s*calc\(var\(--app-safe-area-top\) \+ var\(--nav-height, 58px\) \+ 44px\);/)
-    expect(source).toMatch(/html\.capacitor-android \.courses-page > \.van-nav-bar,[\s\S]*?html\.capacitor-android \.schedule-page > \.van-nav-bar,[\s\S]*?html\.capacitor-android \.profile-page > \.van-nav-bar,[\s\S]*?html\.capacitor-android \.course-import-page > \.van-nav-bar \{[\s\S]*?position:\s*relative;[\s\S]*?top:\s*var\(--app-native-nav-inset-top\);[\s\S]*?margin-top:\s*12px;/)
+    expect(source).toMatch(/html\.capacitor-android \.courses-page > \.van-nav-bar,[\s\S]*?html\.capacitor-android \.reminders-page > \.van-nav-bar,[\s\S]*?html\.capacitor-android \.profile-page > \.van-nav-bar,[\s\S]*?html\.capacitor-android \.course-import-page > \.van-nav-bar \{[\s\S]*?position:\s*relative;[\s\S]*?top:\s*var\(--app-native-nav-inset-top\);[\s\S]*?margin-top:\s*12px;/)
     expect(source).toMatch(/html\.capacitor-android \.courses-page \.week-head \{[\s\S]*?top:\s*var\(--app-native-nav-inset-top, env\(safe-area-inset-top, 0px\)\);/)
     expect(source).toMatch(/html\.capacitor-android \.courses-page \.week-head\.is-stuck::before \{[\s\S]*?height:\s*var\(--app-native-nav-inset-top, env\(safe-area-inset-top, 0px\)\);[\s\S]*?background:\s*rgba\(246, 247, 252, 0\.98\);/)
-    expect(source).toMatch(/html\.capacitor-android \.courses-page > \.van-nav-bar \+ \.page-content,[\s\S]*?html\.capacitor-android \.schedule-page > \.van-nav-bar \+ \.page-content,[\s\S]*?html\.capacitor-android \.profile-page > \.van-nav-bar \+ \.page-content,[\s\S]*?html\.capacitor-android \.course-import-page > \.van-nav-bar \+ \.page-content \{[\s\S]*?padding-top:\s*calc\(var\(--app-native-nav-inset-top\) \+ 8px\);/)
+    expect(source).toMatch(/html\.capacitor-android \.courses-page > \.van-nav-bar \+ \.page-content,[\s\S]*?html\.capacitor-android \.reminders-page > \.van-nav-bar \+ \.page-content,[\s\S]*?html\.capacitor-android \.profile-page > \.van-nav-bar \+ \.page-content,[\s\S]*?html\.capacitor-android \.course-import-page > \.van-nav-bar \+ \.page-content \{[\s\S]*?padding-top:\s*calc\(var\(--app-native-nav-inset-top\) \+ 8px\);/)
     expect(source).toMatch(/html\.capacitor-android \.courses-page #semester-settings \{[\s\S]*?margin-top:\s*0;/)
   })
 
@@ -130,7 +130,7 @@ describe('readability policy', () => {
     // --fresh-muted 的终值由下一行钉住，与上方 #5f6f62 对比度断言构成完整审计链
     expect(frontendFile('src/styles/fresh.css')).toContain('--fresh-muted: #5f6f62')
     expect(frontendFile('src/components/import/ImportCandidateCard.vue')).toContain('.panel-title small { color: var(--fresh-muted); font-size: 12px; }')
-    expect(frontendFile('src/components/RealCampusMap.vue')).toContain('.map-selected-card div > span { color: #5f6e62;')
+    expect(frontendFile('src/pages/CampusMapPage.vue')).toContain('color: #596d51;')
   })
 
   it('uses the backend channel name and no stale public-channel label', () => {
@@ -153,12 +153,16 @@ describe('readability policy', () => {
 })
 
 describe('map marker policy', () => {
-  it('keeps building pins self-contained so anchoring cannot drift', () => {
+  it('uses native hotspot hit testing without building pins or transforms', () => {
     const source = frontendFile('src/components/RealCampusMap.vue')
     // 曾因 :deep 覆盖 amap 标记子元素并施加 transform 动画，把 pin 从坐标点上挪走；
     // 标记内容必须自包含（内联 SVG 配色 + 像素定位），不允许再深度覆盖标记内部元素
     expect(source).not.toContain('.amap-marker-content > div > span')
-    expect(source).toMatch(/anchor: 'center'/)
+    expect(source).toContain("bind('hotspotclick'")
+    expect(source).not.toMatch(/new .*\.Marker\(/)
+    expect(source).not.toContain('setFitView(')
+    expect(source).not.toMatch(/:deep\(\.amap-/)
+    expect(frontendFile('src/App.vue')).toContain("to.path === '/map' || from.path === '/map'")
   })
 })
 

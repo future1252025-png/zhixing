@@ -54,16 +54,16 @@ test('Android primary headers keep a compact top gap and equal content gaps', as
 
     await page.evaluate(() => {
       document.body.innerHTML = `
-        <section class="page schedule-page">
+        <section class="page reminders-page">
           <div class="van-nav-bar"><div class="van-nav-bar__content"></div></div>
-          <div class="page-content schedule-content"><div class="journey-hero"></div></div>
+          <div class="page-content reminders-content"><div class="journey-hero"></div></div>
         </section>
       `
     })
     const schedule = await measureVerticalRhythm(
       page,
-      '.schedule-page',
-      '.schedule-content > .journey-hero'
+      '.reminders-page',
+      '.reminders-content > .journey-hero'
     )
 
     await page.evaluate(() => {

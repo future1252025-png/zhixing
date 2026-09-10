@@ -11,6 +11,7 @@ const LoginPage = () => import('@/pages/LoginPage.vue')
 const RegisterPage = () => import('@/pages/RegisterPage.vue')
 const PrivacyPage = () => import('@/pages/PrivacyPage.vue')
 const HomePage = () => import('@/pages/HomePage.vue')
+const CampusMapPage = () => import('@/pages/CampusMapPage.vue')
 const MapCollectorPage = () => import('@/pages/MapCollectorPage.vue')
 const BuildingDetailPage = () => import('@/pages/BuildingDetailPage.vue')
 const BuildingChatroomsPage = () => import('@/pages/BuildingChatroomsPage.vue')
@@ -18,7 +19,7 @@ const BuildingMessagesPage = () => import('@/pages/BuildingMessagesPage.vue')
 const CoursesPage = () => import('@/pages/CoursesPage.vue')
 const CourseFormPage = () => import('@/pages/CourseFormPage.vue')
 const CourseImportPage = () => import('@/pages/CourseImportPage.vue')
-const SchedulePage = () => import('@/pages/SchedulePage.vue')
+const RemindersPage = () => import('@/pages/RemindersPage.vue')
 const ProfilePage = () => import('@/pages/ProfilePage.vue')
 
 type AuthRouteTarget = {
@@ -102,6 +103,7 @@ const routes: RouteRecordRaw[] = [
   },
   { path: '/privacy', name: 'privacy', component: PrivacyPage },
   { path: '/home', name: 'home', component: HomePage, meta: { requiresAuth: true } },
+  { path: '/map', name: 'campus-map', component: CampusMapPage, meta: { requiresAuth: true } },
   {
     path: '/map-collector',
     name: 'map-collector',
@@ -151,9 +153,9 @@ const routes: RouteRecordRaw[] = [
     meta: { requiresAuth: true }
   },
   {
-    path: '/schedule',
-    name: 'schedule',
-    component: SchedulePage,
+    path: '/reminders',
+    name: 'reminders',
+    component: RemindersPage,
     meta: { requiresAuth: true }
   },
   {
@@ -161,7 +163,8 @@ const routes: RouteRecordRaw[] = [
     name: 'profile',
     component: ProfilePage,
     meta: { requiresAuth: true }
-  }
+  },
+  { path: '/schedule', redirect: '/reminders' }
 ]
 
 const router = createRouter({

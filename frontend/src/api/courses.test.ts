@@ -148,4 +148,14 @@ describe('courses api', () => {
       excluded_row_refs: ['row-14']
     })
   })
+
+  it('sends user-confirmed clocks alongside the untouched original file', async () => {
+    const file = new File(['original'], 'schedule.html')
+    vi.mocked(request.post).mockResolvedValue({ data: { created_count: 1, course_ids: [17] } })
+    const times = [{ row_ref: 'row-1', start_time: '14:30', end_time: '16:10' }]
+    await commitCourseImport(file, 'd'.repeat(64), [], times)
+    const form = vi.mocked(request.post).mock.calls[0]![1] as FormData
+    expect(form.get('file')).toBe(file)
+    expect(JSON.parse(String(form.get('manifest')))).toEqual({ sha256: 'd'.repeat(64), time_resolutions: times })
+  })
 })

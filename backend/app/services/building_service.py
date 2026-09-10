@@ -6,7 +6,7 @@ from app.schemas.location_preset import LocationPresetRead
 
 
 def list_buildings(session: Session) -> list[Building]:
-    return list(session.scalars(select(Building).order_by(Building.id)).all())
+    return list(session.scalars(select(Building).options(selectinload(Building.map_pois)).order_by(Building.id)).all())
 
 
 def get_building(session: Session, building_id: int) -> Building | None:

@@ -1,13 +1,14 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, defineAsyncComponent, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import AppTabbar from '@/components/AppTabbar.vue'
+const ReminderRuntime = defineAsyncComponent(() => import('@/components/ReminderRuntime.vue'))
 import { vantThemeVars as themeVars } from '@/styles/tokens'
 
 const route = useRoute()
 const router = useRouter()
-const tabbarRoutes = ['/home', '/courses', '/schedule', '/profile']
+const tabbarRoutes = ['/home', '/courses', '/reminders', '/profile']
 const showTabbar = computed(() => tabbarRoutes.includes(route.path))
 
 /* 路由转场方向：tab 互切与同层跳转仅淡入淡出，进层从右滑入、返回从左滑入 */
@@ -15,6 +16,11 @@ const transitionName = ref('route-fade')
 const pathDepth = (path: string) => path.split('/').filter(Boolean).length
 
 router.afterEach((to, from) => {
+  // The SDK hit-test coordinates must never inherit a moving/scaled route container.
+  if (to.path === '/map' || from.path === '/map') {
+    transitionName.value = 'route-fade'
+    return
+  }
   if (tabbarRoutes.includes(to.path) && tabbarRoutes.includes(from.path)) {
     transitionName.value = 'route-fade'
     return
@@ -37,6 +43,7 @@ router.afterEach((to, from) => {
         </router-view>
       </main>
       <AppTabbar v-if="showTabbar" />
+      <ReminderRuntime />
     </div>
   </van-config-provider>
 </template>

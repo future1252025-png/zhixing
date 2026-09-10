@@ -29,6 +29,16 @@ const courses: Course[] = [
 ]
 
 describe('courses store', () => {
+  it('preserves the last course snapshot when a background refresh goes offline', async () => {
+    setActivePinia(createPinia())
+    vi.mocked(getCourses).mockResolvedValueOnce(courses)
+    const store = useCoursesStore()
+    await store.ensureLoaded()
+    vi.mocked(getCourses).mockRejectedValueOnce(new Error('offline'))
+    await expect(store.ensureLoaded(true)).rejects.toThrow('offline')
+    expect(store.loaded).toBe(true)
+    expect(store.courses).toEqual(courses)
+  })
   beforeEach(() => {
     setActivePinia(createPinia())
     vi.clearAllMocks()

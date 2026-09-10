@@ -10,6 +10,7 @@ import { fetchSemester } from '@/api/semester'
 import { useAuthStore } from '@/stores/auth'
 import type { Course } from '@/types/course'
 import HomePage from './HomePage.vue'
+import selectionFixture from '../../../tests/fixtures/course-selection.json'
 
 vi.mock('@/api/buildings', () => ({ getBuildings: vi.fn() }))
 vi.mock('@/api/courses', () => ({ getCourses: vi.fn() }))
@@ -173,6 +174,43 @@ describe('HomePage', () => {
     await flushPromises()
 
     expect(router.currentRoute.value.path).toBe('/courses/5/edit')
+    wrapper.unmount()
+  })
+
+  it.each(['2026-09-07T14:09:00+08:00', '2026-09-07T14:30:00+08:00'])('shows the ongoing course at %s instead of Java', async (time) => {
+    vi.setSystemTime(new Date(time))
+    vi.mocked(getCourses).mockResolvedValue(selectionFixture.courses.map(course))
+    const wrapper = await mountHome()
+    expect(wrapper.get('.today-copy').text()).toContain('习近平新时代中国特色社会主义思想概论')
+    expect(wrapper.get('.today-copy').text()).toContain('正在上课')
+    expect(wrapper.get('.today-copy').text()).not.toContain('JAVA应用开发')
+    expect(wrapper.text()).toContain('真实第 2 周')
+    wrapper.unmount()
+  })
+
+  it('switches only at the end boundary while staying on the page, without reloading', async () => {
+    vi.setSystemTime(new Date('2026-09-07T15:39:59+08:00'))
+    vi.mocked(getCourses).mockResolvedValue(selectionFixture.courses.map(course))
+    const wrapper = await mountHome()
+    expect(wrapper.get('.today-copy').text()).toContain('习近平新时代中国特色社会主义思想概论')
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(wrapper.get('.today-copy').text()).toContain('JAVA应用开发')
+    expect(wrapper.get('.today-copy').text()).not.toContain('正在上课')
+    expect(getCourses).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
+  })
+
+  it('recomputes date and teaching week on resume without using the cached week', async () => {
+    vi.setSystemTime(new Date('2026-09-13T23:59:59+08:00'))
+    vi.mocked(getCourses).mockResolvedValue(selectionFixture.courses.map(course))
+    const wrapper = await mountHome()
+    expect(wrapper.find('.home-next-course').exists()).toBe(false)
+    vi.setSystemTime(new Date('2026-09-14T14:09:00+08:00'))
+    window.dispatchEvent(new Event('focus'))
+    await flushPromises()
+    expect(wrapper.text()).toContain('真实第 3 周')
+    expect(wrapper.get('.today-copy').text()).toContain('JAVA应用开发')
+    expect(wrapper.get('.home-top time').text()).toContain('9月14日')
     wrapper.unmount()
   })
 

@@ -9,6 +9,7 @@ const ROOT_PATHS = new Set([
   '/home',
   '/courses',
   '/schedule',
+  '/reminders',
   '/profile',
   '/login'
 ])

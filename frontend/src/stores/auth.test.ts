@@ -76,6 +76,24 @@ describe('auth store', () => {
     expect(store.currentUser?.nickname).toBe('Alice')
   })
 
+  it('uses the user returned by session restore without a second profile request', async () => {
+    const restore = vi.spyOn(requestApi, 'restoreSession').mockResolvedValue({
+      restored: true,
+      user
+    })
+    setAccessToken('restored-token')
+    const store = useAuthStore()
+
+    try {
+      await expect(store.restoreSession()).resolves.toBe(true)
+    } finally {
+      restore.mockRestore()
+    }
+
+    expect(store.currentUser).toEqual(user)
+    expect(authApi.getCurrentUser).not.toHaveBeenCalled()
+  })
+
   it('keeps the saved session on a transient profile load failure', async () => {
     setAccessToken('saved-token')
     vi.mocked(authApi.getCurrentUser).mockRejectedValue({

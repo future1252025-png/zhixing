@@ -144,6 +144,7 @@ function createPoint(
 
   return {
     id: sourceId || `${name}-${gcjLongitude.toFixed(6)}-${gcjLatitude.toFixed(6)}`,
+    poiId: sourceId || null,
     name,
     type: normalizeType(type),
     address,
@@ -572,7 +573,8 @@ function buildSeedData(source: CollectedPoint[]): string {
       longitude: point.longitude,
       map_x: estimateMapX(point.longitude),
       map_y: estimateMapY(point.latitude),
-      walk_hint: null
+      walk_hint: null,
+      ...(point.poiId ? { map_pois: [{ provider: 'amap', poi_id: point.poiId, name: point.name }] } : {})
     })),
     null,
     2

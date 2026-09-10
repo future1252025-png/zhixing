@@ -12,8 +12,8 @@ from app.schemas.auth import (
     LoginResponse,
     LogoutRequest,
     RefreshRequest,
+    RefreshResponse,
     RegisterRequest,
-    TokenResponse,
 )
 from app.schemas.user import UserProfileUpdate, UserRead
 from app.services.auth_service import (
@@ -153,7 +153,7 @@ def login(
 
 @router.post(
     "/refresh",
-    response_model=TokenResponse,
+    response_model=RefreshResponse,
     response_model_exclude_none=True,
 )
 def refresh_access_token(
@@ -161,7 +161,7 @@ def refresh_access_token(
     request: Request,
     response: Response,
     session: Session = Depends(get_session),
-) -> TokenResponse:
+) -> RefreshResponse:
     _validate_web_refresh_origin(payload, request)
     refresh_token = _presented_refresh_token(payload, request)
     if not refresh_token:
@@ -179,12 +179,13 @@ def refresh_access_token(
 
     if payload.client_kind == "web":
         _set_refresh_cookie(response, next_refresh_token)
-    return TokenResponse(
+    return RefreshResponse(
         access_token=create_access_token(user.token_subject),
         expires_in=settings.access_token_expire_minutes * 60,
         refresh_token=(
             next_refresh_token if payload.client_kind == "native" else None
         ),
+        user=UserRead.model_validate(user),
     )
 
 

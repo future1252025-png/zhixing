@@ -17,7 +17,7 @@ describe('SemesterSettingsCard', () => {
       }
     })
 
-    expect(wrapper.text()).toContain('尚未设置学期，首页与出发建议暂不可用')
+    expect(wrapper.text()).toContain('尚未设置学期，首页课程与课程提醒暂不可用')
     expect(wrapper.find('[name="start_date"]').exists()).toBe(true)
     expect(wrapper.find('[name="total_weeks"]').exists()).toBe(true)
   })

@@ -232,7 +232,10 @@ describe('request session handling', () => {
     sessionRequest.defaults.adapter = adapter
 
     try {
-      await expect(restoreSession()).resolves.toBe(false)
+      await expect(restoreSession()).resolves.toEqual({
+        restored: false,
+        user: null
+      })
     } finally {
       sessionRequest.defaults.adapter = originalAdapter
     }
@@ -241,5 +244,41 @@ describe('request session handling', () => {
     expect(adapter.mock.calls[0]?.[0].url).toBe('/api/auth/logout')
     expect(getAccessToken()).toBeNull()
     expect(hasPendingWebLogout()).toBe(false)
+  })
+
+  it('restores the current user together with the refreshed access token', async () => {
+    const originalAdapter = sessionRequest.defaults.adapter
+    const restoredUser = {
+      id: 7,
+      student_id: '20260007',
+      nickname: '小智',
+      avatar_text: '智',
+      avatar_color: '#4f7d58',
+      role: 'student',
+      created_at: '2026-09-01T00:00:00Z'
+    }
+    sessionRequest.defaults.adapter = vi.fn(async (config) => ({
+      data: {
+        access_token: 'startup-access',
+        token_type: 'bearer',
+        expires_in: 900,
+        user: restoredUser
+      },
+      status: 200,
+      statusText: 'OK',
+      headers: {},
+      config
+    }))
+
+    try {
+      await expect(restoreSession()).resolves.toEqual({
+        restored: true,
+        user: restoredUser
+      })
+    } finally {
+      sessionRequest.defaults.adapter = originalAdapter
+    }
+
+    expect(getAccessToken()).toBe('startup-access')
   })
 })

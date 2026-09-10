@@ -22,8 +22,8 @@ export const useCoursesStore = defineStore('courses', {
   }),
   actions: {
     /** Return the cached course list, requesting it only when missing. */
-    async ensureLoaded(): Promise<Course[]> {
-      if (this.loaded) return this.courses
+    async ensureLoaded(force = false): Promise<Course[]> {
+      if (this.loaded && !force) return this.courses
       if (this.pendingRequest) return this.pendingRequest
       this.loading = true
       this.errorMessage = ''

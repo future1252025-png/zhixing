@@ -85,6 +85,10 @@ class TokenResponse(BaseModel):
     refresh_token: str | None = None
 
 
+class RefreshResponse(TokenResponse):
+    user: UserRead
+
+
 class RefreshRequest(BaseModel):
     client_kind: Literal["web", "native"] = "web"
     refresh_token: str | None = Field(default=None, min_length=32, max_length=512)

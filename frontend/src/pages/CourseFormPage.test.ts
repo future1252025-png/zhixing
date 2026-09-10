@@ -181,6 +181,26 @@ describe('CourseFormPage', () => {
     expect(mocks.push).toHaveBeenCalledWith('/courses')
   })
 
+  it('saves manually corrected imported clocks without snapping back to a section preset', async () => {
+    mocks.route.params = { id: '7' }
+    mocks.getCourses.mockResolvedValue([{ ...existingCourse, source_kind: 'import' }])
+    const wrapper = await mountPage()
+    await wrapper.get('[name="start_time"]').setValue('14:30')
+    await wrapper.get('[name="end_time"]').setValue('16:10')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(mocks.updateCourse).toHaveBeenCalledWith(7,
+      expect.objectContaining({ start_time: '14:30', end_time: '16:10' }))
+  })
+
+  it('uses existing actual afternoon times as a quick preset for a new course', async () => {
+    mocks.getCourses.mockResolvedValue([{ ...existingCourse, start_time: '14:30', end_time: '16:10' }])
+    const wrapper = await mountPage()
+    await wrapper.get('[data-testid="time-slot-5-6"]').trigger('click')
+    expect((wrapper.get('[name="start_time"]').element as HTMLInputElement).value).toBe('14:30')
+    expect((wrapper.get('[name="end_time"]').element as HTMLInputElement).value).toBe('16:10')
+  })
+
   it('keeps saving text outside the spinner so neither can cover the other', async () => {
     mocks.route.params = { id: '7' }
     mocks.getCourses.mockResolvedValue([existingCourse])
@@ -192,5 +212,52 @@ describe('CourseFormPage', () => {
     expect(wrapper.get('.course-save__label').text()).toBe('正在保存课程')
     expect(wrapper.find('.course-save__spinner').exists()).toBe(true)
     expect(wrapper.get('.course-save__label').find('.course-save__spinner').exists()).toBe(false)
+  })
+
+  it('offers polished slot presets when an imported course needs its time completed', async () => {
+    mocks.route.params = { id: '7' }
+    mocks.getCourses.mockResolvedValue([
+      {
+        ...existingCourse,
+        start_time: null,
+        end_time: null,
+        source_kind: 'import'
+      }
+    ])
+    const wrapper = await mountPage()
+
+    expect(wrapper.text()).toContain('补全导入课程')
+    expect(wrapper.text()).toContain('给这门课补上准确时间')
+    expect(wrapper.get('[data-testid="course-time-planner"]').classes()).toContain(
+      'time-planner--pending'
+    )
+
+    await wrapper.get('[data-testid="time-slot-5-6"]').trigger('click')
+
+    expect((wrapper.get('[name="start_time"]').element as HTMLInputElement).value).toBe('14:00')
+    expect((wrapper.get('[name="end_time"]').element as HTMLInputElement).value).toBe('15:40')
+    expect(wrapper.get('[data-testid="time-slot-5-6"]').classes()).toContain('active')
+    expect(wrapper.text()).toContain('5-6 节 · 课程时长 1 小时 40 分钟')
+
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    expect(mocks.updateCourse).toHaveBeenCalledWith(
+      7,
+      expect.objectContaining({ start_time: '14:00', end_time: '15:40' })
+    )
+  })
+
+  it('shows an inline correction when a manually entered time range runs backwards', async () => {
+    const wrapper = await mountPage()
+
+    await wrapper.get('[name="start_time"]').setValue('15:40')
+    await wrapper.get('[name="end_time"]').setValue('14:00')
+
+    expect(wrapper.get('[data-testid="course-time-planner"]').classes()).toContain(
+      'time-planner--error'
+    )
+    expect(wrapper.get('.time-range-feedback').attributes('role')).toBe('alert')
+    expect(wrapper.text()).toContain('结束时间需要晚于开始时间')
   })
 })

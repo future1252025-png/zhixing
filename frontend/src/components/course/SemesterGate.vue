@@ -20,7 +20,7 @@ defineProps<{
     <template v-if="status === 'unconfigured'">
       <span class="semester-gate__eyebrow">先对齐真实教学周</span>
       <h2>请先设置学期</h2>
-      <p>设置开学日期和总周数后，首页与出发建议才会使用同一个真实教学周。</p>
+      <p>设置开学日期和总周数后，首页与课程提醒才会使用同一个真实教学周。</p>
       <RouterLink to="/courses#semester-settings">去课表设置学期</RouterLink>
     </template>
 

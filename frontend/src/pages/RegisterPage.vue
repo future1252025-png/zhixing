@@ -59,7 +59,7 @@ async function handleSubmit() {
         <div>
           <span class="fresh-kicker">从今天开始记录</span>
           <h1 class="fresh-heading">为你的校园日常<br />留一个位置。</h1>
-          <p class="fresh-copy">创建账号后，就可以保存课表、常去地点和每一次出发安排。</p>
+          <p class="fresh-copy">创建账号后，就可以保存课表、常去地点和日常提醒。</p>
         </div>
         <div class="seed-scene" aria-hidden="true">
           <span class="seed-sun"></span>

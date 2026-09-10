@@ -383,7 +383,7 @@ async function permanentlyDeleteAccount() {
         <span class="note-icon"><TechIcon name="spark" :size="21" /></span>
         <div>
           <strong>你的校园记录会留在这里</strong>
-          <p>课表、常去地点和路线偏好都与你的账号关联。</p>
+          <p>课表、常去地点和提醒事项都与你的账号关联。</p>
         </div>
       </section>
 

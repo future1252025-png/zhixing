@@ -576,6 +576,8 @@ def test_native_refresh_rotates_token_and_rejects_replay(
     assert rotated.status_code == 200
     second_refresh_token = rotated.json()["refresh_token"]
     assert second_refresh_token != first_refresh_token
+    assert rotated.json()["user"]["student_id"] == "alice"
+    assert "password_hash" not in rotated.json()["user"]
     access_token = rotated.json()["access_token"]
     assert client.get(
         "/api/auth/me",
@@ -796,6 +798,7 @@ def test_web_refresh_uses_httponly_cookie_and_logout_revokes_session(
     refreshed = client.post("/api/auth/refresh", json={}, headers=web_headers)
     assert refreshed.status_code == 200
     assert "refresh_token" not in refreshed.json()
+    assert refreshed.json()["user"]["student_id"] == "alice"
     assert refreshed.cookies.get("campusmind_refresh") != first_cookie
 
     logout = client.post("/api/auth/logout", json={}, headers=web_headers)

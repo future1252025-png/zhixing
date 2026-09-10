@@ -12,6 +12,7 @@ import { useCoursesStore } from '@/stores/courses'
 import { useSemesterStore } from '@/stores/semester'
 import type { Course } from '@/types/course'
 import type { SemesterUpdate } from '@/types/semester'
+import { createScrollPositionGuard } from '@/utils/scrollPositionGuard'
 import {
   buildCourseCreateQuery,
   buildCourseColorMap,
@@ -19,8 +20,7 @@ import {
   filterCoursesByWeek,
   formatCourseLocation,
   formatTimetableCourseLocation,
-  getCourseDisplaySlot,
-  getCourseTimeSlots,
+  getTimetableTimeSlots,
   getWeekdayLabel,
   getQuickWeekOptions,
   getTeachingWeekOptions,
@@ -45,8 +45,7 @@ const weekStageLockedHeight = ref<number | null>(null)
 const weekTransitionName = ref<'week-forward' | 'week-backward'>('week-forward')
 const errorMessage = ref('')
 const semesterErrorMessage = ref('')
-let weekScrollTop: number | null = null
-let weekScrollRestoreFrame: number | undefined
+const weekScrollGuard = createScrollPositionGuard()
 const selectedWeek = computed({
   get: () => semesterStore.browsingWeek,
   set: (week: number) => {
@@ -65,13 +64,14 @@ const selectedWeek = computed({
 const weekOptions = computed(() =>
   getTeachingWeekOptions(semesterStore.totalWeeks ?? undefined)
 )
-const timeSlots = getCourseTimeSlots()
 const courseActionOptions = [
   { name: '查看地点', subname: '打开地图与地点频道' },
   { name: '编辑课程' },
   { name: '删除课程', color: '#b65f56' }
 ]
 const visibleCourses = computed(() => filterCoursesByWeek(courses.value, selectedWeek.value))
+// Keep the semester's saved clock axis stable when browsing different weeks.
+const timeSlots = computed(() => getTimetableTimeSlots(courses.value))
 const pendingScheduleCourses = computed(() =>
   visibleCourses.value
     .filter((course) => !course.start_time || !course.end_time)
@@ -80,9 +80,8 @@ const pendingScheduleCourses = computed(() =>
 const timetableCoursesByCell = computed(() => {
   const coursesByCell = new Map<string, Course[]>()
   for (const course of visibleCourses.value) {
-    const slot = getCourseDisplaySlot(course)
-    if (!slot) continue
-    const key = `${slot.section}-${course.weekday}`
+    if (!course.start_time || !course.end_time) continue
+    const key = `${course.start_time}-${course.end_time}-${course.weekday}`
     const cellCourses = coursesByCell.get(key) ?? []
     cellCourses.push(course)
     cellCourses.sort((left, right) =>
@@ -257,8 +256,8 @@ function openCreateForSlot(weekday: number, slot: { start_time: string; end_time
   openCreatePage(buildCourseCreateQuery(weekday, slot, selectedWeek.value))
 }
 
-function getCellCourses(weekday: number, slot: { section: string }) {
-  return timetableCoursesByCell.value.get(`${slot.section}-${weekday}`) ?? []
+function getCellCourses(weekday: number, slot: { start_time: string; end_time: string }) {
+  return timetableCoursesByCell.value.get(`${slot.start_time}-${slot.end_time}-${weekday}`) ?? []
 }
 
 function getCourseStyle(course: Course): Record<string, string> {
@@ -307,45 +306,37 @@ function scheduleWeekHeadStuckSync() {
 }
 
 function prepareWeekTransition() {
-  weekScrollTop = window.scrollY
+  weekScrollGuard.begin()
   weekStageLockedHeight.value =
     timetableTransitionFrameRef.value?.getBoundingClientRect().height ?? null
-  if (weekScrollRestoreFrame !== undefined) {
-    window.cancelAnimationFrame(weekScrollRestoreFrame)
-    weekScrollRestoreFrame = undefined
-  }
 }
 
 function restoreWeekScrollPosition() {
-  if (weekScrollTop === null) return
-  window.scrollTo({
-    left: window.scrollX,
-    top: weekScrollTop,
-    behavior: 'auto'
-  })
+  weekScrollGuard.restore()
 }
 
 function scheduleWeekScrollRestore() {
-  if (weekScrollTop === null || weekScrollRestoreFrame !== undefined) return
-  weekScrollRestoreFrame = window.requestAnimationFrame(() => {
-    weekScrollRestoreFrame = undefined
-    restoreWeekScrollPosition()
-  })
+  weekScrollGuard.scheduleRestore()
+}
+
+function releaseWeekScrollPosition() {
+  // Once the user starts a new gesture, their new position is authoritative.
+  // In particular, the transition's delayed after-enter callback must not
+  // restore the offset captured before they swiped or scrolled.
+  weekScrollGuard.release()
+}
+
+function handleWeekScrollKey(event: KeyboardEvent) {
+  if (['ArrowDown', 'ArrowUp', 'PageDown', 'PageUp', 'Home', 'End', ' '].includes(event.key)) {
+    releaseWeekScrollPosition()
+  }
 }
 
 function finishWeekTransition() {
   restoreWeekScrollPosition()
   weekStageLockedHeight.value = null
   void nextTick().then(() => {
-    if (weekScrollTop === null) return
-    if (weekScrollRestoreFrame !== undefined) {
-      window.cancelAnimationFrame(weekScrollRestoreFrame)
-    }
-    weekScrollRestoreFrame = window.requestAnimationFrame(() => {
-      weekScrollRestoreFrame = undefined
-      restoreWeekScrollPosition()
-      weekScrollTop = null
-    })
+    weekScrollGuard.scheduleRestore(true)
   })
 }
 
@@ -429,6 +420,9 @@ onMounted(() => {
   void Promise.all([loadCourses(), loadSemester()])
   window.addEventListener('scroll', scheduleWeekHeadStuckSync, { passive: true })
   window.addEventListener('resize', scheduleWeekHeadStuckSync)
+  window.addEventListener('touchstart', releaseWeekScrollPosition, { passive: true })
+  window.addEventListener('wheel', releaseWeekScrollPosition, { passive: true })
+  window.addEventListener('keydown', handleWeekScrollKey)
   void nextTick().then(scheduleWeekHeadStuckSync)
   nowTimer = setInterval(() => {
     nowMinutes.value = getMinutesOfDay()
@@ -439,13 +433,14 @@ onBeforeUnmount(() => {
   if (nowTimer) clearInterval(nowTimer)
   window.removeEventListener('scroll', scheduleWeekHeadStuckSync)
   window.removeEventListener('resize', scheduleWeekHeadStuckSync)
+  window.removeEventListener('touchstart', releaseWeekScrollPosition)
+  window.removeEventListener('wheel', releaseWeekScrollPosition)
+  window.removeEventListener('keydown', handleWeekScrollKey)
   timetableResizeObserver?.disconnect()
   if (courseHeightFrame !== undefined) {
     window.cancelAnimationFrame(courseHeightFrame)
   }
-  if (weekScrollRestoreFrame !== undefined) {
-    window.cancelAnimationFrame(weekScrollRestoreFrame)
-  }
+  weekScrollGuard.release()
   if (weekHeadScrollFrame !== undefined) {
     window.cancelAnimationFrame(weekHeadScrollFrame)
   }
@@ -598,7 +593,7 @@ onBeforeUnmount(() => {
               <span>{{ formatCourseLocation(course) }}</span>
             </div>
             <footer>
-              <button type="button" @click="openEditPage(course.id)">补全</button>
+              <button type="button" @click="openEditPage(course.id)">补全时间</button>
               <button
                 type="button"
                 class="pending-delete"
@@ -616,7 +611,7 @@ onBeforeUnmount(() => {
           class="timetable-shell fresh-card"
         >
         <header class="table-heading">
-          <div><h2>第 {{ selectedWeek }} 周课表</h2><p>{{ selectedWeekDateRange }}</p></div>
+          <div><h2>第 {{ selectedWeek }} 周课表</h2><p>{{ selectedWeekDateRange }}</p><p class="time-axis-note">时间按已保存课程显示；空白参考时段可自由修改。</p></div>
           <span><i></i> {{ courseCountText }}</span>
         </header>
 
@@ -672,18 +667,18 @@ onBeforeUnmount(() => {
               >
                 <section
                   v-for="slot in timeSlots"
-                  :key="slot.section"
+                  :key="`${slot.start_time}-${slot.end_time}`"
                   class="timetable-slot"
                 >
                   <header class="time-cell">
-                    <strong>{{ slot.section }}</strong>
+                    <strong>{{ slot.isReference ? '参考' : slot.section }}</strong>
                     <span><time>{{ slot.start_time }}</time><i></i><time>{{ slot.end_time }}</time></span>
                   </header>
 
                   <div class="slot-days">
                     <div
                       v-for="weekday in WEEKDAYS"
-                      :key="`${slot.section}-${weekday.value}`"
+                      :key="`${slot.start_time}-${slot.end_time}-${weekday.value}`"
                       class="course-cell"
                       :class="{
                         'has-course': getCellCourses(weekday.value, slot).length > 0,
@@ -1258,7 +1253,10 @@ onBeforeUnmount(() => {
   color: var(--fresh-green-dark);
   font-size: 12px;
   font-weight: 700;
+  flex-shrink: 0;
 }
+
+.table-heading .time-axis-note { font-family: inherit; line-height: 1.5; }
 
 .table-heading > span i {
   width: 6px;
@@ -1642,8 +1640,8 @@ onBeforeUnmount(() => {
 .week-backward-enter-active,
 .week-backward-leave-active {
   transition:
-    opacity 900ms ease,
-    transform 1150ms var(--fresh-spring);
+    opacity 220ms ease,
+    transform 320ms var(--fresh-spring);
 }
 
 .week-forward-leave-active,

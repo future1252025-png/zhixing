@@ -22,7 +22,7 @@ const validationMessage = ref('')
 const statusMessage = computed(() => {
   const semester = props.semester
   if (!semester || semester.status === 'unconfigured') {
-    return '尚未设置学期，首页与出发建议暂不可用'
+    return '尚未设置学期，首页课程与课程提醒暂不可用'
   }
   if (semester.status === 'active' && semester.current_week !== null) {
     return `真实当前周：第 ${semester.current_week} 周`

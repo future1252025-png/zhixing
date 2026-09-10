@@ -1,5 +1,6 @@
 import axios, { AxiosHeaders, type InternalAxiosRequestConfig } from 'axios'
 
+import type { AuthUser } from './auth'
 import {
   clearPendingWebLogout,
   clearSessionTokens,
@@ -22,6 +23,12 @@ type RefreshResponse = {
   token_type: 'bearer'
   expires_in: number
   refresh_token?: string
+  user?: AuthUser
+}
+
+export type SessionRestoreResult = {
+  restored: boolean
+  user: AuthUser | null
 }
 
 type RetryableRequestConfig = InternalAxiosRequestConfig & {
@@ -57,7 +64,7 @@ const request = axios.create({
   withCredentials: true
 })
 
-let refreshPromise: Promise<string> | null = null
+let refreshPromise: Promise<RefreshResponse> | null = null
 
 function isAuthBootstrapRequest(url: string | undefined): boolean {
   return Boolean(
@@ -67,7 +74,7 @@ function isAuthBootstrapRequest(url: string | undefined): boolean {
   )
 }
 
-async function performRefresh(): Promise<string> {
+async function performRefresh(): Promise<RefreshResponse> {
   const native = isNativeAuthClient()
   const storedRefreshToken = native ? await getRefreshToken() : null
   if (native && !storedRefreshToken) {
@@ -85,10 +92,10 @@ async function performRefresh(): Promise<string> {
     await setRefreshToken(response.data.refresh_token)
   }
   setAccessToken(response.data.access_token)
-  return response.data.access_token
+  return response.data
 }
 
-export function refreshAccessToken(): Promise<string> {
+function refreshSession(): Promise<RefreshResponse> {
   if (!refreshPromise) {
     const pending = performRefresh()
     refreshPromise = pending.finally(() => {
@@ -98,11 +105,15 @@ export function refreshAccessToken(): Promise<string> {
   return refreshPromise
 }
 
+export async function refreshAccessToken(): Promise<string> {
+  return (await refreshSession()).access_token
+}
+
 function isRejectedRefreshCredential(error: unknown): boolean {
   return axios.isAxiosError(error) && error.response?.status === 401
 }
 
-export async function restoreSession(): Promise<boolean> {
+export async function restoreSession(): Promise<SessionRestoreResult> {
   if (!isNativeAuthClient() && hasPendingWebLogout()) {
     try {
       await sessionRequest.post('/api/auth/logout', {
@@ -114,17 +125,20 @@ export async function restoreSession(): Promise<boolean> {
       // Stay logged out and retry server-side revocation on a later startup.
     }
     setAccessToken(null)
-    return false
+    return { restored: false, user: null }
   }
   try {
-    await refreshAccessToken()
-    return true
+    const restoredSession = await refreshSession()
+    return {
+      restored: true,
+      user: restoredSession.user ?? null
+    }
   } catch (error) {
     setAccessToken(null)
     if (isRejectedRefreshCredential(error)) {
       await clearSessionTokens()
     }
-    return false
+    return { restored: false, user: null }
   }
 }
 

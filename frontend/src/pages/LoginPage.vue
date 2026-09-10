@@ -58,7 +58,7 @@ async function handleSubmit() {
       <section class="welcome-scene" aria-labelledby="login-title">
         <div class="welcome-copy">
           <span>嗨，今天也要去校园里走走</span>
-          <h1 id="login-title">把课程、地点和出发时间<br />轻轻放在一起。</h1>
+          <h1 id="login-title">把课程、地点和日常提醒<br />轻轻放在一起。</h1>
           <p>不赶路，也不错过。智行为你整理今天的校园节奏。</p>
         </div>
 
@@ -85,7 +85,7 @@ async function handleSubmit() {
           </svg>
           <span class="path-dot dot-a"><TechIcon name="calendar" :size="17" /></span>
           <span class="path-dot dot-b"><TechIcon name="route" :size="17" /></span>
-          <span class="path-ready"><i></i>路线慢慢铺好了</span>
+          <span class="path-ready"><i></i>一天慢慢安排好了</span>
         </div>
       </section>
 

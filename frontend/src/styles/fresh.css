@@ -211,7 +211,7 @@ html.capacitor-android #semester-settings {
    shift, so the course page keeps its existing lower gap while schedule and
    profile receive the missing space. */
 html.capacitor-android .courses-page > .van-nav-bar,
-html.capacitor-android .schedule-page > .van-nav-bar,
+html.capacitor-android .reminders-page > .van-nav-bar,
 html.capacitor-android .profile-page > .van-nav-bar,
 html.capacitor-android .course-import-page > .van-nav-bar {
   position: relative;
@@ -240,7 +240,7 @@ html.capacitor-android .courses-page .week-head.is-stuck::before {
 }
 
 html.capacitor-android .courses-page > .van-nav-bar + .page-content,
-html.capacitor-android .schedule-page > .van-nav-bar + .page-content,
+html.capacitor-android .reminders-page > .van-nav-bar + .page-content,
 html.capacitor-android .profile-page > .van-nav-bar + .page-content,
 html.capacitor-android .course-import-page > .van-nav-bar + .page-content {
   padding-top: calc(var(--app-native-nav-inset-top) + 8px);

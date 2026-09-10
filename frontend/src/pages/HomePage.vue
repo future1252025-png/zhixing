@@ -8,8 +8,11 @@ import RealCampusMap from '@/components/RealCampusMap.vue'
 import TechIcon from '@/components/TechIcon.vue'
 import CourseCard from '@/components/course/CourseCard.vue'
 import SemesterGate from '@/components/course/SemesterGate.vue'
+import { useCampusClock } from '@/composables/useCampusClock'
+import { CAMPUS_TIME_ZONE, semesterAt } from '@/utils/campusTime'
 import { useAuthStore } from '@/stores/auth'
 import { useBuildingsStore } from '@/stores/buildings'
+import { useCampusMapStore } from '@/stores/campusMap'
 import { useCoursesStore } from '@/stores/courses'
 import { useSemesterStore } from '@/stores/semester'
 import type { Course } from '@/types/course'
@@ -24,7 +27,8 @@ import {
 } from '@/utils/chat'
 import {
   filterCoursesByWeek,
-  findNextCourse
+  findNextCourse,
+  isCourseOngoing
 } from '@/utils/course'
 import { formatBuildingDisplayName } from '@/utils/buildings'
 import { createScopedStorage } from '@/utils/scopedStorage'
@@ -37,6 +41,8 @@ import {
 const router = useRouter()
 const authStore = useAuthStore()
 const buildingsStore = useBuildingsStore()
+const mapSession = useCampusMapStore()
+mapSession.attachUser(authStore.currentUser?.id ?? null)
 const coursesStore = useCoursesStore()
 const semesterStore = useSemesterStore()
 const buildings = ref<Building[]>([])
@@ -48,23 +54,23 @@ const recentChats = ref<RecentChatEntry[]>([])
 const loginWelcomeVisible = ref(false)
 const loginWelcomeSnapshot = ref<LoginIntroSnapshot | null>(null)
 let loginWelcomeTimer: number | null = null
-const todayLabel = new Intl.DateTimeFormat('zh-CN', {
+const now = useCampusClock()
+const todayLabel = computed(() => new Intl.DateTimeFormat('zh-CN', {
+  timeZone: CAMPUS_TIME_ZONE,
   month: 'long',
   day: 'numeric',
   weekday: 'short'
-}).format(new Date())
+}).format(now.value))
 
-const currentWeek = computed(() =>
-  semesterStore.semester?.status === 'active'
-    ? semesterStore.semester.current_week
-    : null
-)
+const currentSemester = computed(() => semesterAt(semesterStore.semester, now.value))
+const currentWeek = computed(() => currentSemester.value.current_week)
 const activeCourses = computed(() =>
   currentWeek.value === null
     ? []
     : filterCoursesByWeek(courses.value, currentWeek.value)
 )
-const nextCourse = computed(() => findNextCourse(activeCourses.value))
+const nextCourse = computed(() => findNextCourse(activeCourses.value, now.value))
+const courseOngoing = computed(() => nextCourse.value && isCourseOngoing(nextCourse.value, now.value))
 const nextCourseChat = computed(() =>
   nextCourse.value ? buildNextCourseChatTarget(nextCourse.value) : null
 )
@@ -210,15 +216,6 @@ function openQuickChannels() {
   document.querySelector('.places-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 }
 
-function openBuilding(buildingId: number) {
-  const building = buildings.value.find((item) => item.id === buildingId)
-  if (building) {
-    openBuildingChat(building)
-    return
-  }
-  router.push(`/buildings/${buildingId}/chats`)
-}
-
 onMounted(initializeHome)
 onUnmounted(() => {
   if (loginWelcomeTimer !== null) window.clearTimeout(loginWelcomeTimer)
@@ -249,12 +246,12 @@ onUnmounted(() => {
           >
             <span class="login-welcome__path" aria-hidden="true"><i></i></span>
             <div>
-              <small>登录成功 · 校园路线已接上</small>
+              <small>登录成功 · 校园日常已就绪</small>
               <strong>{{ loginWelcomeSnapshot?.courseName || '欢迎回来，慢慢开始今天' }}</strong>
               <p v-if="loginWelcomeSnapshot">
                 {{ loginWelcomeSnapshot.startTime }} · {{ [loginWelcomeSnapshot.buildingName, loginWelcomeSnapshot.roomName].filter(Boolean).join(' · ') }} · 点我看课表
               </p>
-              <p v-else>课表、地点和出发建议已经准备好了。</p>
+              <p v-else>课表、地点频道和日常提醒都在这里。</p>
             </div>
           </button>
         </div>
@@ -271,7 +268,7 @@ onUnmounted(() => {
 
       <SemesterGate
         v-else
-        :status="semesterStore.semester.status"
+        :status="currentSemester.status"
         :current-week="currentWeek"
       >
         <section class="today-card home-motion-item">
@@ -280,7 +277,7 @@ onUnmounted(() => {
           <span class="leaf-cluster leaf-cluster-b" aria-hidden="true"><i></i><i></i></span>
 
           <div class="today-copy">
-            <span class="fresh-kicker">今天的下一站</span>
+            <span class="fresh-kicker">{{ courseOngoing ? '正在上课' : '接下来的课程' }}</span>
             <p>真实第 {{ currentWeek }} 周</p>
             <template v-if="nextCourse && nextCourseChat">
               <CourseCard
@@ -292,7 +289,7 @@ onUnmounted(() => {
               />
             </template>
             <template v-else>
-              <h1>今天还没有安排</h1>
+              <h1>本周课程已结束或暂无安排</h1>
               <strong>给自己留一点自由时间</strong>
               <small>本周有新课程时，下一节课会出现在这里。</small>
             </template>
@@ -327,10 +324,10 @@ onUnmounted(() => {
           <strong>导入课表</strong>
           <small>一次整理好本学期</small>
         </button>
-        <button type="button" class="note note-blue" @click="router.push('/schedule')">
-          <span><TechIcon name="route" :size="21" /></span>
-          <strong>准备出发</strong>
-          <small>看看什么时候动身</small>
+        <button type="button" class="note note-blue" @click="router.push('/reminders')">
+          <span><TechIcon name="bell" :size="21" /></span>
+          <strong>日常提醒</strong>
+          <small>要紧的事，到点提醒</small>
         </button>
         <button type="button" class="note note-yellow" @click="router.push('/courses')">
           <span><TechIcon name="calendar" :size="21" /></span>
@@ -423,28 +420,26 @@ onUnmounted(() => {
         </div>
       </section>
 
-      <section v-reveal="{ from: 'right', distance: 42 }" class="map-section">
+      <section class="map-section">
         <div class="fresh-section-heading">
-          <div><h2>沿着地图去发现</h2><p>点一下建筑，就能进入地点频道</p></div>
+          <div><h2>从地点开始聊</h2><p>展开地图，选择建筑和频道</p></div>
+          <button type="button" class="mini-map-open" @click="router.push('/map')">展开地图 <TechIcon name="arrow" :size="17" /></button>
         </div>
         <div class="map-sheet fresh-card">
           <RealCampusMap
-            v-if="!loading && buildings.length"
             :buildings="buildings"
+            :position="mapSession.position"
+            :interactive="false"
+            lazy
             title=""
             subtitle=""
-            height="430px"
-            selected-action-text="进频道"
-            @building-click="openBuilding"
+            height="230px"
+            @map-click="router.push('/map')"
           />
-          <div v-if="loading" class="home-loading">
-            <span><i></i><i></i><i></i></span>
-            <p>正在铺开校园地图...</p>
+          <div class="mini-map-footer">
+            <span>{{ mapSession.position ? '蓝点为上次定位，展开后可刷新' : '定位后可在小地图看到自己' }}</span>
+            <button type="button" class="mini-map-open" @click="router.push('/map')"><TechIcon name="aim" :size="17" /> 定位与选楼</button>
           </div>
-          <van-empty v-else-if="errorMessage" image="error" :description="errorMessage">
-            <van-button type="primary" size="small" @click="loadHomeData">重新加载</van-button>
-          </van-empty>
-          <van-empty v-else-if="!buildings.length" description="暂时还没有地点数据" />
         </div>
       </section>
     </div>
@@ -452,6 +447,8 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+.mini-map-open { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; padding: 8px 10px; border: 1px solid #d5dfcb; border-radius: 12px; background: #edf3e6; color: #3d6144; font: inherit; font-size: 12px; cursor: pointer; flex-shrink: 0; }
+.mini-map-footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 4px 0; color: var(--fresh-muted); font-size: 11px; line-height: 1.6; }
 .home-page {
   background:
     radial-gradient(circle at 110% 4%, rgba(146, 177, 133, 0.18), transparent 20rem),

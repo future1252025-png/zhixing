@@ -119,13 +119,14 @@ def _parse_course_start_time(course: Course) -> time:
         raise _course_data_error(course, ["start_time"]) from error
 
 
-def _validate_course_end_time(course: Course, start_time: time) -> None:
+def _validate_course_end_time(course: Course, start_time: time) -> time:
     try:
         end_time = parse_course_time(course.end_time)
     except ValueError as error:
         raise _course_data_error(course, ["end_time"]) from error
     if end_time <= start_time:
         raise _course_data_error(course, ["start_time", "end_time"])
+    return end_time
 
 
 def _missing_location_fields(course: Course) -> list[str]:
@@ -184,9 +185,6 @@ def find_next_course(
     now: datetime,
 ) -> NextCourseCandidate | None:
     current = _normalize_now(now)
-    # Course times have minute precision. Treat the whole displayed start
-    # minute as current instead of skipping it because the clock has seconds.
-    current_minute = current.replace(second=0, microsecond=0)
     setting, teaching_week = _get_active_semester(session, user_id, current)
     week_start = setting.start_date + timedelta(weeks=teaching_week - 1)
     week_end = week_start + timedelta(days=6)
@@ -222,8 +220,12 @@ def find_next_course(
             continue
         start_time = _parse_course_start_time(course)
         starts_at = _course_start_datetime(target_date, start_time)
-        if starts_at < current_minute:
-            continue
+        if starts_at <= current:
+            # Starting is not finishing: retain the current class for [start, end).
+            # If its end is invalid we cannot assume it finished and silently skip it.
+            end_time = _validate_course_end_time(course, start_time)
+            if _course_start_datetime(target_date, end_time) <= current:
+                continue
         candidates.append(
             NextCourseCandidate(
                 course=course,
@@ -334,6 +336,11 @@ def _build_text(
     walk_minutes: int,
     buffer_minutes: int,
 ) -> str:
+    if starts_at <= now:
+        return (
+            f"当前课程正在上课；如尚未到达，可从{from_name}前往教室，"
+            f"预计步行 {walk_minutes} 分钟。已在教室可忽略出发提醒。"
+        )
     if starts_at.date() == now.date():
         minutes_until_course = max(0, int((starts_at - now).total_seconds() // 60))
         return (
@@ -411,7 +418,10 @@ def build_schedule_suggestion(
         distance_meters=distance_meters,
         walk_minutes=walk_minutes,
         buffer_minutes=DEFAULT_BUFFER_MINUTES,
-        suggest_departure_time=_format_departure_time(current, departure_at),
+        suggest_departure_time=(
+            "现在" if next_candidate.starts_at <= current
+            else _format_departure_time(current, departure_at)
+        ),
         status=get_departure_status(current, departure_at),
         text=_build_text(
             now=current,

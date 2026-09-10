@@ -10,7 +10,7 @@ const activePath = computed(() => route.path)
 const navItems = [
   { path: '/home', label: '校园', icon: 'orbit' },
   { path: '/courses', label: '课表', icon: 'calendar' },
-  { path: '/schedule', label: '出发', icon: 'route' },
+  { path: '/reminders', label: '提醒', icon: 'bell' },
   { path: '/profile', label: '我的', icon: 'user' }
 ] as const
 
