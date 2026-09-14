@@ -316,7 +316,7 @@ onMounted(loadFormData)
               </span>
             </li>
           </ul>
-          <a v-if="saveErrorCode === 'semester_unconfigured'" href="/courses#semester-settings">
+          <a v-if="saveErrorCode === 'semester_unconfigured'" href="/profile/semester">
             前往课表设置学期
           </a>
         </section>

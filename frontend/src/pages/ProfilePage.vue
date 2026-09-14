@@ -370,6 +370,18 @@ async function permanentlyDeleteAccount() {
         </div>
       </section>
 
+      <router-link class="privacy-entry" to="/profile/semester">
+        <span><TechIcon name="calendar" :size="19" /></span>
+        <span><strong>学期设置</strong><small>修改开学日期和学期周数</small></span>
+        <TechIcon name="arrow" :size="18" />
+      </router-link>
+
+      <router-link class="privacy-entry" to="/profile/notifications">
+        <span><TechIcon name="bell" :size="19" /></span>
+        <span><strong>通知设置</strong><small>通知权限与提醒方式</small></span>
+        <TechIcon name="arrow" :size="18" />
+      </router-link>
+
       <router-link class="privacy-entry" to="/privacy">
         <span><TechIcon name="certificate" :size="19" /></span>
         <span><strong>隐私与数据说明</strong><small>了解定位、课表和频道信息如何使用</small></span>

@@ -6,12 +6,10 @@ import { useRouter } from 'vue-router'
 import { deleteCourse } from '@/api/courses'
 import { extractBusinessError } from '@/api/errors'
 import TechIcon from '@/components/TechIcon.vue'
-import SemesterSettingsCard from '@/components/course/SemesterSettingsCard.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useCoursesStore } from '@/stores/courses'
 import { useSemesterStore } from '@/stores/semester'
 import type { Course } from '@/types/course'
-import type { SemesterUpdate } from '@/types/semester'
 import { createScrollPositionGuard } from '@/utils/scrollPositionGuard'
 import {
   buildCourseCreateQuery,
@@ -221,18 +219,6 @@ async function loadSemester() {
     await semesterStore.load(userId)
   } catch (error) {
     semesterErrorMessage.value = getErrorMessage(error)
-  }
-}
-
-async function saveSemesterSetting(payload: SemesterUpdate) {
-  semesterErrorMessage.value = ''
-  try {
-    await semesterStore.save(payload)
-    showSuccessToast('学期设置已保存')
-  } catch (error) {
-    const message = getErrorMessage(error)
-    semesterErrorMessage.value = message
-    showFailToast(message)
   }
 }
 
@@ -462,15 +448,6 @@ onBeforeUnmount(() => {
       >
         <van-button type="primary" size="small" @click="loadSemester">重新加载学期</van-button>
       </van-empty>
-      <SemesterSettingsCard
-        v-else
-        id="semester-settings"
-        v-reveal="{ from: 'right', distance: 32 }"
-        :semester="semesterStore.semester"
-        :saving="semesterStore.saving"
-        @save="saveSemesterSetting"
-      />
-
       <header
         v-reveal="{ from: 'left', distance: 38, stagger: 55 }"
         class="course-hero"

@@ -21,6 +21,8 @@ const CourseFormPage = () => import('@/pages/CourseFormPage.vue')
 const CourseImportPage = () => import('@/pages/CourseImportPage.vue')
 const RemindersPage = () => import('@/pages/RemindersPage.vue')
 const ProfilePage = () => import('@/pages/ProfilePage.vue')
+const SemesterSettingsPage = () => import('@/pages/SemesterSettingsPage.vue')
+const NotificationSettingsPage = () => import('@/pages/NotificationSettingsPage.vue')
 
 type AuthRouteTarget = {
   path: string
@@ -159,6 +161,18 @@ const routes: RouteRecordRaw[] = [
     meta: { requiresAuth: true }
   },
   {
+    path: '/profile/semester',
+    name: 'semester-settings',
+    component: SemesterSettingsPage,
+    meta: { requiresAuth: true }
+  },
+  {
+    path: '/profile/notifications',
+    name: 'notification-settings',
+    component: NotificationSettingsPage,
+    meta: { requiresAuth: true }
+  },
+  {
     path: '/profile',
     name: 'profile',
     component: ProfilePage,
@@ -176,6 +190,8 @@ const router = createRouter({
 })
 
 router.beforeEach(async (to) => {
+  // Preserve old settings bookmarks without bringing the card back to the timetable.
+  if (to.path === '/courses' && to.hash === '#semester-settings') return '/profile/semester'
   const authStore = useAuthStore()
   const target = {
     path: to.path,

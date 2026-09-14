@@ -1,9 +1,11 @@
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { reactive } from 'vue'
+import { Dialog } from 'vant'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { Course } from '@/types/course'
 import { emptyReminderPlan } from '@/utils/reminders'
 import RemindersPage from './RemindersPage.vue'
+import NotificationSettingsPage from './NotificationSettingsPage.vue'
 import ReminderRuntime from '@/components/ReminderRuntime.vue'
 
 const mock = vi.hoisted(() => ({ auth: null as any, courses: null as any, semester: null as any,
@@ -42,10 +44,11 @@ beforeEach(() => {
   mock.semester = reactive({ semester: { start_date: '2026-08-31', total_weeks: 20, current_week: 19 },
     loadedForUserId: 1, load: vi.fn(async () => {}) })
   mock.reminders = reactive({ plan, userId: 1, loaded: true, loading: false, saving: false, error: '',
-    capability: { ...capability, permission: 'prompt' }, deviceEnabled: false, scheduling: false,
+    capability: { ...capability, permission: 'prompt' }, deviceEnabled: false, devicePreferenceSet: true,
+    permissionPromptDismissed: false, scheduling: false,
     scheduleError: '', truncated: false, scheduledCount: 0, coverageUntil: '',
     load: vi.fn(async () => {}), reset: vi.fn(),
-    setDeviceEnabled: vi.fn((value: boolean) => { mock.reminders.deviceEnabled = value }) })
+    setDeviceEnabled: vi.fn((value: boolean) => { mock.reminders.deviceEnabled = value; mock.reminders.devicePreferenceSet = true }) })
   mock.capability.mockResolvedValue({ ...capability })
   mock.sync.mockResolvedValue({ capability, count: 0, until: '', truncated: false })
 })
@@ -55,10 +58,79 @@ afterEach(() => {
   vi.useRealTimers()
 })
 async function mountPage() {
-  page = mount(RemindersPage, { global: { stubs: { RouterLink: { template: '<a><slot /></a>' } } } })
+  page = mount(RemindersPage, { global: { components: { 'van-dialog': Dialog },
+    stubs: { teleport: true, 'van-nav-bar': true, RouterLink: { template: '<a><slot /></a>' } } } })
   await flushPromises()
   return page
 }
+it('removes the device card and keeps only the daily course tip for authorized users', async () => {
+  const wrapper = await mountPage()
+  expect(wrapper.find('.device-notice').exists()).toBe(false)
+  expect(wrapper.find('.reminder-help').exists()).toBe(false)
+  expect(wrapper.getComponent(Dialog).props('show')).toBe(false)
+  expect(wrapper.get('.course-daily-tip').text()).toBe('保持网页打开，接收今天的课程提醒。')
+  expect(wrapper.findAll('.course-reminder-panel .panel-tip')).toHaveLength(1)
+  mock.reminders.plan.course_settings.enabled = false
+  await flushPromises()
+  expect(wrapper.find('.course-daily-tip').exists()).toBe(false)
+})
+it.each([
+  { permission: 'granted', exact: false, prompt: false },
+  { permission: 'granted', exact: true, prompt: false },
+  { permission: 'prompt', exact: false, prompt: true },
+  { permission: 'denied', exact: false, prompt: true },
+  { permission: 'unsupported', exact: false, prompt: false }
+])('only offers permission for $permission / exact=$exact', async ({ permission, exact, prompt }) => {
+  mock.capability.mockResolvedValue({ platform: 'android', permission, exact })
+  const wrapper = await mountPage()
+  expect(wrapper.get('.course-daily-tip').text()).toBe('每天打开一次 App，安排今天的课程提醒。')
+  expect(wrapper.getComponent(Dialog).props('show')).toBe(prompt)
+  expect(mock.capability).not.toHaveBeenCalledWith(true)
+  expect(wrapper.find('.device-notice').exists()).toBe(false)
+})
+it('waits for the actual permission result before prompting, and keeps explicit pauses', async () => {
+  let resolve!: (value: unknown) => void
+  mock.capability.mockImplementationOnce(() => new Promise(done => { resolve = done }))
+  const wrapper = await mountPage()
+  expect(wrapper.getComponent(Dialog).props('show')).toBe(false)
+  resolve(capability)
+  await flushPromises()
+  expect(wrapper.getComponent(Dialog).props('show')).toBe(false)
+  expect(mock.reminders.deviceEnabled).toBe(false)
+  expect(wrapper.text()).toContain('本机通知已暂停')
+})
+it('uses an existing OS grant on first use without overriding an explicit local preference', async () => {
+  mock.reminders.devicePreferenceSet = false
+  const wrapper = await mountPage()
+  expect(mock.reminders.deviceEnabled).toBe(true)
+  expect(wrapper.getComponent(Dialog).props('show')).toBe(false)
+  expect(mock.capability).not.toHaveBeenCalledWith(true)
+})
+it('does not keep prompting after dismissal during the same session', async () => {
+  mock.capability.mockResolvedValue({ ...capability, permission: 'prompt' })
+  const wrapper = await mountPage()
+  expect(wrapper.getComponent(Dialog).props('show')).toBe(true)
+  expect(await wrapper.getComponent(Dialog).props('beforeClose')!('cancel')).toBe(true)
+  wrapper.unmount(); page = undefined
+  const reopened = await mountPage()
+  expect(reopened.getComponent(Dialog).props('show')).toBe(false)
+  expect(mock.capability).not.toHaveBeenCalledWith(true)
+})
+it('keeps scheduling errors and partial-coverage warnings without restoring the card', async () => {
+  mock.reminders.scheduleError = '本机通知安排失败，请重试'
+  mock.reminders.truncated = true
+  mock.reminders.deviceEnabled = true
+  mock.reminders.scheduledCount = 400
+  mock.reminders.coverageUntil = '2026-09-08T12:00:00+08:00'
+  const wrapper = await mountPage()
+  const alerts = wrapper.findAll('[role="alert"]')
+  expect(alerts).toHaveLength(2)
+  expect(alerts[0]!.text()).toContain('安排失败')
+  expect(alerts[1]!.text()).toContain('最近 400 条')
+  expect(alerts.every(alert => !alert.element.closest('details'))).toBe(true)
+  expect(alerts[1]!.text()).toContain('9/8')
+})
+
 it('shows only today’s actual course time despite a different browsing/current-week snapshot', async () => {
   const wrapper = await mountPage()
   const list = wrapper.get('.next-reminders')
@@ -108,38 +180,59 @@ it('refreshes cached daily alarms after background suspension without waiting fo
   expect(mock.sync.mock.calls.at(-1)![1].map((item: any) => item.date)).toEqual(['2026-09-09'])
 })
 it('releases the permission button on failure, keeps an error visible, and allows retry', async () => {
+  mock.capability.mockResolvedValueOnce({ ...capability, permission: 'prompt' })
   const wrapper = await mountPage()
   mock.capability.mockRejectedValueOnce(new Error('通知授权尚未完成，请重试'))
-  await wrapper.get('.device-actions button').trigger('click')
+  expect(await wrapper.getComponent(Dialog).props('beforeClose')!('confirm')).toBe(false)
   await flushPromises()
-  expect(wrapper.get('.device-actions button').attributes('disabled')).toBeUndefined()
-  expect(wrapper.get('.device-notice [role="alert"]').text()).toContain('通知授权尚未完成')
+  expect(wrapper.getComponent(Dialog).props('confirmButtonDisabled')).toBe(false)
+  expect(wrapper.get('[role="alert"]').text()).toContain('通知授权尚未完成')
   expect(mock.reminders.deviceEnabled).toBe(false)
-  await wrapper.get('.device-actions button').trigger('click')
+  expect(await wrapper.getComponent(Dialog).props('beforeClose')!('confirm')).toBe(true)
   await flushPromises()
   expect(mock.reminders.deviceEnabled).toBe(true)
-  expect(wrapper.find('.device-notice [role="alert"]').exists()).toBe(false)
+  expect(wrapper.getComponent(Dialog).props('show')).toBe(false)
+  expect(wrapper.find('[role="alert"]').exists()).toBe(false)
 })
 it('allows notification authorization even while loading rules offline and handles denial', async () => {
   mock.reminders.loaded = false
   mock.reminders.load.mockImplementation(() => new Promise(() => {}))
+  mock.capability.mockResolvedValueOnce({ ...capability, permission: 'prompt' })
   const wrapper = await mountPage()
-  expect(wrapper.get('.device-actions button').attributes('disabled')).toBeUndefined()
+  expect(wrapper.getComponent(Dialog).props('confirmButtonDisabled')).toBe(false)
   mock.capability.mockResolvedValueOnce({ ...capability, permission: 'denied' })
-  await wrapper.get('.device-actions button').trigger('click')
+  expect(await wrapper.getComponent(Dialog).props('beforeClose')!('confirm')).toBe(false)
   await flushPromises()
-  expect(wrapper.get('.device-notice [role="alert"]').text()).toContain('尚未获得通知权限')
+  expect(wrapper.get('[role="alert"]').text()).toContain('尚未获得通知权限')
   expect(mock.reminders.deviceEnabled).toBe(false)
 })
 it('does not enable notifications for another account if the user changes during authorization', async () => {
+  mock.capability.mockResolvedValueOnce({ ...capability, permission: 'prompt' })
   const wrapper = await mountPage()
   let grant!: (value: unknown) => void
   mock.capability.mockImplementationOnce(() => new Promise(resolve => { grant = resolve }))
-  await wrapper.get('.device-actions button').trigger('click')
-  expect(wrapper.get('.device-actions button').attributes('disabled')).toBeDefined()
+  const request = wrapper.getComponent(Dialog).props('beforeClose')!('confirm')
+  await flushPromises()
+  expect(wrapper.getComponent(Dialog).props('confirmButtonDisabled')).toBe(true)
   mock.reminders.userId = 2
   grant(capability)
+  await request
   await flushPromises()
   expect(mock.reminders.deviceEnabled).toBe(false)
-  expect(wrapper.get('.device-actions button').attributes('disabled')).toBeUndefined()
+  expect(wrapper.getComponent(Dialog).props('confirmButtonDisabled')).toBe(false)
+})
+
+it('keeps advanced controls in the separate notification settings page', async () => {
+  mock.capability.mockResolvedValue({ platform: 'android', permission: 'granted', exact: false })
+  mock.reminders.deviceEnabled = true
+  page = mount(NotificationSettingsPage, { global: { stubs: { 'van-nav-bar': true } } })
+  await flushPromises()
+  expect(page.get('.device-actions').text()).toContain('设置准时提醒')
+  expect(page.get('details').attributes('open')).toBeUndefined()
+  expect(page.text()).toContain('Android 8')
+  await page.get('.device-actions button').trigger('click')
+  expect(mock.reminders.deviceEnabled).toBe(false)
+  await page.get('.device-actions button').trigger('click')
+  await flushPromises()
+  expect(mock.reminders.deviceEnabled).toBe(true)
 })

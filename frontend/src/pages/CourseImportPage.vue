@@ -6,6 +6,7 @@ import { useRouter } from 'vue-router'
 import { commitCourseImport, previewCourseImport } from '@/api/courses'
 import { extractBusinessError } from '@/api/errors'
 import ImportSummary from '@/components/import/ImportSummary.vue'
+import SemesterSettingsPanel from '@/components/course/SemesterSettingsPanel.vue'
 import {
   captureHubuCourseTable,
   captureToHtmlFile,
@@ -428,6 +429,8 @@ async function commitImport() {
           <b></b><b></b>
         </div>
       </header>
+
+      <SemesterSettingsPanel v-if="state !== 'success'" />
 
       <section v-reveal="{ from: 'right', distance: 30, delay: 60 }" class="hubu-import-sheet">
         <header>

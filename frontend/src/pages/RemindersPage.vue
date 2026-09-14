@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { showConfirmDialog, showFailToast, showSuccessToast } from 'vant'
 import TechIcon from '@/components/TechIcon.vue'
 import { useCampusClock } from '@/composables/useCampusClock'
+import { useReminderDevice } from '@/composables/useReminderDevice'
 import { useAuthStore } from '@/stores/auth'
 import { useCoursesStore } from '@/stores/courses'
 import { useSemesterStore } from '@/stores/semester'
@@ -13,7 +14,6 @@ import { campusTime, semesterAt } from '@/utils/campusTime'
 import { isCourseActiveInWeek } from '@/utils/course'
 import { addCalendarDays, buildReminderOccurrences, customOccurrences, formatReminderAt, nextCustomOccurrence,
   reminderInstant, validateReminder } from '@/utils/reminders'
-import { openExactReminderSettings, reminderCapability, testReminderNotification } from '@/services/reminderNotifications'
 import { useKeyboardAwarePage } from '@/utils/keyboardInset'
 
 const auth = useAuthStore()
@@ -27,8 +27,8 @@ const editing = ref(false)
 const editingId = ref<string | null>(null)
 const editingRevision = ref(0)
 const formError = ref('')
-const permissionBusy = ref(false)
-const permissionError = ref('')
+const { capabilityReady, permissionBusy, permissionError, enableDevice } = useReminderDevice()
+const permissionOpen = ref(false)
 const filter = ref<'active' | 'all'>('active')
 const editor = ref<HTMLElement | null>(null)
 const { pageStyle, onFieldFocus } = useKeyboardAwarePage({ basePaddingPx: 95 })
@@ -55,24 +55,24 @@ const pendingCourses = computed(() => {
     && (!item.start_time || !item.end_time || item.end_time <= item.start_time)).length : 0
 })
 const visibleItems = computed(() => store.plan.items.filter((item) => filter.value === 'all' || Boolean(nextCustomOccurrence(item, now.value))))
-const permissionLabel = computed(() => {
-  if (store.scheduling) return '正在安排本机通知'
-  if (store.scheduleError) return '本机通知需要检查'
-  if (!store.deviceEnabled) return '尚未开启本机通知'
-  if (store.capability.permission !== 'granted') return '通知权限尚未允许'
-  if (store.capability.platform === 'web') return '网页通知已开启'
-  return store.capability.exact ? '本机提醒已开启' : '已开启 · 时间可能延迟'
+function offerPermission() {
+  if (capabilityReady.value && ['prompt', 'denied'].includes(store.capability.permission)) permissionOpen.value = true
+}
+watch([capabilityReady, () => store.capability.permission], ([ready, permission]) => {
+  if (permission === 'granted' || permission === 'unsupported') { permissionOpen.value = false; return }
+  if (ready && !store.permissionPromptDismissed) {
+    store.permissionPromptDismissed = true
+    offerPermission()
+  }
 })
+async function beforePermissionClose(action: string) {
+  if (action !== 'confirm') return !permissionBusy.value
+  return enableDevice()
+}
 const planCopy = (): ReminderPlan => JSON.parse(JSON.stringify(store.plan))
 async function savePlan(plan: ReminderPlan) {
   try { await store.save(plan); return true }
   catch { showFailToast(store.error || '保存失败，请稍后重试'); return false }
-}
-async function refresh() {
-  const userId = auth.currentUser?.id
-  if (!userId) return
-  await store.load(userId, true)
-  window.dispatchEvent(new Event('campusmind:sync-reminders'))
 }
 async function edit(item?: ReminderItem) {
   editingId.value = item?.id ?? null
@@ -111,12 +111,12 @@ async function saveDraft() {
   else if (editingId.value) { formError.value = '这条提醒已被其他页面删除，请重新添加'; return }
   else if (plan.items.length >= 100) { formError.value = '最多保存 100 个事项，请先删除不再需要的提醒'; return }
   else plan.items.push(item)
-  if (await savePlan(plan)) { editing.value = false; showSuccessToast('已保存') }
+  if (await savePlan(plan)) { editing.value = false; showSuccessToast('已保存'); offerPermission() }
 }
 async function courseSetting(field: 'enabled' | 'lead_minutes' | 'mode', value: boolean | number | ReminderMode) {
   const plan = planCopy()
   plan.course_settings = { ...plan.course_settings, [field]: value }
-  await savePlan(plan)
+  if (await savePlan(plan) && field === 'enabled' && value) offerPermission()
 }
 async function toggleItem(item: ReminderItem) {
   const plan = planCopy()
@@ -142,33 +142,6 @@ async function finish(item: ReminderItem, snooze = false) {
   }
   await savePlan(plan)
 }
-async function enableDevice() {
-  if (permissionBusy.value) return
-  const userId = store.userId
-  permissionBusy.value = true
-  permissionError.value = ''
-  try {
-    const capability = await reminderCapability(true)
-    if (store.userId !== userId) return
-    store.capability = capability
-    if (store.capability.permission !== 'granted') {
-      permissionError.value = '尚未获得通知权限，请在系统或浏览器设置中允许智行发送通知后重试'
-      return
-    }
-    store.setDeviceEnabled(true)
-    window.dispatchEvent(new Event('campusmind:sync-reminders'))
-  } catch (error) {
-    if (store.userId === userId) permissionError.value = error instanceof Error ? error.message : '无法开启通知，请检查系统权限设置'
-  }
-  finally { permissionBusy.value = false }
-}
-async function testNotification() {
-  try { await testReminderNotification(); showSuccessToast(store.capability.platform === 'android' ? '5 秒后发送测试提醒' : '已发送测试提醒') }
-  catch (error) { showFailToast(error instanceof Error ? error.message : '测试提醒失败') }
-}
-async function exactSettings() {
-  try { await openExactReminderSettings() } catch { showFailToast('请到系统设置 → 智行 → 闹钟和提醒中开启') }
-}
 function itemStatus(item: ReminderItem): string {
   if (!item.enabled) return '已暂停'
   const occurrence = nextCustomOccurrence(item, now.value)
@@ -177,10 +150,6 @@ function itemStatus(item: ReminderItem): string {
 }
 onMounted(async () => {
   const userId = auth.currentUser?.id
-  // Checking local permissions does not depend on fetching server-side rules.
-  void reminderCapability().then(capability => {
-    if (auth.currentUser?.id === userId) store.capability = capability
-  }).catch(() => { /* status panel retains a safe default */ })
   if (userId) await Promise.allSettled([store.load(userId), courses.ensureLoaded(),
     semester.loadedForUserId === userId ? Promise.resolve() : semester.load(userId)])
   if (typeof route.query.title === 'string') await edit()
@@ -198,23 +167,19 @@ onMounted(async () => {
         <footer><span><strong>{{ todayCount }}</strong> 今天待提醒</span><button type="button" class="reminder-primary" :disabled="!store.loaded || store.saving" data-testid="new-reminder" @click="edit()"><TechIcon name="plus" :size="18" />新建提醒</button></footer>
       </header>
 
-      <section class="device-notice" :class="{ ready: store.deviceEnabled && store.capability.permission === 'granted' }" aria-label="本机提醒状态">
-        <header><TechIcon name="bell" :size="20" /><strong>{{ permissionLabel }}</strong></header>
-        <p v-if="store.capability.platform === 'web'">网页只在打开且浏览器允许运行时提醒；关闭网页、休眠或系统限制可能导致漏提醒。重要事项请使用安卓 App。</p>
-        <p v-else>通知由本机系统安排，无需平板持续在线。请允许通知与“闹钟和提醒”；震动、声音仍遵循勿扰和省电设置，强行停止 App 后需重新打开。分项声音/震动模式需 Android 8 及以上，旧系统使用系统默认通知方式。</p>
-        <p v-if="store.scheduleError" class="reminder-error" role="alert">{{ store.scheduleError }}</p>
-        <p v-if="permissionError" class="reminder-error" role="alert">{{ permissionError }}</p>
-        <small v-if="store.deviceEnabled && store.capability.permission === 'granted'">{{ store.capability.platform === 'android' ? '本机已安排' : '网页待提醒' }} {{ store.scheduledCount }} 条<span v-if="store.coverageUntil"> · 最晚 {{ formatReminderAt(store.coverageUntil) }}</span></small>
-        <p v-if="store.truncated" class="reminder-error">当前只安排了最近 400 条。后续提醒尚未登记到系统，请在覆盖时间结束前再次打开 App 继续安排。</p>
-        <div class="device-actions">
-          <button v-if="!store.deviceEnabled || store.capability.permission !== 'granted'" type="button" :disabled="permissionBusy" @click="enableDevice">{{ permissionBusy ? '正在等待授权…' : '开启本机通知' }}</button>
-          <button v-else type="button" @click="store.setDeviceEnabled(false)">暂停本机通知</button>
-          <button v-if="store.capability.platform === 'android' && !store.capability.exact" type="button" @click="exactSettings">设置准时提醒</button>
-          <button type="button" :disabled="!store.deviceEnabled || store.capability.permission !== 'granted'" @click="testNotification">发送测试提醒</button>
-          <button type="button" :disabled="store.loading || store.saving" @click="refresh">重新同步</button>
+      <van-dialog v-model:show="permissionOpen" title="开启通知提醒" aria-labelledby="reminder-permission-title" show-cancel-button cancel-button-text="暂不开启" confirm-button-text="开启通知" confirm-button-color="#496a50" :before-close="beforePermissionClose" :confirm-button-disabled="permissionBusy" class="reminder-permission-dialog">
+        <template #title><span id="reminder-permission-title">开启通知提醒</span></template>
+        <div class="permission-copy">
+          <p>{{ store.capability.permission === 'denied' ? '请在系统或浏览器设置中允许智行发送通知。' : '允许通知后，上课和事项到点会提醒你。' }}</p>
+          <p v-if="store.capability.platform === 'web'">网页需保持打开才能提醒。</p>
+          <p v-if="permissionError" class="reminder-error" role="alert">{{ permissionError }}</p>
         </div>
-        <small>提醒规则随账号同步；每台设备需单独开启通知。其他设备的修改会在本机联网并打开 App 后更新。</small>
-      </section>
+      </van-dialog>
+      <p v-if="store.scheduleError" class="reminder-error" role="alert">{{ store.scheduleError }} <router-link to="/profile/notifications">检查通知设置</router-link></p>
+      <p v-if="permissionError && !permissionOpen" class="reminder-error" role="alert">{{ permissionError }} <router-link to="/profile/notifications">检查通知设置</router-link></p>
+      <p v-if="store.truncated" class="reminder-error" role="alert">仅安排了最近 400 条<span v-if="store.coverageUntil">（至 {{ formatReminderAt(store.coverageUntil) }}）</span>，请在覆盖时间结束前打开 App 继续安排。</p>
+      <p v-if="capabilityReady && store.capability.permission === 'granted' && !store.deviceEnabled" class="panel-tip">本机通知已暂停。<router-link to="/profile/notifications">去开启</router-link></p>
+      <p v-if="capabilityReady && store.capability.permission === 'unsupported'" class="panel-tip">当前浏览器不支持系统通知，请使用安卓 App。</p>
 
       <p v-if="store.error" class="reminder-error" role="alert">{{ store.offline ? '暂未连接服务器，显示本机缓存；修改需联网保存。' : '' }}{{ store.error }}</p>
       <p v-if="store.loading && !store.loaded" role="status">正在取回你的提醒…</p>
@@ -232,7 +197,7 @@ onMounted(async () => {
           <label class="full">备注（可选）<textarea v-model="draft.note" name="reminder-note" rows="2" maxlength="300" placeholder="地点、需要带的东西，或给自己的小提示" /></label>
         </fieldset>
         <p v-if="formError" class="reminder-error" role="alert">{{ formError }}</p>
-        <footer><span>保存事项 ≠ 已开启本机通知，请查看上方状态。</span><button class="reminder-primary" type="submit" :disabled="store.saving">{{ store.saving ? '正在保存…' : '保存提醒' }}</button></footer>
+        <footer><router-link v-if="!store.deviceEnabled" to="/profile/notifications">通知未开启？去设置</router-link><button class="reminder-primary" type="submit" :disabled="store.saving">{{ store.saving ? '正在保存…' : '保存提醒' }}</button></footer>
       </form>
 
       <section class="course-reminder-panel" aria-label="课程提醒设置">
@@ -241,22 +206,21 @@ onMounted(async () => {
           <label>提前多久<select :value="store.plan.course_settings.lead_minutes" :disabled="store.saving" aria-label="课程提前提醒" @change="courseSetting('lead_minutes', Number(($event.target as HTMLSelectElement).value))"><option :value="0">上课时</option><option v-for="minutes in [5, 10, 15, 20, 30, 60, 120]" :key="minutes" :value="minutes">提前 {{ minutes }} 分钟</option></select></label>
           <label>提醒方式<select :value="store.plan.course_settings.mode" :disabled="store.saving" aria-label="课程提醒方式" @change="courseSetting('mode', ($event.target as HTMLSelectElement).value as ReminderMode)"><option v-for="mode in modes" :key="mode.value" :value="mode.value">{{ mode.label }}</option></select></label>
         </div>
-        <p class="panel-tip">仅按北京时间今天的课表、实际上课周次和保存的时间生成，不展示或预排后几天的课程。浏览其他周次不会改变提醒。</p>
-        <p class="panel-tip">每天打开一次 App 即可安排当天课程通知；保持打开跨天时会自动切换。若 App 已关闭或被系统冻结，需要再次打开才会安排新一天的课程。自定义事项仍按设置的日期和重复规则提醒。</p>
-        <p v-if="!semester.semester?.start_date" class="panel-tip"><router-link to="/courses#semester-settings">先设置开学日期</router-link>，再生成课程提醒；自定义事项不受影响。</p>
+        <p v-if="store.plan.course_settings.enabled" class="panel-tip course-daily-tip">{{ store.capability.platform === 'android' ? '每天打开一次 App，安排今天的课程提醒。' : '保持网页打开，接收今天的课程提醒。' }}</p>
+        <p v-if="!semester.semester?.start_date" class="panel-tip"><router-link to="/profile/semester">先设置开学日期</router-link>，再生成课程提醒；自定义事项不受影响。</p>
         <p v-if="pendingCourses" class="panel-tip">今天有 {{ pendingCourses }} 门课程需要补全正确的起止时间，暂不提醒。<router-link to="/courses">去补全时间</router-link></p>
         <p v-if="courses.errorMessage" class="reminder-error">课表暂未同步成功，课程通知未重新安排，请检查网络后重新同步。</p>
       </section>
 
       <section class="next-reminders" aria-label="即将提醒">
-        <header><h2>接下来</h2><small>{{ nextReminder ? '今日课程 · 自定义事项' : '今天不再有待提醒的课程' }}</small></header>
-        <div v-if="!upcoming.length" class="reminder-empty"><TechIcon name="notes" :size="32" /><p>暂时没有新的提醒</p><small>课程只看今天，也可以添加一件自己的事。</small></div>
+        <header><h2>接下来</h2><small v-if="nextReminder">今日课程 · 自定义事项</small></header>
+        <div v-if="!upcoming.length" class="reminder-empty"><TechIcon name="notes" :size="32" /><p>暂无待提醒的事</p></div>
         <ol v-else><li v-for="occurrence in upcoming.slice(0, 6)" :key="occurrence.key"><span class="timeline-dot" :class="occurrence.kind"></span><div><time>{{ formatReminderAt(occurrence.at) }}</time><strong>{{ occurrence.title }}</strong><p>{{ occurrence.body }}</p></div><span class="kind-label">{{ occurrence.kind === 'course' ? '课程' : '事项' }}</span></li></ol>
       </section>
 
       <section class="my-reminders" aria-label="我的事项">
-        <header><div><h2>我的事项</h2><small>{{ store.plan.items.length }} 个事项 · 可编辑、暂停或完成</small></div><div class="reminder-filter" role="group" aria-label="事项筛选"><button type="button" :aria-pressed="filter === 'active'" @click="filter = 'active'">待办</button><button type="button" :aria-pressed="filter === 'all'" @click="filter = 'all'">全部</button></div></header>
-        <p v-if="!visibleItems.length" class="reminder-empty">{{ filter === 'active' ? '待办都处理好了，也可以添加新的提醒。' : '还没有自定义事项，点击上方“新建提醒”。' }}</p>
+        <header><div><h2>我的事项</h2><small>{{ store.plan.items.length }} 个事项</small></div><div class="reminder-filter" role="group" aria-label="事项筛选"><button type="button" :aria-pressed="filter === 'active'" @click="filter = 'active'">待办</button><button type="button" :aria-pressed="filter === 'all'" @click="filter = 'all'">全部</button></div></header>
+        <p v-if="!visibleItems.length" class="reminder-empty">{{ store.plan.items.length ? '待办都处理好了' : '还没有事项，试试“新建提醒”' }}</p>
         <article v-for="item in visibleItems" :key="item.id" class="reminder-item" :data-reminder-id="item.id" :class="{ paused: !item.enabled }">
           <header><strong>{{ item.title }}</strong><span>{{ itemStatus(item) }}</span></header>
           <time>{{ formatReminderAt(nextCustomOccurrence(item, now)?.at || reminderInstant(item.date, item.time)) }}</time>
@@ -282,15 +246,12 @@ onMounted(async () => {
 .bell-art b { position: absolute; bottom: -5px; right: -5px; width: 23px; height: 42px; background: #aac396; border-radius: 85% 0 85% 0; transform: rotate(20deg); }
 button { cursor: pointer; color: inherit; font: inherit; }
 button:disabled { opacity: .48; cursor: not-allowed; }
-button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid #4f7558; outline-offset: 3px; }
+button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, summary:focus-visible { outline: 2px solid #4f7558; outline-offset: 3px; }
 .reminder-primary { display: inline-flex; align-items: center; justify-content: center; gap: 7px; border: 0; min-height: 46px; border-radius: 16px; background: #496a50; color: #fff; padding: 10px 19px; font-size: 14px; font-weight: 700; white-space: nowrap; }
-.device-notice { padding: 18px; border: 1px solid #e5d9ba; background: #fbf7e9; border-radius: 20px; }
-.device-notice.ready { border-color: #d3dfcf; background: #edf3e8; }
-.device-notice header { display: flex; align-items: center; gap: 9px; color: #4b6248; font-size: 14px; }
-.device-notice p,.panel-tip { font-size: 12px; color: #636b5f; line-height: 1.8; margin: 10px 0; }
-.device-notice small { display: block; color: #636b5f; line-height: 1.7; font-size: 11px; }
-.device-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
-.device-actions button,.reminder-item footer button { border: 1px solid #d9e0d3; border-radius: 12px; background: #fffef8; min-height: 42px; padding: 8px 12px; font-size: 12px; font-weight: 650; }
+.panel-tip { font-size: 12px; color: #636b5f; line-height: 1.8; margin: 10px 0; }
+.permission-copy { padding: 8px 24px 18px; font-size: 14px; line-height: 1.7; color: #53624e; }
+.reminder-item footer button { border: 1px solid #d9e0d3; border-radius: 12px; background: #fffef8; min-height: 42px; padding: 8px 12px; font-size: 12px; font-weight: 650; }
+.reminder-error a,.reminder-editor footer a { color: #426349; text-decoration: underline; text-underline-offset: 3px; }
 .reminder-editor,.course-reminder-panel,.next-reminders,.my-reminders { padding: 22px; background: #fffef9; border: 1px solid #e3e8dd; border-radius: 24px; box-shadow: 0 9px 28px rgba(52,73,48,.04); }
 .reminder-editor { scroll-margin-top: 85px; border-color: #aabea0; }
 .reminder-editor > header,.course-reminder-panel > header,.next-reminders > header,.my-reminders > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }

@@ -8,6 +8,8 @@ import { getBuildings } from '@/api/buildings'
 import { getCourses } from '@/api/courses'
 import { fetchSemester } from '@/api/semester'
 import { useAuthStore } from '@/stores/auth'
+import { rememberRecentChatEntry } from '@/utils/chat'
+import { createScopedStorage } from '@/utils/scopedStorage'
 import type { Course } from '@/types/course'
 import HomePage from './HomePage.vue'
 import selectionFixture from '../../../tests/fixtures/course-selection.json'
@@ -61,6 +63,7 @@ async function mountHome() {
     history: createMemoryHistory(),
     routes: [
       { path: '/', component: EmptyRoute },
+      { path: '/map', component: EmptyRoute },
       { path: '/courses', component: EmptyRoute },
       { path: '/courses/import', component: EmptyRoute },
       { path: '/schedule', component: EmptyRoute },
@@ -112,6 +115,37 @@ describe('HomePage', () => {
   afterEach(() => {
     vi.useRealTimers()
     vi.clearAllMocks()
+  })
+
+  it('removes popular places and opens the map from the channel shortcut when there is no history', async () => {
+    vi.mocked(getCourses).mockResolvedValue([])
+    const wrapper = await mountHome()
+    expect(wrapper.find('.places-section').exists()).toBe(false)
+    expect(wrapper.find('.place-grid').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('校园里的常去处')
+    expect(wrapper.find('[data-testid="campus-map"]').exists()).toBe(true)
+    await wrapper.get('.note-lilac').trigger('click')
+    await flushPromises()
+    expect(wrapper.vm.$router.currentRoute.value.path).toBe('/map')
+    wrapper.unmount()
+  })
+
+  it('preserves recent places and the shortcut to the last chat', async () => {
+    vi.mocked(getCourses).mockResolvedValue([])
+    rememberRecentChatEntry(createScopedStorage(7), {
+      buildingId: 2, buildingName: '综合教学楼', roomName: '410'
+    })
+    const wrapper = await mountHome()
+    expect(wrapper.get('.recent-section').text()).toContain('最近去过')
+    expect(wrapper.get('.recent-row button').text()).toContain('410')
+    await wrapper.get('.recent-row button').trigger('click')
+    await flushPromises()
+    expect(wrapper.vm.$router.currentRoute.value.fullPath).toBe('/buildings/2/messages?room_name=410')
+    await wrapper.vm.$router.push('/')
+    await wrapper.get('.note-lilac').trigger('click')
+    await flushPromises()
+    expect(wrapper.vm.$router.currentRoute.value.fullPath).toBe('/buildings/2/messages?room_name=410')
+    wrapper.unmount()
   })
 
   it('uses the semester current week and ignores the timetable browsing week', async () => {

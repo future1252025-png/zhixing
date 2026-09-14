@@ -13,7 +13,8 @@ const initialCapability = (): ReminderCapability => ({
 export const useRemindersStore = defineStore('reminders', {
   state: () => ({
     plan: emptyReminderPlan(), userId: null as number | null, loaded: false, loading: false, saving: false,
-    error: '', offline: false, generation: 0, deviceEnabled: false,
+    error: '', offline: false, generation: 0, deviceEnabled: false, devicePreferenceSet: false,
+    permissionPromptDismissed: false,
     capability: initialCapability(),
     scheduledCount: 0, coverageUntil: '', truncated: false, scheduleError: '', scheduling: false
   }),
@@ -34,8 +35,14 @@ export const useRemindersStore = defineStore('reminders', {
       this.scheduling = false
       this.capability = initialCapability()
       this.deviceEnabled = false
+      this.devicePreferenceSet = false
+      this.permissionPromptDismissed = false
       if (userId) {
-        try { this.deviceEnabled = createScopedStorage(userId).get('reminder-device-enabled') === 'true' } catch { /* storage unavailable */ }
+        try {
+          const preference = createScopedStorage(userId).get('reminder-device-enabled')
+          this.deviceEnabled = preference === 'true'
+          this.devicePreferenceSet = preference === 'true' || preference === 'false'
+        } catch { /* storage unavailable */ }
       }
     },
     async load(userId: number, force = false) {
@@ -86,6 +93,7 @@ export const useRemindersStore = defineStore('reminders', {
     },
     setDeviceEnabled(enabled: boolean) {
       this.deviceEnabled = enabled
+      this.devicePreferenceSet = true
       if (this.userId) {
         try { createScopedStorage(this.userId).set('reminder-device-enabled', String(enabled)) } catch { /* session-only */ }
       }

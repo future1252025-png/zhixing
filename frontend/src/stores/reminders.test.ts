@@ -16,6 +16,19 @@ it('keeps plans account-scoped and notification opt-in device-local', async () =
   await store.load(1)
   expect(store.deviceEnabled).toBe(true)
 })
+it('distinguishes an explicit pause from first use and resets prompt dismissal between accounts', () => {
+  const store = useRemindersStore()
+  store.reset(1)
+  expect(store.devicePreferenceSet).toBe(false)
+  store.setDeviceEnabled(false)
+  store.permissionPromptDismissed = true
+  store.reset(2)
+  expect(store.devicePreferenceSet).toBe(false)
+  expect(store.permissionPromptDismissed).toBe(false)
+  store.reset(1)
+  expect(store.devicePreferenceSet).toBe(true)
+  expect(store.deviceEnabled).toBe(false)
+})
 it('uses a valid offline cache, ignoring malformed records', async () => {
   localStorage.setItem('campusmind:1:reminder-plan', JSON.stringify({ ...emptyReminderPlan(), revision: 3 }))
   vi.mocked(getReminders).mockRejectedValue(new Error('offline'))

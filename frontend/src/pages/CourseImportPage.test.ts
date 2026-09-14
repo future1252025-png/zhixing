@@ -3,6 +3,8 @@ import { createPinia, setActivePinia, type Pinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { useCoursesStore } from '@/stores/courses'
+import { useAuthStore } from '@/stores/auth'
+import { useSemesterStore } from '@/stores/semester'
 import type { ImportPreviewResponse } from '@/types/courseImport'
 
 import CourseImportPage from './CourseImportPage.vue'
@@ -155,6 +157,11 @@ describe('CourseImportPage', () => {
     // 每个用例重置 Pinia，避免 buildings/courses store 缓存跨用例泄漏。
     pinia = createPinia()
     setActivePinia(pinia)
+    useAuthStore(pinia).currentUser = { id: 1, student_id: '20240001', nickname: '测试同学',
+      avatar_text: null, avatar_color: null, role: 'student', created_at: '2026-01-01T00:00:00Z' }
+    const semester = useSemesterStore(pinia)
+    semester.loadedForUserId = 1
+    semester.semester = { status: 'active', start_date: '2026-08-31', total_weeks: 20, current_week: 4 }
     mocks.getBuildings.mockResolvedValue([
       {
         id: 3,

@@ -21,21 +21,21 @@ defineProps<{
       <span class="semester-gate__eyebrow">先对齐真实教学周</span>
       <h2>请先设置学期</h2>
       <p>设置开学日期和总周数后，首页与课程提醒才会使用同一个真实教学周。</p>
-      <RouterLink to="/courses#semester-settings">去课表设置学期</RouterLink>
+      <RouterLink to="/courses/import">去导入课表并设置学期</RouterLink>
     </template>
 
     <slot v-else-if="status === 'before_term'" name="before-term">
       <span class="semester-gate__eyebrow">课程还没开始</span>
       <h2>学期尚未开始</h2>
       <p>现在不会提前套用第 1 周课程。开学后会自动切换到真实教学周。</p>
-      <RouterLink to="/courses#semester-settings">检查学期设置</RouterLink>
+      <RouterLink to="/profile/semester">检查学期设置</RouterLink>
     </slot>
 
     <slot v-else name="after-term">
       <span class="semester-gate__eyebrow">这一学期走完了</span>
       <h2>本学期已结束</h2>
       <p>当前日期已超过教学周范围，可以在课表页设置新学期。</p>
-      <RouterLink to="/courses#semester-settings">设置新学期</RouterLink>
+      <RouterLink to="/profile/semester">设置新学期</RouterLink>
     </slot>
   </section>
 </template>

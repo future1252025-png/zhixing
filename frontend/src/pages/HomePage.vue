@@ -77,21 +77,6 @@ const nextCourseChat = computed(() =>
 const chatSearchResults = computed(() =>
   buildChatSearchResults(buildings.value, chatQuery.value, 8)
 )
-const popularChatBuildings = computed(() => {
-  const courseBuildingIds = new Set(activeCourses.value.map((course) => course.building_id))
-  const scored = buildings.value.map((building, index) => {
-    const text = `${building.name} ${building.type} ${building.description}`.toLowerCase()
-    let score = 0
-    if (courseBuildingIds.has(building.id)) score += 40
-    if (/教|教学|实训|实验/.test(text)) score += 16
-    if (/图书|食堂|宿舍|体育/.test(text)) score += 10
-    return { building, index, score }
-  })
-  return scored
-    .sort((left, right) => right.score - left.score || left.index - right.index)
-    .slice(0, 6)
-    .map((item) => item.building)
-})
 const showSearchResults = computed(() => chatQuery.value.trim().length > 0)
 
 function refreshRecentChats() {
@@ -212,8 +197,8 @@ function openQuickChannels() {
     openRecentChat(latest)
     return
   }
-  // 还没聊过：带用户到常去处板块，那里每张卡都是频道入口
-  document.querySelector('.places-section')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  // 还没聊过时，直接打开地图选楼。
+  router.push('/map')
 }
 
 onMounted(initializeHome)
@@ -391,31 +376,6 @@ onUnmounted(() => {
           >
             <span><TechIcon name="location" :size="16" /></span>
             <strong>{{ formatChatEntryLabel(entry) }}</strong>
-          </button>
-        </div>
-      </section>
-
-      <section
-        v-reveal="{ from: 'left', distance: 40, stagger: 60 }"
-        class="places-section"
-      >
-        <div class="fresh-section-heading">
-          <div><h2>校园里的常去处</h2><p>点一下，进这个地点的频道聊聊</p></div>
-          <span>{{ buildings.length }} 个地点</span>
-        </div>
-
-        <div class="place-grid">
-          <button
-            v-for="(building, index) in popularChatBuildings"
-            :key="building.id"
-            type="button"
-            :class="`place-tone-${index % 4}`"
-            @click="openBuildingChat(building)"
-          >
-            <span class="place-index">{{ String(index + 1).padStart(2, '0') }}</span>
-            <small>{{ building.type }}</small>
-            <strong>{{ formatBuildingDisplayName(building.name) }}</strong>
-            <span class="place-enter"><TechIcon name="chat" :size="14" /> 进频道聊聊 <TechIcon name="arrow" :size="15" /></span>
           </button>
         </div>
       </section>
@@ -941,7 +901,6 @@ onUnmounted(() => {
 }
 
 .recent-section,
-.places-section,
 .map-section {
   display: grid;
   gap: 13px;
@@ -982,80 +941,6 @@ onUnmounted(() => {
 }
 
 .recent-row strong { font-size: 13px; font-weight: 700; }
-
-.places-section .fresh-section-heading > span {
-  color: var(--fresh-muted);
-  font-size: 12px;
-}
-
-.place-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 9px;
-}
-
-.place-grid button {
-  position: relative;
-  display: grid;
-  min-width: 0;
-  min-height: 148px;
-  align-content: end;
-  overflow: hidden;
-  border: 0;
-  border-radius: 23px 23px 18px 23px;
-  color: var(--fresh-ink);
-  cursor: pointer;
-  padding: 15px;
-  text-align: left;
-}
-
-.place-grid button::before {
-  position: absolute;
-  top: -26px;
-  right: -19px;
-  width: 90px;
-  height: 90px;
-  border: 18px solid rgba(255, 255, 255, 0.35);
-  border-radius: 50%;
-  content: "";
-  pointer-events: none;
-}
-
-.place-tone-0 { background: var(--fresh-mint); }
-.place-tone-1 { background: var(--fresh-sky); }
-.place-tone-2 { background: var(--cm-amber-soft); }
-.place-tone-3 { background: #eee5ec; }
-
-.place-index {
-  position: absolute;
-  top: 13px;
-  left: 14px;
-  color: var(--fresh-text);
-  font-family: ui-monospace, monospace;
-  font-size: 12px;
-}
-
-.place-grid small {
-  color: var(--fresh-text);
-  font-size: 12px;
-}
-
-.place-grid strong {
-  margin-top: 3px;
-  font-size: 16px;
-  line-height: 1.35;
-  overflow-wrap: anywhere;
-}
-
-.place-enter {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  margin-top: 11px;
-  color: var(--fresh-green-dark);
-  font-size: 12px;
-  font-weight: 700;
-}
 
 .map-sheet {
   overflow: hidden;

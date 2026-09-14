@@ -159,7 +159,7 @@ describe('CourseFormPage', () => {
     await flushPromises()
 
     expect(wrapper.text()).toContain('请先设置学期')
-    expect(wrapper.find('a[href="/courses#semester-settings"]').exists()).toBe(true)
+    expect(wrapper.find('a[href="/profile/semester"]').exists()).toBe(true)
     expect(mocks.push).not.toHaveBeenCalled()
   })
 
