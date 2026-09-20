@@ -5,6 +5,7 @@ import type { SemesterState, SemesterUpdate } from '@/types/semester'
 
 const props = defineProps<{
   semester: SemesterState | null
+  currentSemester?: SemesterState
   saving: boolean
 }>()
 
@@ -20,7 +21,7 @@ const form = reactive({
 const validationMessage = ref('')
 
 const statusMessage = computed(() => {
-  const semester = props.semester
+  const semester = props.currentSemester ?? props.semester
   if (!semester || semester.status === 'unconfigured') {
     return '尚未设置学期，首页课程与课程提醒暂不可用'
   }

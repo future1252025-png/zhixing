@@ -3,9 +3,11 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { showConfirmDialog, showFailToast, showSuccessToast } from 'vant'
 import { useRouter } from 'vue-router'
 
-import { deleteCourse } from '@/api/courses'
+import { deleteCourse, deleteMakeupBatch } from '@/api/courses'
 import { extractBusinessError } from '@/api/errors'
 import TechIcon from '@/components/TechIcon.vue'
+import { useCampusClock } from '@/composables/useCampusClock'
+import { campusTime, semesterAt } from '@/utils/campusTime'
 import { useAuthStore } from '@/stores/auth'
 import { useCoursesStore } from '@/stores/courses'
 import { useSemesterStore } from '@/stores/semester'
@@ -29,8 +31,12 @@ const router = useRouter()
 const authStore = useAuthStore()
 const coursesStore = useCoursesStore()
 const semesterStore = useSemesterStore()
-const courses = ref<Course[]>([])
-const loading = ref(true)
+if (authStore.currentUser) semesterStore.attachUser(authStore.currentUser.id)
+const courses = computed(() => coursesStore.courses)
+const loading = computed(() => !coursesStore.loaded && !coursesStore.errorMessage)
+const now = useCampusClock()
+const currentSemester = computed(() => semesterAt(semesterStore.semester, now.value))
+const overviewReady = computed(() => Boolean(semesterStore.semester && coursesStore.loaded))
 const deletingId = ref<number | null>(null)
 const activeCourse = ref<Course | null>(null)
 const actionSheetVisible = ref(false)
@@ -62,12 +68,17 @@ const selectedWeek = computed({
 const weekOptions = computed(() =>
   getTeachingWeekOptions(semesterStore.totalWeeks ?? undefined)
 )
-const courseActionOptions = [
+const courseActionOptions = computed(() => activeCourse.value?.makeup ? [
+  { name: '查看地点' }, { name: '修改这次补课' },
+  { name: '取消这次补课', color: '#b65f56' },
+  { name: '撤销整批补课', color: '#b65f56' }
+] : [
   { name: '查看地点', subname: '打开地图与地点频道' },
   { name: '编辑课程' },
+  { name: '添加补课', subname: '沿用这门课，只选日期和时间' },
   { name: '删除课程', color: '#b65f56' }
-]
-const visibleCourses = computed(() => filterCoursesByWeek(courses.value, selectedWeek.value))
+])
+const visibleCourses = computed(() => filterCoursesByWeek(courses.value, selectedWeek.value, semesterStore.semester))
 // Keep the semester's saved clock axis stable when browsing different weeks.
 const timeSlots = computed(() => getTimetableTimeSlots(courses.value))
 const pendingScheduleCourses = computed(() =>
@@ -107,22 +118,13 @@ const courseColorMap = computed(() => buildCourseColorMap(courses.value))
 const courseCountText = computed(() =>
   visibleCourses.value.length > 0 ? `${visibleCourses.value.length} 门课` : '本周暂无课'
 )
-const todayWeekday = computed(() => {
-  const day = new Date().getDay()
-  return day === 0 ? 7 : day
-})
+const todayWeekday = computed(() => campusTime(now.value).weekday)
 // 当前时刻（分钟精度），驱动"此刻正在上的节次"呼吸高亮
-const nowMinutes = ref(getMinutesOfDay())
-let nowTimer: ReturnType<typeof setInterval> | undefined
+const nowMinutes = computed(() => campusTime(now.value).minutes)
 let timetableResizeObserver: ResizeObserver | undefined
 let courseHeightFrame: number | undefined
 let weekHeadScrollFrame: number | undefined
 let observedGridWidth = 0
-
-function getMinutesOfDay(): number {
-  const now = new Date()
-  return now.getHours() * 60 + now.getMinutes()
-}
 
 function toMinutes(time: string): number {
   const [hour, minute] = time.split(':').map(Number)
@@ -189,7 +191,7 @@ const selectedWeekDateRange = computed(() => {
 })
 
 function isTodayColumn(weekday: number): boolean {
-  return semesterStore.currentWeek === selectedWeek.value && weekday === todayWeekday.value
+  return currentSemester.value.current_week === selectedWeek.value && weekday === todayWeekday.value
 }
 
 function getErrorMessage(error: unknown): string {
@@ -197,18 +199,15 @@ function getErrorMessage(error: unknown): string {
 }
 
 async function loadCourses() {
-  loading.value = true
   errorMessage.value = ''
   try {
-    courses.value = await coursesStore.ensureLoaded()
+    await coursesStore.ensureLoaded()
   } catch (error) {
     errorMessage.value = getErrorMessage(error)
-  } finally {
-    loading.value = false
   }
 }
 
-async function loadSemester() {
+async function loadSemester(force = false) {
   const userId = authStore.currentUser?.id
   if (!userId) {
     semesterErrorMessage.value = '登录信息尚未加载完成'
@@ -216,7 +215,7 @@ async function loadSemester() {
   }
   semesterErrorMessage.value = ''
   try {
-    await semesterStore.load(userId)
+    await semesterStore.load(userId, force)
   } catch (error) {
     semesterErrorMessage.value = getErrorMessage(error)
   }
@@ -235,7 +234,15 @@ function openImportPage() {
 }
 
 function openEditPage(courseId: number) {
-  router.push(`/courses/${courseId}/edit`)
+  router.push(courses.value.find(course => course.id === courseId)?.makeup ? `/courses/makeups?edit=${courseId}` : `/courses/${courseId}/edit`)
+}
+
+function openMakeup(course?: Course) {
+  const date = selectedWeekDates.value[5]?.iso
+  router.push({ path: '/courses/makeups', query: {
+    ...(date ? { date } : {}),
+    ...(course ? { source: String(course.id), from: selectedWeekDates.value[course.weekday - 1]?.iso } : {})
+  } })
 }
 
 function openCreateForSlot(weekday: number, slot: { start_time: string; end_time: string }) {
@@ -349,13 +356,28 @@ async function handleCourseAction(action: { name: string }) {
   if (action.name === '删除课程') {
     await confirmDelete(course)
   }
+  if (action.name === '添加补课') openMakeup(course)
+  if (action.name === '修改这次补课') openEditPage(course.id)
+  if (action.name === '取消这次补课') await confirmDelete(course)
+  if (action.name === '撤销整批补课' && course.makeup) {
+    const batch = courses.value.filter(item => item.makeup?.batch_id === course.makeup!.batch_id)
+    try { await showConfirmDialog({ title: `撤销这批 ${batch.length} 门补课？`, message: '对应补课和通知会取消；原日期停课的课程将恢复。' }) } catch { return }
+    try {
+      await deleteMakeupBatch(course.makeup.batch_id)
+      coursesStore.invalidate()
+      await loadCourses()
+      showSuccessToast('已撤销这批补课')
+    } catch (cause) { showFailToast(getErrorMessage(cause)) }
+  }
 }
 
 async function confirmDelete(course: Course) {
   try {
     await showConfirmDialog({
-      title: '删除课程',
-      message: `确认删除「${course.course_name}」吗？`
+      title: course.makeup ? '取消这次补课' : '删除课程',
+      message: course.makeup
+        ? `取消 ${course.makeup.date}「${course.course_name}」及对应提醒？${course.makeup.cancel_source ? '原日期这门课将恢复。' : '其他课程不受影响。'}`
+        : `确认删除「${course.course_name}」吗？`
     })
   } catch {
     return
@@ -365,7 +387,7 @@ async function confirmDelete(course: Course) {
   try {
     await deleteCourse(course.id)
     coursesStore.invalidate()
-    showSuccessToast('课程已删除')
+    showSuccessToast(course.makeup ? '已取消这次补课' : '课程已删除')
     await loadCourses()
   } catch (error) {
     showFailToast(getErrorMessage(error))
@@ -410,13 +432,9 @@ onMounted(() => {
   window.addEventListener('wheel', releaseWeekScrollPosition, { passive: true })
   window.addEventListener('keydown', handleWeekScrollKey)
   void nextTick().then(scheduleWeekHeadStuckSync)
-  nowTimer = setInterval(() => {
-    nowMinutes.value = getMinutesOfDay()
-  }, 60_000)
 })
 
 onBeforeUnmount(() => {
-  if (nowTimer) clearInterval(nowTimer)
   window.removeEventListener('scroll', scheduleWeekHeadStuckSync)
   window.removeEventListener('resize', scheduleWeekHeadStuckSync)
   window.removeEventListener('touchstart', releaseWeekScrollPosition)
@@ -437,17 +455,20 @@ onBeforeUnmount(() => {
   <section class="page courses-page">
     <van-nav-bar title="我的课表" />
     <div class="page-content courses-content">
-      <div v-if="semesterStore.loading" class="semester-loading fresh-card" aria-live="polite">
+      <div v-if="semesterStore.loading && !semesterStore.semester" class="semester-loading fresh-card" aria-live="polite">
         <i aria-hidden="true"></i>
         <span>正在读取真实教学周...</span>
       </div>
       <van-empty
-        v-else-if="semesterErrorMessage && !semesterStore.semester"
+        v-else-if="(semesterErrorMessage || semesterStore.errorMessage) && !semesterStore.semester"
         image="error"
-        :description="semesterErrorMessage"
+        :description="semesterErrorMessage || semesterStore.errorMessage"
       >
-        <van-button type="primary" size="small" @click="loadSemester">重新加载学期</van-button>
+        <van-button type="primary" size="small" @click="loadSemester(true)">重新加载学期</van-button>
       </van-empty>
+      <p v-if="semesterStore.semester && semesterStore.errorMessage" class="semester-sync-hint" role="status">
+        学期暂未同步，当前按已保存设置显示。<button type="button" @click="loadSemester(true)">重试</button>
+      </p>
       <header
         v-reveal="{ from: 'left', distance: 38, stagger: 55 }"
         class="course-hero"
@@ -473,6 +494,7 @@ onBeforeUnmount(() => {
         </div>
       </header>
 
+      <div id="current-week" :data-scroll-ready="overviewReady">
       <section
         v-reveal="{ from: 'right', distance: 36, stagger: 54 }"
         class="week-book fresh-card"
@@ -495,6 +517,7 @@ onBeforeUnmount(() => {
             </select>
             <TechIcon name="chevron-down" :size="15" />
           </label>
+          <button type="button" class="makeup-shortcut" :disabled="!coursesStore.loaded" @click="openMakeup()"><TechIcon name="calendar" :size="17" />补课</button>
         </div>
 
         <div class="week-switcher">
@@ -512,6 +535,7 @@ onBeforeUnmount(() => {
           </button>
         </div>
       </section>
+      </div>
 
       <div v-if="loading" class="course-loading" aria-live="polite">
         <span><i></i><i></i><i></i></span>
@@ -677,6 +701,7 @@ onBeforeUnmount(() => {
                         v-for="course in getCellCourses(weekday.value, slot)"
                         :key="course.id"
                         class="timetable-course"
+                        :data-makeup-date="course.makeup?.date"
                         :class="{ 'is-deleting': deletingId === course.id }"
                         :style="getCourseStyle(course)"
                       >
@@ -688,6 +713,7 @@ onBeforeUnmount(() => {
                           @click="openCourseActions(course)"
                         >
                           <strong>{{ course.course_name }}</strong>
+                          <span v-if="course.makeup" class="makeup-badge">补课</span>
                           <span v-if="course.teacher" class="compact-teacher">
                             {{ course.teacher }}
                           </span>
@@ -695,7 +721,7 @@ onBeforeUnmount(() => {
                             <span class="location-mark" aria-hidden="true">@</span>
                             <span>{{ formatTimetableCourseLocation(course) }}</span>
                           </span>
-                          <time v-if="!courseUsesStandardSlotTime(course, slot)" class="exception-time">
+                          <time v-if="course.makeup || !courseUsesStandardSlotTime(course, slot)" class="exception-time">
                             {{ course.start_time }}—{{ course.end_time }}
                           </time>
                         </button>
@@ -726,6 +752,13 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.makeup-shortcut { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 44px; padding: 8px 12px; border: 1px solid #d7e1d0; border-radius: 13px; background: #f5f8ef; color: #486b4b; white-space: nowrap; font: inherit; cursor: pointer; }
+.makeup-badge { align-self: center; color: #5b4b25; background: #f4e7be; border-radius: 5px; padding: 2px 3px; font-size: clamp(9px, 1.35vw, 11px); white-space: nowrap; }
+@media (max-width: 480px) { .makeup-shortcut { padding: 8px; font-size: 13px; }.makeup-shortcut :deep(svg) { display: none; } }
+#current-week { scroll-margin-top: calc(var(--app-safe-area-top, 0px) + var(--nav-height, 58px) + 18px); }
+:global(html.capacitor-android #current-week) { scroll-margin-top: calc(var(--app-native-nav-inset-top, 0px) + 12px); }
+.semester-sync-hint { color: #6d7666; font-size: 12px; line-height: 1.7; }
+.semester-sync-hint button { min-height: 44px; padding: 8px 12px; border: 0; background: transparent; color: #3d6144; font: inherit; text-decoration: underline; cursor: pointer; }
 .courses-page {
   overflow-anchor: none;
   background:

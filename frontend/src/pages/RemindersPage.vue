@@ -10,8 +10,8 @@ import { useCoursesStore } from '@/stores/courses'
 import { useSemesterStore } from '@/stores/semester'
 import { useRemindersStore } from '@/stores/reminders'
 import type { ReminderItem, ReminderMode, ReminderPlan } from '@/types/reminder'
-import { campusTime, semesterAt } from '@/utils/campusTime'
-import { isCourseActiveInWeek } from '@/utils/course'
+import { campusTime } from '@/utils/campusTime'
+import { coursesOnDate } from '@/utils/course'
 import { addCalendarDays, buildReminderOccurrences, customOccurrences, formatReminderAt, nextCustomOccurrence,
   reminderInstant, validateReminder } from '@/utils/reminders'
 import { useKeyboardAwarePage } from '@/utils/keyboardInset'
@@ -49,10 +49,8 @@ const upcoming = computed(() => occurrences.value.filter((item) => Date.parse(it
 const nextReminder = computed(() => upcoming.value[0])
 const todayCount = computed(() => upcoming.value.filter((item) => campusTime(new Date(item.at)).date === today.value).length)
 const pendingCourses = computed(() => {
-  const week = semesterAt(semester.semester, now.value).current_week
-  const weekday = campusTime(now.value).weekday
-  return week ? courses.courses.filter(item => item.weekday === weekday && isCourseActiveInWeek(item.weeks, week)
-    && (!item.start_time || !item.end_time || item.end_time <= item.start_time)).length : 0
+  return coursesOnDate(courses.courses, today.value, semester.semester)
+    .filter(item => !item.start_time || !item.end_time || item.end_time <= item.start_time).length
 })
 const visibleItems = computed(() => store.plan.items.filter((item) => filter.value === 'all' || Boolean(nextCustomOccurrence(item, now.value))))
 function offerPermission() {
@@ -82,7 +80,8 @@ async function edit(item?: ReminderItem) {
   formError.value = ''
   editing.value = true
   await nextTick()
-  editor.value?.scrollIntoView({ block: 'start', behavior: 'smooth' })
+  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  editor.value?.scrollIntoView({ block: 'start', behavior: reduceMotion ? 'instant' : 'smooth' })
 }
 function repeatChanged() {
   draft.value.end_date = draft.value.repeat === 'once' ? null : addCalendarDays(draft.value.date, 30)
@@ -160,10 +159,10 @@ onMounted(async () => {
   <section class="page reminders-page">
     <van-nav-bar title="提醒" />
     <main class="page-content reminders-content" :style="pageStyle" @focusin="onFieldFocus">
-      <header class="reminder-hero">
+      <header class="reminder-hero reminder-arrive">
         <div><span class="fresh-kicker">给校园日常，留一点从容</span><h1>要紧的事，<br />到点轻轻提醒。</h1>
           <p>上课、开会、交作业……不用一直记在心里。</p></div>
-        <div class="bell-art" aria-hidden="true"><TechIcon name="bell" :size="64" /><i></i><b></b></div>
+        <div class="bell-art" aria-hidden="true"><span class="bell-chime"><TechIcon name="bell" :size="64" /></span><i></i><b></b></div>
         <footer><span><strong>{{ todayCount }}</strong> 今天待提醒</span><button type="button" class="reminder-primary" :disabled="!store.loaded || store.saving" data-testid="new-reminder" @click="edit()"><TechIcon name="plus" :size="18" />新建提醒</button></footer>
       </header>
 
@@ -200,7 +199,7 @@ onMounted(async () => {
         <footer><router-link v-if="!store.deviceEnabled" to="/profile/notifications">通知未开启？去设置</router-link><button class="reminder-primary" type="submit" :disabled="store.saving">{{ store.saving ? '正在保存…' : '保存提醒' }}</button></footer>
       </form>
 
-      <section class="course-reminder-panel" aria-label="课程提醒设置">
+      <section class="course-reminder-panel reminder-arrive" aria-label="课程提醒设置">
         <header><span class="section-icon"><TechIcon name="calendar" :size="25" /></span><div><h2>课程提醒</h2><p>只提醒今天要上的课。</p></div><button class="reminder-switch" type="button" role="switch" aria-label="课程提醒" :aria-checked="store.plan.course_settings.enabled" :disabled="!store.loaded || store.saving" @click="courseSetting('enabled', !store.plan.course_settings.enabled)"><i></i></button></header>
         <div v-if="store.plan.course_settings.enabled" class="course-reminder-options">
           <label>提前多久<select :value="store.plan.course_settings.lead_minutes" :disabled="store.saving" aria-label="课程提前提醒" @change="courseSetting('lead_minutes', Number(($event.target as HTMLSelectElement).value))"><option :value="0">上课时</option><option v-for="minutes in [5, 10, 15, 20, 30, 60, 120]" :key="minutes" :value="minutes">提前 {{ minutes }} 分钟</option></select></label>
@@ -212,13 +211,13 @@ onMounted(async () => {
         <p v-if="courses.errorMessage" class="reminder-error">课表暂未同步成功，课程通知未重新安排，请检查网络后重新同步。</p>
       </section>
 
-      <section class="next-reminders" aria-label="即将提醒">
+      <section class="next-reminders reminder-arrive" aria-label="即将提醒">
         <header><h2>接下来</h2><small v-if="nextReminder">今日课程 · 自定义事项</small></header>
         <div v-if="!upcoming.length" class="reminder-empty"><TechIcon name="notes" :size="32" /><p>暂无待提醒的事</p></div>
         <ol v-else><li v-for="occurrence in upcoming.slice(0, 6)" :key="occurrence.key"><span class="timeline-dot" :class="occurrence.kind"></span><div><time>{{ formatReminderAt(occurrence.at) }}</time><strong>{{ occurrence.title }}</strong><p>{{ occurrence.body }}</p></div><span class="kind-label">{{ occurrence.kind === 'course' ? '课程' : '事项' }}</span></li></ol>
       </section>
 
-      <section class="my-reminders" aria-label="我的事项">
+      <section class="my-reminders reminder-arrive" aria-label="我的事项">
         <header><div><h2>我的事项</h2><small>{{ store.plan.items.length }} 个事项</small></div><div class="reminder-filter" role="group" aria-label="事项筛选"><button type="button" :aria-pressed="filter === 'active'" @click="filter = 'active'">待办</button><button type="button" :aria-pressed="filter === 'all'" @click="filter = 'all'">全部</button></div></header>
         <p v-if="!visibleItems.length" class="reminder-empty">{{ store.plan.items.length ? '待办都处理好了' : '还没有事项，试试“新建提醒”' }}</p>
         <article v-for="item in visibleItems" :key="item.id" class="reminder-item" :data-reminder-id="item.id" :class="{ paused: !item.enabled }">
@@ -235,6 +234,15 @@ onMounted(async () => {
 <style scoped>
 .reminders-page { --page-max: 920px; }
 .reminders-content { display: grid; gap: 22px; max-width: 860px; margin: auto; }
+/* Mount-only entrance: data refreshes never replay it or hold up usable content. */
+.reminder-arrive { animation: reminder-arrive 520ms var(--fresh-spring) backwards; }
+.course-reminder-panel.reminder-arrive { animation-delay: 60ms; }
+.next-reminders.reminder-arrive { animation-delay: 120ms; }
+.my-reminders.reminder-arrive { animation-delay: 180ms; }
+@keyframes reminder-arrive {
+  from { opacity: .65; transform: translateY(14px); }
+  to { opacity: 1; transform: none; }
+}
 .reminder-hero { position: relative; overflow: hidden; display: grid; grid-template-columns: 1fr auto; gap: 24px; padding: 28px; border-radius: 28px 28px 52px 28px; background: linear-gradient(130deg,#f7efd9,#e4efdf 75%); border: 1px solid #e3e7d9; }
 .reminder-hero h1 { margin: 15px 0 12px; font-size: clamp(28px,5vw,40px); line-height: 1.35; letter-spacing: -.04em; color: #344d3b; }
 .reminder-hero p { color: #64705f; font-size: 13px; line-height: 1.7; max-width: 310px; margin: 0; }
@@ -242,18 +250,42 @@ onMounted(async () => {
 .reminder-hero footer > span { color: #5b6c55; font-size: 12px; }
 .reminder-hero footer strong { font-size: 30px; font-weight: 700; margin-right: 6px; }
 .bell-art { position: relative; align-self: center; color: #66815c; display: grid; place-items: center; width: 130px; height: 130px; border-radius: 50%; background: rgba(255,254,247,.7); box-shadow: 0 0 0 15px rgba(255,255,255,.2); transform: rotate(10deg); }
+.bell-chime { display: grid; place-items: center; transform-origin: 50% 12%; animation: reminder-chime 920ms ease-in-out 140ms backwards; }
+.bell-art::after { content: ''; position: absolute; inset: -8px; border: 1px solid rgba(102,129,92,.3); border-radius: inherit; opacity: 0; pointer-events: none; animation: reminder-ring 850ms ease-out 210ms backwards; }
+@keyframes reminder-chime {
+  0%, 100% { transform: rotate(0); }
+  20% { transform: rotate(-12deg); }
+  43% { transform: rotate(9deg); }
+  65% { transform: rotate(-5deg); }
+  83% { transform: rotate(2deg); }
+}
+@keyframes reminder-ring {
+  0% { opacity: 0; transform: scale(.9); }
+  25% { opacity: .65; }
+  100% { opacity: 0; transform: scale(1.22); }
+}
 .bell-art i { position: absolute; width: 17px; height: 17px; background: #e9c77c; top: -3px; right: 9px; border-radius: 50%; }
 .bell-art b { position: absolute; bottom: -5px; right: -5px; width: 23px; height: 42px; background: #aac396; border-radius: 85% 0 85% 0; transform: rotate(20deg); }
 button { cursor: pointer; color: inherit; font: inherit; }
 button:disabled { opacity: .48; cursor: not-allowed; }
 button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, summary:focus-visible { outline: 2px solid #4f7558; outline-offset: 3px; }
 .reminder-primary { display: inline-flex; align-items: center; justify-content: center; gap: 7px; border: 0; min-height: 46px; border-radius: 16px; background: #496a50; color: #fff; padding: 10px 19px; font-size: 14px; font-weight: 700; white-space: nowrap; }
+.reminders-content button:not(:disabled) { transition: transform 160ms var(--fresh-spring), background-color 160ms ease; }
+.reminders-content button:not(:disabled):active { transform: scale(.97); }
+@media (hover: hover) and (pointer: fine) {
+  .reminder-primary:hover:not(:disabled) { background: #3e5d44; }
+}
 .panel-tip { font-size: 12px; color: #636b5f; line-height: 1.8; margin: 10px 0; }
 .permission-copy { padding: 8px 24px 18px; font-size: 14px; line-height: 1.7; color: #53624e; }
 .reminder-item footer button { border: 1px solid #d9e0d3; border-radius: 12px; background: #fffef8; min-height: 42px; padding: 8px 12px; font-size: 12px; font-weight: 650; }
 .reminder-error a,.reminder-editor footer a { color: #426349; text-decoration: underline; text-underline-offset: 3px; }
 .reminder-editor,.course-reminder-panel,.next-reminders,.my-reminders { padding: 22px; background: #fffef9; border: 1px solid #e3e8dd; border-radius: 24px; box-shadow: 0 9px 28px rgba(52,73,48,.04); }
-.reminder-editor { scroll-margin-top: 85px; border-color: #aabea0; }
+/* Opacity only: moving this form would offset edit()'s scrollIntoView target. */
+.reminder-editor { scroll-margin-top: 85px; border-color: #aabea0; animation: reminder-editor-open 220ms ease-out; }
+@keyframes reminder-editor-open {
+  from { opacity: .6; }
+  to { opacity: 1; }
+}
 .reminder-editor > header,.course-reminder-panel > header,.next-reminders > header,.my-reminders > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 h2 { color: #3d5441; font-size: 20px; margin: 0; }
 header small { font-size: 11px; color: #6c7566; }
@@ -276,7 +308,7 @@ label small { font-size: 11px; color: #6d7666; font-weight: 400; line-height: 1.
 .course-reminder-panel header > div { flex: 1; }
 .course-reminder-panel header p { margin: 5px 0 0; font-size: 12px; color: #6d7666; line-height: 1.5; }
 .reminder-switch { position: relative; width: 48px; height: 30px; min-height: 44px; border: 0; background: transparent; flex-shrink: 0; }
-.reminder-switch::before { content: ''; position: absolute; inset: 7px 0; background: #d7ddcf; border-radius: 25px; }
+.reminder-switch::before { content: ''; position: absolute; inset: 7px 0; background: #d7ddcf; border-radius: 25px; transition: background-color .2s ease; }
 .reminder-switch i { position: absolute; left: 3px; top: 10px; height: 24px; width: 24px; border-radius: 50%; background: #fff; box-shadow: 0 2px 4px #0002; transition: transform .2s; }
 .reminder-switch[aria-checked=true]::before { background: #658661; }
 .reminder-switch[aria-checked=true] i { transform: translateX(18px); }
@@ -323,5 +355,11 @@ label small { font-size: 11px; color: #6d7666; font-weight: 400; line-height: 1.
   .reminder-editor fieldset { grid-template-columns: minmax(0,1fr); }
   .bell-art { display: none; }
   .reminder-hero { grid-template-columns: 1fr; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .reminder-arrive,.bell-chime,.bell-art::after,.reminder-editor { animation: none; }
+  .reminder-arrive { opacity: 1; transform: none; }
+  .reminders-content button:not(:disabled),.reminder-switch::before,.reminder-switch i { transition: none; }
+  .reminders-content button:not(:disabled):active { transform: none; }
 }
 </style>

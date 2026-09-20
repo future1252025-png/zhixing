@@ -15,7 +15,6 @@ import { useBuildingsStore } from '@/stores/buildings'
 import { useCampusMapStore } from '@/stores/campusMap'
 import { useCoursesStore } from '@/stores/courses'
 import { useSemesterStore } from '@/stores/semester'
-import type { Course } from '@/types/course'
 import {
   buildChatSearchResults,
   buildNextCourseChatTarget,
@@ -32,6 +31,7 @@ import {
 } from '@/utils/course'
 import { formatBuildingDisplayName } from '@/utils/buildings'
 import { createScopedStorage } from '@/utils/scopedStorage'
+import { CURRENT_WEEK_ANCHOR } from '@/utils/routeAnchor'
 import {
   consumeLoginIntroFlag,
   consumeLoginIntroSnapshot,
@@ -45,10 +45,11 @@ const mapSession = useCampusMapStore()
 mapSession.attachUser(authStore.currentUser?.id ?? null)
 const coursesStore = useCoursesStore()
 const semesterStore = useSemesterStore()
-const buildings = ref<Building[]>([])
-const courses = ref<Course[]>([])
-const loading = ref(true)
-const errorMessage = ref('')
+if (authStore.currentUser) semesterStore.attachUser(authStore.currentUser.id)
+const buildings = computed(() => buildingsStore.buildings)
+const courses = computed(() => coursesStore.courses)
+const errorMessage = computed(() => (!coursesStore.loaded ? coursesStore.errorMessage : '') || (!semesterStore.semester ? semesterStore.errorMessage : ''))
+const loading = computed(() => !errorMessage.value && (!coursesStore.loaded || !semesterStore.semester))
 const chatQuery = ref('')
 const recentChats = ref<RecentChatEntry[]>([])
 const loginWelcomeVisible = ref(false)
@@ -67,7 +68,7 @@ const currentWeek = computed(() => currentSemester.value.current_week)
 const activeCourses = computed(() =>
   currentWeek.value === null
     ? []
-    : filterCoursesByWeek(courses.value, currentWeek.value)
+    : filterCoursesByWeek(courses.value, currentWeek.value, semesterStore.semester)
 )
 const nextCourse = computed(() => findNextCourse(activeCourses.value, now.value))
 const courseOngoing = computed(() => nextCourse.value && isCourseOngoing(nextCourse.value, now.value))
@@ -88,29 +89,15 @@ function refreshRecentChats() {
   recentChats.value = readRecentChatEntries(createScopedStorage(userId))
 }
 
-async function loadHomeData() {
-  loading.value = true
-  errorMessage.value = ''
+async function loadHomeData(force = false) {
   const userId = authStore.currentUser?.id
-  if (!userId) {
-    errorMessage.value = '登录信息尚未加载完成，请重新进入首页'
-    loading.value = false
-    return
-  }
-  try {
-    const [buildingResult, courseResult] = await Promise.all([
-      buildingsStore.ensureLoaded(),
-      coursesStore.ensureLoaded(),
-      semesterStore.load(userId)
-    ])
-    buildings.value = buildingResult
-    courses.value = courseResult
-    refreshRecentChats()
-  } catch {
-    errorMessage.value = '校园数据暂时没有加载出来，请稍后重试'
-  } finally {
-    loading.value = false
-  }
+  if (!userId) return
+  await Promise.allSettled([coursesStore.ensureLoaded(force), semesterStore.load(userId, force)])
+}
+
+async function loadBuildings() {
+  // Map/search failures never block the course card or locally saved recent chats.
+  try { await buildingsStore.ensureLoaded() } catch { /* shown in the search section */ }
 }
 
 async function initializeHome() {
@@ -123,6 +110,8 @@ async function initializeHome() {
       loginWelcomeTimer = null
     }, 3600)
   }
+  refreshRecentChats()
+  void loadBuildings()
   await loadHomeData()
 }
 
@@ -180,7 +169,7 @@ function openNextCourseChat() {
 }
 
 function openCourseEdit(courseId: number) {
-  router.push(`/courses/${courseId}/edit`)
+  router.push(courses.value.find(course => course.id === courseId)?.makeup ? `/courses/makeups?edit=${courseId}` : `/courses/${courseId}/edit`)
 }
 
 function openSearchResult(result: ChatSearchResult) {
@@ -248,7 +237,7 @@ onUnmounted(() => {
       </div>
 
       <van-empty v-else-if="errorMessage || !semesterStore.semester" image="error" :description="errorMessage || '学期状态暂时不可用'">
-        <van-button type="primary" size="small" @click="loadHomeData">重新加载</van-button>
+        <van-button type="primary" size="small" @click="loadHomeData(true)">重新加载</van-button>
       </van-empty>
 
       <SemesterGate
@@ -293,6 +282,12 @@ onUnmounted(() => {
           </button>
         </section>
       </SemesterGate>
+      <p v-if="coursesStore.loaded && coursesStore.errorMessage" class="sync-hint" role="status">
+        课表暂未同步，当前显示已加载的课程。<button type="button" @click="loadHomeData(true)">重试</button>
+      </p>
+      <p v-if="semesterStore.semester && semesterStore.errorMessage" class="sync-hint" role="status">
+        学期暂未同步，当前按已保存设置显示。<button type="button" @click="loadHomeData(true)">重试</button>
+      </p>
 
       <nav
         v-reveal="{ from: 'right', distance: 34, stagger: 70 }"
@@ -314,7 +309,7 @@ onUnmounted(() => {
           <strong>日常提醒</strong>
           <small>要紧的事，到点提醒</small>
         </button>
-        <button type="button" class="note note-yellow" @click="router.push('/courses')">
+        <button type="button" class="note note-yellow" @click="router.push({ path: '/courses', hash: CURRENT_WEEK_ANCHOR })">
           <span><TechIcon name="calendar" :size="21" /></span>
           <strong>本周课表</strong>
           <small>{{ activeCourses.length }} 门课程</small>
@@ -339,7 +334,9 @@ onUnmounted(() => {
           background="transparent"
         />
 
-        <div v-if="showSearchResults" class="search-results">
+        <p v-if="buildingsStore.errorMessage" class="sync-hint" role="status">地点暂未加载，不影响课表。<button type="button" @click="loadBuildings">重试</button></p>
+        <p v-else-if="showSearchResults && buildingsStore.loading && !buildingsStore.loaded" class="sync-hint" role="status">正在读取地点…</p>
+        <div v-else-if="showSearchResults" class="search-results">
           <button
             v-for="result in chatSearchResults"
             :key="`${result.building.id}-${result.roomName || 'general'}`"
@@ -407,6 +404,8 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+.sync-hint { color: var(--fresh-muted); font-size: 12px; line-height: 1.7; }
+.sync-hint button { min-height: 44px; padding: 8px 12px; border: 0; background: transparent; color: #3d6144; font: inherit; text-decoration: underline; cursor: pointer; }
 .mini-map-open { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; padding: 8px 10px; border: 1px solid #d5dfcb; border-radius: 12px; background: #edf3e6; color: #3d6144; font: inherit; font-size: 12px; cursor: pointer; flex-shrink: 0; }
 .mini-map-footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 4px 0; color: var(--fresh-muted); font-size: 11px; line-height: 1.6; }
 .home-page {

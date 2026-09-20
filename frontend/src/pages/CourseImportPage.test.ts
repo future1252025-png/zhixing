@@ -161,6 +161,7 @@ describe('CourseImportPage', () => {
       avatar_text: null, avatar_color: null, role: 'student', created_at: '2026-01-01T00:00:00Z' }
     const semester = useSemesterStore(pinia)
     semester.loadedForUserId = 1
+    semester.lastFetchedAt = Date.now()
     semester.semester = { status: 'active', start_date: '2026-08-31', total_weeks: 20, current_week: 4 }
     mocks.getBuildings.mockResolvedValue([
       {

@@ -187,6 +187,7 @@ class CourseRead(BaseModel):
     created_at: datetime
     building: CourseBuildingRead | None
     source_location: str | None = None
+    makeup: dict | None = None
 
     @computed_field(return_type=bool)
     @property

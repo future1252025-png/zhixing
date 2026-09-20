@@ -28,6 +28,18 @@ function responseStatus(error: unknown): number {
   return typeof error.response.status === 'number' ? error.response.status : 0
 }
 
+function requestPath(error: unknown): string {
+  if (!isRecord(error)) return ''
+  const response = isRecord(error.response) ? error.response : null
+  const config = isRecord(error.config) ? error.config : response && isRecord(response.config) ? response.config : null
+  if (!config || typeof config.url !== 'string') return ''
+  try {
+    return new URL(config.url, 'http://localhost').pathname
+  } catch {
+    return ''
+  }
+}
+
 export function extractBusinessError(error: unknown): BusinessError {
   const status = responseStatus(error)
   const response = isRecord(error) && isRecord(error.response) ? error.response : null
@@ -48,6 +60,17 @@ export function extractBusinessError(error: unknown): BusinessError {
       message: localizedBusinessMessage(data.code, data.message),
       fields: [...data.fields],
       details: data.details
+    }
+  }
+  if ((status === 404 || status === 405) && /^\/api\/courses\/makeups(?:\/|$)/u.test(requestPath(error))) {
+    // An older backend has no makeup POST route. It may match /courses/{id}
+    // instead and respond 405. Keep real structured course-not-found errors above.
+    return {
+      status,
+      code: 'makeup_api_unavailable',
+      message: '补课服务暂不可用，请确认平板后端已更新后重试。已填写的内容会保留。',
+      fields: [],
+      details: {}
     }
   }
   if (data && typeof data.detail === 'string' && data.detail.trim().length > 0) {

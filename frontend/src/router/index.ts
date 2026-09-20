@@ -6,6 +6,9 @@ import {
 
 import { useAuthStore } from '@/stores/auth'
 import { extractBusinessError } from '@/api/errors'
+import { CURRENT_WEEK_ANCHOR, waitForRouteAnchor } from '@/utils/routeAnchor'
+import { useSemesterStore } from '@/stores/semester'
+import { semesterAt } from '@/utils/campusTime'
 
 const LoginPage = () => import('@/pages/LoginPage.vue')
 const RegisterPage = () => import('@/pages/RegisterPage.vue')
@@ -19,6 +22,7 @@ const BuildingMessagesPage = () => import('@/pages/BuildingMessagesPage.vue')
 const CoursesPage = () => import('@/pages/CoursesPage.vue')
 const CourseFormPage = () => import('@/pages/CourseFormPage.vue')
 const CourseImportPage = () => import('@/pages/CourseImportPage.vue')
+const CourseMakeupPage = () => import('@/pages/CourseMakeupPage.vue')
 const RemindersPage = () => import('@/pages/RemindersPage.vue')
 const ProfilePage = () => import('@/pages/ProfilePage.vue')
 const SemesterSettingsPage = () => import('@/pages/SemesterSettingsPage.vue')
@@ -178,18 +182,39 @@ const routes: RouteRecordRaw[] = [
     component: ProfilePage,
     meta: { requiresAuth: true }
   },
+  { path: '/courses/makeups', name: 'course-makeups', component: CourseMakeupPage, meta: { requiresAuth: true } },
   { path: '/schedule', redirect: '/reminders' }
 ]
 
+let cancelPendingScroll: (() => void) | undefined
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes,
   scrollBehavior(to, _from, savedPosition) {
+    cancelPendingScroll?.()
+    if (to.path === '/courses' && to.hash === CURRENT_WEEK_ANCHOR) {
+      const pending = waitForRouteAnchor(
+        `${CURRENT_WEEK_ANCHOR}[data-scroll-ready="true"]`,
+        () => router.currentRoute.value.fullPath === to.fullPath,
+        () => {
+          // History navigation preserves the user's browsed week and scroll position.
+          if (savedPosition) return
+          const semester = useSemesterStore()
+          const requestedWeek = typeof to.query.week === 'string' ? Number(to.query.week) : NaN
+          const week = Number.isInteger(requestedWeek) && requestedWeek >= 1 && requestedWeek <= (semester.totalWeeks ?? 0)
+            ? requestedWeek : semesterAt(semester.semester, new Date()).current_week
+          if (week !== null) semester.setBrowsingWeek(week)
+        }
+      )
+      cancelPendingScroll = pending.cancel
+      return pending.position.then(position => position && savedPosition ? { ...savedPosition, behavior: 'instant' as const } : position)
+    }
     return resolveRouteScrollPosition(savedPosition, to.hash)
   }
 })
 
 router.beforeEach(async (to) => {
+  cancelPendingScroll?.()
   // Preserve old settings bookmarks without bringing the card back to the timetable.
   if (to.path === '/courses' && to.hash === '#semester-settings') return '/profile/semester'
   const authStore = useAuthStore()

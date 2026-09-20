@@ -4,6 +4,7 @@ import type {
   CoursePayload,
   CourseUpdatePayload
 } from '@/types/course'
+import type { MakeupPayload, MakeupTiming } from '@/types/course'
 import type {
   ImportCommitResponse,
   ImportPreviewResponse,
@@ -30,6 +31,16 @@ export async function updateCourse(
 
 export async function deleteCourse(courseId: number): Promise<void> {
   await request.delete(`/api/courses/${courseId}`)
+}
+
+export async function createMakeups(payload: MakeupPayload): Promise<Course[]> {
+  return (await request.post<Course[]>('/api/courses/makeups', payload)).data
+}
+export async function updateMakeup(id: number, payload: MakeupTiming): Promise<Course> {
+  return (await request.put<Course>(`/api/courses/makeups/${id}`, payload)).data
+}
+export async function deleteMakeupBatch(batchId: string): Promise<void> {
+  await request.delete(`/api/courses/makeups/batches/${encodeURIComponent(batchId)}`)
 }
 
 export async function previewCourseImport(

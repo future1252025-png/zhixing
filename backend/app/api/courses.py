@@ -20,6 +20,8 @@ from app.schemas.course_import import (
 from app.schemas.error import BusinessErrorResponse
 from app.services.course_import_service import build_course_import_preview, commit_course_import
 from app.services.course_service import add_course, delete_course, list_courses, update_course
+from app.schemas.course_makeup import MakeupCreate, MakeupTiming
+from app.services.course_makeup_service import add_makeups, remove_batch, update_makeup
 
 
 router = APIRouter(prefix="/api/courses", tags=["courses"])
@@ -107,6 +109,25 @@ async def commit_current_user_course_import(
         created_count=len(courses),
         course_ids=[course.id for course in courses],
     )
+
+
+@router.post("/makeups", response_model=list[CourseRead], status_code=201, responses=_BUSINESS_ERROR_RESPONSES)
+def create_makeup_batch(payload: MakeupCreate, session: Session = Depends(get_session),
+                        current_user: User = Depends(get_current_user)):
+    return _write_with_retry(session, lambda: add_makeups(session, current_user.id, payload))
+
+
+@router.put("/makeups/{course_id}", response_model=CourseRead, responses=_BUSINESS_ERROR_RESPONSES)
+def edit_makeup(course_id: int, payload: MakeupTiming, session: Session = Depends(get_session),
+                current_user: User = Depends(get_current_user)):
+    return _write_with_retry(session, lambda: update_makeup(session, current_user.id, course_id, payload))
+
+
+@router.delete("/makeups/batches/{batch_id}", status_code=204, responses=_BUSINESS_ERROR_RESPONSES)
+def delete_makeup_batch(batch_id: str, session: Session = Depends(get_session),
+                        current_user: User = Depends(get_current_user)):
+    _write_with_retry(session, lambda: remove_batch(session, current_user.id, batch_id))
+    return Response(status_code=204)
 
 
 @router.put("/{course_id}", response_model=CourseRead, responses=_BUSINESS_ERROR_RESPONSES)

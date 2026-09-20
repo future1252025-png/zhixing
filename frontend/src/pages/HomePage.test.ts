@@ -8,6 +8,8 @@ import { getBuildings } from '@/api/buildings'
 import { getCourses } from '@/api/courses'
 import { fetchSemester } from '@/api/semester'
 import { useAuthStore } from '@/stores/auth'
+import { useSemesterStore, SEMESTER_FRESH_MS } from '@/stores/semester'
+import { useCoursesStore } from '@/stores/courses'
 import { rememberRecentChatEntry } from '@/utils/chat'
 import { createScopedStorage } from '@/utils/scopedStorage'
 import type { Course } from '@/types/course'
@@ -47,8 +49,7 @@ function course(overrides: Partial<Course>): Course {
   }
 }
 
-async function mountHome() {
-  const pinia = createPinia()
+async function mountHome(pinia = createPinia()) {
   useAuthStore(pinia).currentUser = {
     id: 7,
     student_id: '20240001',
@@ -117,6 +118,57 @@ describe('HomePage', () => {
     vi.clearAllMocks()
   })
 
+  it('shows courses before a slow building request finishes', async () => {
+    let finishBuildings!: (value: Awaited<ReturnType<typeof getBuildings>>) => void
+    vi.mocked(getBuildings).mockReturnValueOnce(new Promise(resolve => { finishBuildings = resolve }))
+    vi.mocked(getCourses).mockResolvedValue([course({ course_name: '无需等地图的课程' })])
+    const wrapper = await mountHome()
+    expect(wrapper.get('.today-card').text()).toContain('无需等地图的课程')
+    expect(wrapper.find('.home-semester-loading').exists()).toBe(false)
+    finishBuildings([])
+    await flushPromises()
+    wrapper.unmount()
+  })
+
+  it('isolates building failures from courses and locally saved recent chats', async () => {
+    vi.mocked(getBuildings).mockRejectedValueOnce(new Error('map offline'))
+    vi.mocked(getCourses).mockResolvedValue([course({ course_name: '正常课程' })])
+    rememberRecentChatEntry(createScopedStorage(7), { buildingId: 2, buildingName: '综合教学楼', roomName: '410' })
+    const wrapper = await mountHome()
+    expect(wrapper.get('.today-card').text()).toContain('正常课程')
+    expect(wrapper.get('.recent-section').text()).toContain('410')
+    expect(wrapper.get('.search-sheet').text()).toContain('地点暂未加载')
+    wrapper.unmount()
+  })
+
+  it('does not show a loading card or refetch on a warm revisit, even with a slow stale refresh', async () => {
+    const pinia = createPinia()
+    vi.mocked(getCourses).mockResolvedValue([course({ course_name: '缓存课程' })])
+    const first = await mountHome(pinia)
+    first.unmount()
+    const second = await mountHome(pinia)
+    expect(second.get('.today-card').text()).toContain('缓存课程')
+    expect(fetchSemester).toHaveBeenCalledTimes(1)
+    expect(getCourses).toHaveBeenCalledTimes(1)
+    second.unmount()
+    vi.advanceTimersByTime(SEMESTER_FRESH_MS)
+    let rejectRefresh!: (reason: unknown) => void
+    vi.mocked(fetchSemester).mockReturnValueOnce(new Promise((_, reject) => { rejectRefresh = reject }))
+    const third = await mountHome(pinia)
+    expect(useSemesterStore(pinia).loading).toBe(true)
+    expect(third.find('.home-semester-loading').exists()).toBe(false)
+    expect(third.get('.today-card').text()).toContain('缓存课程')
+    rejectRefresh(new Error('offline'))
+    await flushPromises()
+    expect(third.get('.today-card').text()).toContain('缓存课程')
+    expect(third.text()).toContain('当前按已保存设置显示')
+    // Store updates remain visible without remounting after import/edit or background sync.
+    useCoursesStore(pinia).courses = [course({ course_name: '更新后的课程' })]
+    await flushPromises()
+    expect(third.get('.today-card').text()).toContain('更新后的课程')
+    third.unmount()
+  })
+
   it('removes popular places and opens the map from the channel shortcut when there is no history', async () => {
     vi.mocked(getCourses).mockResolvedValue([])
     const wrapper = await mountHome()
@@ -127,6 +179,15 @@ describe('HomePage', () => {
     await wrapper.get('.note-lilac').trigger('click')
     await flushPromises()
     expect(wrapper.vm.$router.currentRoute.value.path).toBe('/map')
+    wrapper.unmount()
+  })
+
+  it('opens the current-week shortcut at the week selector rather than the page header', async () => {
+    vi.mocked(getCourses).mockResolvedValue([])
+    const wrapper = await mountHome()
+    await wrapper.get('.note-yellow').trigger('click')
+    await flushPromises()
+    expect(wrapper.vm.$router.currentRoute.value.fullPath).toBe('/courses#current-week')
     wrapper.unmount()
   })
 

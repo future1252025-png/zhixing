@@ -913,6 +913,11 @@ def commit_course_import(
     )
     resolution_map = _match_optional_resolutions(candidates, manifest.resolutions)
     guard = acquire_user_mutation_guard(session, user_id)
+    # Dated snapshots survive re-import. Do not silently drop source-date exclusions
+    # when replacing their recurring source IDs with a completely new timetable.
+    if any(course.makeup and course.makeup.get("cancel_source") for course in
+           session.scalars(select(Course).where(Course.user_id == user_id)).all()):
+        raise BusinessError(409, "makeup_transfer_before_import", "存在原日期停课的调课安排，请先撤销对应调课，再重新导入课表")
     resolved = _resolve_import_candidates(session, candidates, resolution_map)
     validated_entries = validate_course_batch(
         session,
@@ -930,7 +935,8 @@ def commit_course_import(
         session.scalars(select(Course).where(Course.user_id == user_id)).all()
     )
     for existing_course in existing_courses:
-        session.delete(existing_course)
+        if not existing_course.makeup:
+            session.delete(existing_course)
     session.flush()
 
     created: list[Course] = []

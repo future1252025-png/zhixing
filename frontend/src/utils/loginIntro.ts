@@ -100,7 +100,7 @@ export async function prepareLoginIntro(
     }
     const courses = await loadCourses()
     const nextCourse = findNextCourse(
-      filterCoursesByWeek(courses, semester.current_week),
+      filterCoursesByWeek(courses, semester.current_week, semester),
       options.now ?? new Date()
     )
     markLoginIntroPending(introStorage, buildLoginIntroSnapshot(nextCourse))

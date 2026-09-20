@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import CheckConstraint, ForeignKey, Integer, String
+from sqlalchemy import JSON, CheckConstraint, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.database import Base
@@ -38,6 +38,8 @@ class Course(Base):
         default="manual",
         server_default="manual",
     )
+    # A dated snapshot, independent of the recurring source's future edits.
+    makeup: Mapped[dict | None] = mapped_column(JSON(none_as_null=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         TZDateTime(),
         default=lambda: datetime.now(timezone.utc),
@@ -57,6 +59,8 @@ class Course(Base):
     def source_location(self) -> str | None:
         """Return the untouched location text captured from an imported timetable."""
 
+        if self.makeup:
+            return self.makeup.get("location")
         if self.import_source is None:
             return None
         return self.import_source.raw_location

@@ -3,11 +3,11 @@ import { computed, reactive, ref } from 'vue'
 import { showFailToast } from 'vant'
 import { useRoute, useRouter } from 'vue-router'
 
-import { getCourses } from '@/api/courses'
 import { extractBusinessError } from '@/api/errors'
-import { fetchSemester } from '@/api/semester'
 import TechIcon from '@/components/TechIcon.vue'
 import { useAuthStore } from '@/stores/auth'
+import { useCoursesStore } from '@/stores/courses'
+import { useSemesterStore } from '@/stores/semester'
 import { sanitizeInternalRedirect } from '@/router'
 import { useKeyboardAwarePage } from '@/utils/keyboardInset'
 import { prepareLoginIntro } from '@/utils/loginIntro'
@@ -29,10 +29,10 @@ const pageStyle = computed(() => ({
 async function handleSubmit() {
   submitting.value = true
   try {
-    await authStore.login(form)
+    const user = await authStore.login(form)
     // 乐观导航：登录成功立刻进首页，欢迎卡数据在后台预取；
     // 首页欢迎卡是唯一的欢迎反馈，这里不再叠加 toast
-    void prepareLoginIntro(getCourses, fetchSemester)
+    void prepareLoginIntro(() => useCoursesStore().ensureLoaded(), () => useSemesterStore().load(user.id))
     const redirect = sanitizeInternalRedirect(route.query.redirect)
     await router.replace(redirect)
   } catch (error) {

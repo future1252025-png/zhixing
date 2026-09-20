@@ -3,11 +3,11 @@ import { reactive, ref } from 'vue'
 import { showFailToast, showSuccessToast } from 'vant'
 import { useRoute, useRouter } from 'vue-router'
 
-import { getCourses } from '@/api/courses'
 import { extractBusinessError } from '@/api/errors'
-import { fetchSemester } from '@/api/semester'
 import TechIcon from '@/components/TechIcon.vue'
 import { useAuthStore } from '@/stores/auth'
+import { useCoursesStore } from '@/stores/courses'
+import { useSemesterStore } from '@/stores/semester'
 import { sanitizeInternalRedirect } from '@/router'
 import { useKeyboardAwarePage } from '@/utils/keyboardInset'
 import { prepareLoginIntro } from '@/utils/loginIntro'
@@ -33,9 +33,9 @@ async function handleSubmit() {
       student_id: form.student_id
     })
     try {
-      await authStore.login({ student_id: form.student_id, password: form.password })
+      const user = await authStore.login({ student_id: form.student_id, password: form.password })
       // 与登录页一致的乐观导航：欢迎卡数据后台预取，立即进入目标页
-      void prepareLoginIntro(getCourses, fetchSemester)
+      void prepareLoginIntro(() => useCoursesStore().ensureLoaded(), () => useSemesterStore().load(user.id))
       showSuccessToast('账号创建成功，欢迎来到智行')
       await router.replace(sanitizeInternalRedirect(route.query.redirect))
     } catch {

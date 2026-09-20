@@ -20,7 +20,8 @@ import {
   setRefreshToken
 } from '@/auth/sessionTokens'
 import { extractBusinessError, resetUnauthorizedState } from '@/api/errors'
-import { useSemesterStore } from '@/stores/semester'
+import { SEMESTER_CACHE_KEY, useSemesterStore } from '@/stores/semester'
+import { createScopedStorage } from '@/utils/scopedStorage'
 import { useCampusMapStore } from '@/stores/campusMap'
 import { cancelDeviceReminders, clearReminderCache } from '@/services/reminderNotifications'
 
@@ -70,7 +71,10 @@ export const useAuthStore = defineStore('auth', {
     },
     async deleteAccount(payload: DeleteAccountPayload) {
       await deleteAccountRequest(payload)
-      if (this.currentUser) clearReminderCache(this.currentUser.id)
+      if (this.currentUser) {
+        clearReminderCache(this.currentUser.id)
+        try { createScopedStorage(this.currentUser.id).remove(SEMESTER_CACHE_KEY) } catch { /* storage unavailable */ }
+      }
       this.clearSession()
     },
     async restoreSession() {

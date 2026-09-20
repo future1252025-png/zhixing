@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Literal
 
 from sqlalchemy import select
@@ -83,7 +83,7 @@ def upsert_setting(
         invalid_courses = [
             course
             for course in session.scalars(select(Course).where(Course.user_id == user_id)).all()
-            if not weeks_fit_max_week(course.weeks, max_week=total_weeks)
+            if not course.makeup and not weeks_fit_max_week(course.weeks, max_week=total_weeks)
         ]
         if invalid_courses:
             raise BusinessError(
@@ -97,6 +97,15 @@ def upsert_setting(
                     ]
                 },
             )
+    from types import SimpleNamespace
+    from app.services.course_makeup_service import validate_dates
+    courses = list(session.scalars(select(Course).where(Course.user_id == user_id)).all())
+    dates = {date.fromisoformat(course.makeup["date"]) for course in courses if course.makeup}
+    if any(course.makeup and course.makeup.get("cancel_source") for course in courses):
+        # A new semester baseline can move recurring lessons out of a dated
+        # cancellation and expose conflicts in the vacated slot's replacement.
+        dates.update(start_date + timedelta(days=day) for day in range(total_weeks * 7))
+    validate_dates(courses, SimpleNamespace(start_date=start_date, total_weeks=total_weeks), dates)
     now = datetime.now(timezone.utc)
     statement = (
         insert(SemesterSetting)

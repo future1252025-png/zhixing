@@ -46,7 +46,7 @@ vi.mock('@/stores/semester', () => ({
   useSemesterStore: () => ({
     currentWeek: 1,
     semester: {},
-    load: vi.fn()
+    load: vi.fn().mockResolvedValue({})
   })
 }))
 
@@ -81,6 +81,7 @@ describe('ProfilePage logout', () => {
       '已从本机退出，服务端暂时未确认注销'
     )
     expect(mocks.replace).toHaveBeenCalledWith('/login')
+    wrapper.unmount()
   })
 
   it('shows one student identity row and a localized account role', async () => {
@@ -110,5 +111,6 @@ describe('ProfilePage logout', () => {
     expect(wrapper.get('.account-list').text()).not.toContain('不同')
     expect(wrapper.get('.account-list').text()).toContain('学生')
     expect(wrapper.get('.account-list').text()).not.toContain('student')
+    wrapper.unmount()
   })
 })

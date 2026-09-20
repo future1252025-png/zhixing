@@ -5,6 +5,8 @@ import { useRouter } from 'vue-router'
 
 import { extractBusinessError } from '@/api/errors'
 import TechIcon from '@/components/TechIcon.vue'
+import { useCampusClock } from '@/composables/useCampusClock'
+import { semesterAt } from '@/utils/campusTime'
 import { useAuthStore } from '@/stores/auth'
 import { useCoursesStore } from '@/stores/courses'
 import { useSemesterStore } from '@/stores/semester'
@@ -13,6 +15,8 @@ const router = useRouter()
 const authStore = useAuthStore()
 const coursesStore = useCoursesStore()
 const semesterStore = useSemesterStore()
+const now = useCampusClock()
+const currentSemester = computed(() => semesterAt(semesterStore.semester, now.value))
 const editing = ref(false)
 const saving = ref(false)
 const deleteAccountOpen = ref(false)
@@ -21,7 +25,7 @@ const deleteAccountPassword = ref('')
 // hero 底部换成真实数据：课程数 / 教学周 / 学号（拿不到就显示占位横线）
 const courseCount = ref<number | null>(null)
 const currentWeekText = computed(() =>
-  semesterStore.currentWeek !== null ? `第 ${semesterStore.currentWeek} 周` : '—'
+  currentSemester.value.current_week !== null ? `第 ${currentSemester.value.current_week} 周` : '—'
 )
 const studentIdText = computed(() => authStore.currentUser?.student_id || '未填写')
 const roleText = computed(() => {
@@ -121,7 +125,7 @@ onMounted(async () => {
     })
     .catch(() => {})
   const userId = authStore.currentUser?.id
-  if (userId && !semesterStore.semester) {
+  if (userId) {
     void semesterStore.load(userId).catch(() => {})
   }
 })

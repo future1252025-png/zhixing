@@ -1,4 +1,5 @@
 import type { Course, CourseForm, CoursePayload } from '@/types/course'
+import type { SemesterState } from '@/types/semester'
 import { campusTime } from '@/utils/campusTime'
 
 export const WEEKDAYS = [
@@ -509,15 +510,32 @@ export function isCourseActiveInWeek(
   return true
 }
 
-export function filterCoursesByWeek(courses: Course[], selectedWeek: number): Course[] {
-  return courses.filter((course) => isCourseActiveInWeek(course.weeks, selectedWeek))
+/** One occurrence rule for timetable, home and today's notifications. */
+export function coursesOnDate(courses: Course[], date: string, semester: SemesterState | null): Course[] {
+  const stamp = Date.parse(`${date}T00:00:00Z`)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(stamp) || new Date(stamp).toISOString().slice(0, 10) !== date) return []
+  const weekday = new Date(stamp).getUTCDay() || 7
+  const week = semester?.start_date ? Math.floor((stamp - Date.parse(semester.start_date)) / 604_800_000) + 1 : 0
+  const cancelled = new Set(courses.filter(course => course.makeup?.cancel_source && course.makeup.source_date === date)
+    .map(course => course.makeup!.source_course_id))
+  return courses.filter(course => course.makeup ? course.makeup.date === date
+    : Boolean(semester?.total_weeks && week >= 1 && week <= semester.total_weeks && course.weekday === weekday
+      && !cancelled.has(course.id) && isCourseActiveInWeek(course.weeks, week)))
+    .sort((a, b) => (a.start_time ?? '').localeCompare(b.start_time ?? '') || a.id - b.id)
+}
+
+export function filterCoursesByWeek(courses: Course[], selectedWeek: number, semester?: SemesterState | null): Course[] {
+  if (!semester?.start_date) return courses.filter(course => !course.makeup && isCourseActiveInWeek(course.weeks, selectedWeek))
+  const monday = Date.parse(semester.start_date) + (selectedWeek - 1) * 604_800_000
+  return WEEKDAYS.flatMap(({ value }) => coursesOnDate(courses,
+    new Date(monday + (value - 1) * 86_400_000).toISOString().slice(0, 10), semester))
 }
 
 export function isCourseOngoing(course: Course, now = new Date()): boolean {
   const current = campusTime(now)
   const start = parseTimeValue(course.start_time)
   const end = parseTimeValue(course.end_time)
-  return course.weekday === current.weekday && start !== null && end !== null
+  return (!course.makeup || course.makeup.date === current.date) && course.weekday === current.weekday && start !== null && end !== null
     && start <= current.minutes && current.minutes < end
 }
 
@@ -527,6 +545,7 @@ export function findNextCourse(courses: Course[], now = new Date()): Course | nu
 
   return (
     courses
+      .filter(course => !course.makeup || course.makeup.date >= campusTime(now).date)
       .map((course) => {
         const dayOffset = course.weekday - currentWeekday
         const startMinutes = parseTimeValue(course.start_time)

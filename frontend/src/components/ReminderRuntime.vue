@@ -35,7 +35,7 @@ async function refresh(force = false) {
   refreshing = true
   try {
     // A failed background refresh must not erase previously scheduled, offline course alarms.
-    await Promise.allSettled([reminders.load(userId, force), courses.ensureLoaded(force), semester.load(userId)])
+    await Promise.allSettled([reminders.load(userId, force), courses.ensureLoaded(force), semester.load(userId, force)])
     await sync()
   } finally {
     refreshing = false

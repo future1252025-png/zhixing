@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
+import { useCampusClock } from '@/composables/useCampusClock'
+import { semesterAt } from '@/utils/campusTime'
 import { showSuccessToast } from 'vant'
 import { extractBusinessError } from '@/api/errors'
 import { useAuthStore } from '@/stores/auth'
@@ -9,12 +11,15 @@ import SemesterSettingsCard from './SemesterSettingsCard.vue'
 
 const auth = useAuthStore()
 const semester = useSemesterStore()
+if (auth.currentUser) semester.attachUser(auth.currentUser.id)
+const now = useCampusClock()
+const currentSemester = computed(() => semesterAt(semester.semester, now.value))
 const error = ref('')
-async function load() {
+async function load(force = false) {
   const userId = auth.currentUser?.id
   if (!userId) return
   error.value = ''
-  try { await semester.load(userId) }
+  try { await semester.load(userId, force) }
   catch (cause) { error.value = extractBusinessError(cause).message }
 }
 async function save(payload: SemesterUpdate) {
@@ -25,16 +30,14 @@ async function save(payload: SemesterUpdate) {
     window.dispatchEvent(new Event('campusmind:sync-reminders'))
   } catch (cause) { error.value = extractBusinessError(cause).message }
 }
-onMounted(() => {
-  if (semester.loadedForUserId !== auth.currentUser?.id || !semester.semester) void load()
-})
+onMounted(() => { void load() })
 </script>
 
 <template>
   <div class="semester-settings-panel">
     <p v-if="semester.loading && !semester.semester" role="status">正在读取学期…</p>
-    <p v-if="error" class="semester-panel-error" role="alert">{{ error }} <button v-if="!semester.semester" type="button" @click="load">重试</button></p>
-    <SemesterSettingsCard v-if="semester.semester" :semester="semester.semester" :saving="semester.saving" @save="save" />
+    <p v-if="error || semester.errorMessage" class="semester-panel-error" role="alert">{{ error || semester.errorMessage }} <button type="button" @click="load(true)">重试</button></p>
+    <SemesterSettingsCard v-if="semester.semester" :semester="semester.semester" :current-semester="currentSemester" :saving="semester.saving" @save="save" />
   </div>
 </template>
 

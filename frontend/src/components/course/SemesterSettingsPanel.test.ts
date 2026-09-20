@@ -2,7 +2,7 @@ import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { createPinia } from 'pinia'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { fetchSemester, saveSemester } from '@/api/semester'
-import { useSemesterStore } from '@/stores/semester'
+import { SEMESTER_FRESH_MS, useSemesterStore } from '@/stores/semester'
 import SemesterSettingsPanel from './SemesterSettingsPanel.vue'
 
 vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ currentUser: { id: 1 } }) }))
@@ -49,4 +49,21 @@ it('offers retry when semester loading fails', async () => {
   await flushPromises()
   expect(wrapper.find('.semester-card').exists()).toBe(true)
   expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+})
+
+it('does not discard in-progress edits when unchanged settings finish refreshing', async () => {
+  const pinia = createPinia()
+  const store = useSemesterStore(pinia)
+  await store.load(1)
+  store.lastFetchedAt = Date.now() - SEMESTER_FRESH_MS
+  let finishRefresh!: (value: typeof semester) => void
+  vi.mocked(fetchSemester).mockReturnValueOnce(new Promise(resolve => { finishRefresh = resolve }))
+  wrapper = mount(SemesterSettingsPanel, { global: { plugins: [pinia] } })
+  await flushPromises()
+  await wrapper.get('[data-testid="edit-semester"]').trigger('click')
+  await wrapper.get('[name="total_weeks"]').setValue('18')
+  finishRefresh({ ...semester })
+  await flushPromises()
+  expect((wrapper.get('[name="total_weeks"]').element as HTMLInputElement).value).toBe('18')
+  expect(store.totalWeeks).toBe(20)
 })

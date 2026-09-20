@@ -191,7 +191,7 @@ def test_latest_migration_erases_historical_precise_message_locations(
                 )
             ).one()
             assert row == (None, None, None)
-            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260910_11"
+            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260915_12"
     finally:
         engine.dispose()
 
@@ -417,7 +417,7 @@ def test_upgrade_adopts_database_stamped_by_previous_initial_migration(
     try:
         inspector = inspect(engine)
         with engine.connect() as connection:
-            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260910_11"
+            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260915_12"
             assert connection.scalar(text("SELECT COUNT(*) FROM courses")) == 1
             assert connection.scalar(text("SELECT weeks FROM courses WHERE id = 1")) == "1-20"
         assert {
@@ -743,7 +743,7 @@ def test_migration_round_trip_preserves_legacy_course_and_recreates_current_sche
     try:
         inspector = inspect(engine)
         with engine.connect() as connection:
-            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260910_11"
+            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260915_12"
             assert connection.scalar(text("SELECT COUNT(*) FROM courses")) == 1
         assert "source_kind" in {
             column["name"] for column in inspector.get_columns("courses")
@@ -794,7 +794,7 @@ def test_alembic_upgrade_is_idempotent(tmp_path: Path) -> None:
     engine = create_engine(database_url)
     try:
         with engine.connect() as connection:
-            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260910_11"
+            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260915_12"
     finally:
         engine.dispose()
 
@@ -822,7 +822,7 @@ def test_native_poi_upgrade_binds_verified_building_without_touching_history(tmp
             ))
             before = {table: connection.execute(text(f"SELECT * FROM {table} ORDER BY id")).all()
                       for table in ("users", "courses", "messages", "buildings")}
-        command.upgrade(config, "head")
+        command.upgrade(config, "20260910_11")
         with engine.connect() as connection:
             assert connection.execute(text("SELECT building_id, poi_id FROM building_map_pois")).all() == [(1, "B001B0IPJP")]
             for table, rows in before.items():
@@ -832,6 +832,30 @@ def test_native_poi_upgrade_binds_verified_building_without_touching_history(tmp
             assert "building_map_pois" not in inspect(engine).get_table_names()
             for table, rows in before.items():
                 assert connection.execute(text(f"SELECT * FROM {table} ORDER BY id")).all() == rows
+    finally:
+        engine.dispose()
+
+
+def test_makeup_upgrade_preserves_original_courses_and_downgrades(tmp_path: Path) -> None:
+    database_url = make_database_url(tmp_path / "makeup-upgrade.db")
+    config = migration_config(database_url)
+    upgrade_to_baseline(database_url)
+    insert_legacy_course(database_url, drop_version=False)
+    command.upgrade(config, "20260910_11")
+    engine = create_engine(database_url)
+    try:
+        with engine.connect() as connection:
+            columns = ", ".join(column["name"] for column in inspect(engine).get_columns("courses"))
+            before = connection.execute(text(f"SELECT {columns} FROM courses ORDER BY id")).all()
+        command.upgrade(config, "20260915_12")
+        with engine.connect() as connection:
+            assert connection.execute(text(f"SELECT {columns} FROM courses ORDER BY id")).all() == before
+            assert connection.scalar(text("SELECT COUNT(*) FROM courses WHERE makeup IS NOT NULL")) == 0
+            assert "course_makeup_requests" in inspect(engine).get_table_names()
+        command.downgrade(config, "20260910_11")
+        with engine.connect() as connection:
+            assert connection.execute(text("SELECT * FROM courses ORDER BY id")).all() == before
+            assert "course_makeup_requests" not in inspect(engine).get_table_names()
     finally:
         engine.dispose()
 
@@ -856,7 +880,7 @@ def test_upgrade_database_serializes_simultaneous_threads(
     engine = create_engine(database_url)
     try:
         with engine.connect() as connection:
-            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260910_11"
+            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260915_12"
         assert {
             "semester_settings",
             "course_import_sources",
@@ -901,7 +925,7 @@ def test_upgrade_database_serializes_simultaneous_processes(
     engine = create_engine(database_url)
     try:
         with engine.connect() as connection:
-            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260910_11"
+            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260915_12"
         assert {
             "semester_settings",
             "course_import_sources",

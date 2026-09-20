@@ -2,7 +2,7 @@ import type { Course } from '@/types/course'
 import type { SemesterState } from '@/types/semester'
 import type { ReminderItem, ReminderOccurrence, ReminderPlan } from '@/types/reminder'
 import { campusTime } from './campusTime'
-import { formatCourseLocation, isCourseActiveInWeek } from './course'
+import { coursesOnDate, formatCourseLocation } from './course'
 
 export const MAX_DEVICE_REMINDERS = 400
 export const emptyReminderPlan = (): ReminderPlan => ({
@@ -72,12 +72,9 @@ export function customOccurrences(item: ReminderItem): ReminderOccurrence[] {
 export function buildReminderOccurrences(plan: ReminderPlan, courses: Course[], semester: SemesterState | null,
   date = campusTime(new Date()).date): ReminderOccurrence[] {
   const occurrences = plan.items.flatMap(customOccurrences)
-  if (plan.course_settings.enabled && semester?.start_date && semester.total_weeks && validDate(date)) {
-    const week = Math.floor((Date.parse(date) - Date.parse(semester.start_date)) / (7 * 86_400_000)) + 1
-    const weekday = new Date(`${date}T00:00:00Z`).getUTCDay() || 7
-    for (const course of courses) {
+  if (plan.course_settings.enabled && validDate(date)) {
+    for (const course of coursesOnDate(courses, date, semester)) {
       if (!course.start_time || !course.end_time || course.end_time <= course.start_time) continue
-      if (week < 1 || week > semester.total_weeks || course.weekday !== weekday || !isCourseActiveInWeek(course.weeks, week)) continue
       const event_at = reminderInstant(date, course.start_time)
       // Today's course reminders never fire on the previous calendar day.
       const at = new Date(Math.max(Date.parse(reminderInstant(date, '00:00')),

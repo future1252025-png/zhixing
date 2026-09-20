@@ -63,6 +63,40 @@ async function mountPage() {
   await flushPromises()
   return page
 }
+it('keeps entrance surfaces mounted while reminders load and refresh', async () => {
+  mock.reminders.loaded = false
+  mock.reminders.loading = true
+  mock.reminders.load.mockImplementation(() => new Promise(() => {}))
+  const wrapper = await mountPage()
+  const surfaces = wrapper.findAll('.reminder-arrive').map(node => node.element)
+  expect(surfaces).toHaveLength(4)
+  expect(wrapper.get('.bell-art').attributes('aria-hidden')).toBe('true')
+  mock.reminders.loaded = true
+  mock.reminders.loading = false
+  mock.reminders.plan.course_settings.enabled = false
+  await flushPromises()
+  expect(wrapper.findAll('.reminder-arrive').map(node => node.element)).toEqual(surfaces)
+})
+it.each([false, true])('opens the editor without waiting for entrance motion (reduced motion: %s)', async reduceMotion => {
+  const originalScroll = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollIntoView')
+  const scroll = vi.fn()
+  Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: scroll })
+  const media = window.matchMedia('(prefers-reduced-motion: reduce)')
+  const preference = vi.spyOn(window, 'matchMedia').mockReturnValue({ ...media, matches: reduceMotion })
+  try {
+    const wrapper = await mountPage()
+    await wrapper.get('[data-testid="new-reminder"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('form[aria-label="编辑提醒"]').exists()).toBe(true)
+    expect(scroll).toHaveBeenCalledExactlyOnceWith({ block: 'start', behavior: reduceMotion ? 'instant' : 'smooth' })
+    await wrapper.get('[aria-label="关闭提醒编辑"]').trigger('click')
+    expect(wrapper.find('.reminder-editor').exists()).toBe(false)
+  } finally {
+    preference.mockRestore()
+    if (originalScroll) Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', originalScroll)
+    else Reflect.deleteProperty(HTMLElement.prototype, 'scrollIntoView')
+  }
+})
 it('removes the device card and keeps only the daily course tip for authorized users', async () => {
   const wrapper = await mountPage()
   expect(wrapper.find('.device-notice').exists()).toBe(false)
