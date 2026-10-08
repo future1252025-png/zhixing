@@ -57,5 +57,6 @@ test('home week shortcut opens the actual week at its selector and does not pull
   await page.getByRole('link', { name: '课表', exact: true }).click()
   await expect(page).toHaveURL(/\/courses$/)
   await expect(page.locator('#courseWeekSelect')).toHaveValue('4')
-  await expect.poll(() => page.evaluate(() => scrollY)).toBeLessThan(3)
+  // Tab switches now resume the last reading position as well.
+  await expect.poll(() => page.evaluate(top => Math.abs(scrollY - top), manualTop)).toBeLessThan(3)
 })

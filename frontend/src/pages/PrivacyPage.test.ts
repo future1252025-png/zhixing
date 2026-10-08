@@ -1,15 +1,17 @@
 import { mount } from '@vue/test-utils'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import PrivacyPage from './PrivacyPage.vue'
 
 const back = vi.fn()
+const replace = vi.fn()
 
 vi.mock('vue-router', () => ({
-  useRouter: () => ({ back })
+  useRouter: () => ({ back, replace })
 }))
 
 describe('PrivacyPage', () => {
+  beforeEach(() => { vi.clearAllMocks(); window.history.replaceState({ back: '/profile' }, '') })
   it('explains account, timetable, location and deletion choices', async () => {
     const wrapper = mount(PrivacyPage, {
       global: {
@@ -29,5 +31,9 @@ describe('PrivacyPage', () => {
 
     await wrapper.get('button').trigger('click')
     expect(back).toHaveBeenCalledOnce()
+    window.history.replaceState({}, '')
+    await wrapper.get('button').trigger('click')
+    expect(replace).toHaveBeenCalledExactlyOnceWith('/profile')
+    wrapper.unmount()
   })
 })

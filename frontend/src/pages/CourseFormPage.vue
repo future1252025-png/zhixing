@@ -248,7 +248,7 @@ onMounted(loadFormData)
 </script>
 
 <template>
-  <section class="page course-form-page">
+  <section class="page course-form-page" :data-route-content-ready="!loading">
     <van-nav-bar :title="pageTitle" left-arrow @click-left="goBack(router, '/courses')" />
 
     <main class="page-content form-content" :style="pageStyle" @focusin="onFieldFocus">

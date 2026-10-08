@@ -38,7 +38,7 @@ onMounted(loadBuilding)
 </script>
 
 <template>
-  <section class="page building-detail-page">
+  <section class="page building-detail-page" :data-route-content-ready="!loading">
     <van-nav-bar title="校园地点" left-arrow @click-left="goBack(router, '/home')" />
     <div class="page-content building-content">
       <div v-if="loading" class="place-loading" role="status" aria-live="polite">

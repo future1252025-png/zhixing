@@ -8,9 +8,9 @@ import { CAMPUS_MAP_CENTER, buildingMapCoordinate, readMapCoordinate, readNative
 import { wgs84ToGcj02 } from '@/utils/geo'
 
 const props = withDefaults(defineProps<{
-  title?: string; subtitle?: string; height?: string; zoom?: number; interactive?: boolean; lazy?: boolean
+  title?: string; subtitle?: string; height?: string; zoom?: number; interactive?: boolean; lazy?: boolean; autoCenter?: boolean
   buildings?: Building[]; activeBuildingId?: number | null; camera?: MapCamera | null; position?: DevicePosition | null
-}>(), { title: '', subtitle: '', height: '260px', zoom: 17, interactive: true, lazy: false,
+}>(), { title: '', subtitle: '', height: '260px', zoom: 17, interactive: true, lazy: false, autoCenter: false,
   buildings: () => [], activeBuildingId: null, camera: null, position: null })
 const emit = defineEmits<{ poiClick: [poi: NativeMapPoi]; mapClick: [coordinate: MapCoordinate]
   cameraChange: [camera: MapCamera]; ready: [] }>()
@@ -29,13 +29,15 @@ let positionOverlays: any[] = []
 let intersection: IntersectionObserver | null = null
 let accessibility: MutationObserver | null = null
 let pendingFocus: MapCamera | null = null
+let cameraClaimed = validMapCamera(props.camera) || props.activeBuildingId !== null
+let locationCentered = false
 const listeners: [string, (...args: any[]) => void][] = []
 
 function startingCamera(): MapCamera {
   if (pendingFocus) return pendingFocus
   if (validMapCamera(props.camera)) return props.camera
   const building = props.buildings.find(item => item.id === props.activeBuildingId)
-  const point = building ? buildingMapCoordinate(building) : !props.interactive && props.position ? buildingMapCoordinate(props.position) : null
+  const point = building ? buildingMapCoordinate(building) : (props.autoCenter || !props.interactive) && props.position ? buildingMapCoordinate(props.position) : null
   return { center: point ? [point.longitude, point.latitude] : CAMPUS_MAP_CENTER, zoom: props.zoom }
 }
 function publishCamera() {
@@ -47,6 +49,7 @@ function focusCoordinate(coordinate: MapCoordinate, zoom = 18) {
   if (!readMapCoordinate(coordinate)) return
   const camera: MapCamera = { zoom, center: [coordinate.longitude, coordinate.latitude] }
   if (!validMapCamera(camera)) return
+  cameraClaimed = true
   if (map.value) map.value.setZoomAndCenter(zoom, camera.center)
   else pendingFocus = camera
 }
@@ -57,7 +60,7 @@ function drawPosition() {
   const position = props.position
   if (!position) return
   const center = wgs84ToGcj02(position.latitude, position.longitude)
-  // The only extra overlay is the explicitly requested user location, never a building pin or hitbox.
+  // Only the user's position and accuracy are overlays, never building pins or hitboxes.
   if (typeof sdk.value.CircleMarker === 'function') positionOverlays.push(new sdk.value.CircleMarker({
     center, radius: 6, strokeColor: '#ffffff', strokeWeight: 2, fillColor: '#1677ff', fillOpacity: 1, zIndex: 180,
     bubble: true, cursor: 'default'
@@ -68,6 +71,15 @@ function drawPosition() {
       bubble: true, cursor: 'default' }))
   }
   if (positionOverlays.length) map.value.add(positionOverlays)
+}
+function updatePosition() {
+  drawPosition()
+  if (!map.value || !props.position || !props.autoCenter) return
+  // The mini map follows the latest fix. The expanded map centers only once,
+  // and a slow GPS result must never undo an explicit selection/zoom/drag.
+  if (props.interactive && (cameraClaimed || locationCentered)) return
+  locationCentered = true
+  map.value.setCenter(wgs84ToGcj02(props.position.latitude, props.position.longitude))
 }
 function labelMapElements() {
   mapContainer.value?.querySelectorAll('iframe').forEach(frame => { if (!frame.title) frame.title = '校园地图交互辅助框架' })
@@ -116,6 +128,7 @@ async function init() {
       if (!props.interactive || gesture || Date.now() < suppressUntil) return
       const poi = readNativeMapPoi(event)
       if (!poi) return
+      cameraClaimed = true
       clearTimeout(deferredClick)
       suppressUntil = Date.now() + 200
       emit('poiClick', poi)
@@ -124,24 +137,26 @@ async function init() {
       if (gesture || Date.now() < suppressUntil) return
       const point = readMapCoordinate(event?.lnglat)
       if (!point) return
+      cameraClaimed = true
       clearTimeout(deferredClick)
       // AMap may dispatch both events for a single tap. Native POI identity wins.
       deferredClick = setTimeout(() => { if (!disposed && !gesture && Date.now() >= suppressUntil) emit('mapClick', point) }, 220)
     })
-    for (const event of ['dragstart', 'zoomstart']) bind(event, () => { gesture = true; clearTimeout(deferredClick) })
+    for (const event of ['dragstart', 'zoomstart']) bind(event, () => { cameraClaimed = true; gesture = true; clearTimeout(deferredClick) })
     for (const event of ['dragend', 'zoomend']) bind(event, () => { gesture = false; suppressUntil = Date.now() + 250; publishCamera() })
     bind('moveend', publishCamera)
     labelMapElements()
     accessibility = new MutationObserver(labelMapElements)
     accessibility.observe(mapContainer.value, { childList: true, subtree: true })
     drawPosition()
+    if (props.position && props.autoCenter) locationCentered = true
     publishCamera()
     void installControls(target, version)
     emit('ready')
   } catch { if (!disposed && version === generation) error.value = '地图暂时打不开，请重试或从建筑列表进入频道。' }
   finally { if (!disposed && version === generation) loading.value = false }
 }
-watch(() => props.position, drawPosition)
+watch(() => props.position, updatePosition)
 // Data refreshes, selected IDs and zoom events never re-fit or rebuild the map.
 onMounted(() => {
   if (props.lazy && host.value && typeof IntersectionObserver !== 'undefined') {

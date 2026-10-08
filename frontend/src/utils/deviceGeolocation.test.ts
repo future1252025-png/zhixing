@@ -129,4 +129,26 @@ describe('device geolocation', () => {
     expect(getDeviceGeolocationErrorMessage({ code: 'OS-PLUG-GLOC-0007' }))
       .toBe('定位服务未开启，请打开定位开关后重试')
   })
+
+  it('does not reopen an Android permission prompt during automatic refresh', async () => {
+    mocks.isNativePlatform.mockReturnValue(true)
+    mocks.checkPermissions.mockResolvedValue({ location: 'prompt', coarseLocation: 'prompt' })
+    await expect(requestDeviceCurrentPosition({ requestPermission: false })).rejects.toMatchObject({ code: 'OS-PLUG-GLOC-0003' })
+    expect(mocks.requestPermissions).not.toHaveBeenCalled()
+    expect(mocks.getCurrentPosition).not.toHaveBeenCalled()
+  })
+
+  it('does not reopen a dismissed browser permission prompt', async () => {
+    const getCurrentPosition = vi.fn()
+    Object.defineProperty(navigator, 'geolocation', { value: { getCurrentPosition }, configurable: true })
+    const descriptor = Object.getOwnPropertyDescriptor(navigator, 'permissions')
+    Object.defineProperty(navigator, 'permissions', { value: { query: vi.fn().mockResolvedValue({ state: 'prompt' }) }, configurable: true })
+    try {
+      await expect(requestDeviceCurrentPosition({ requestPermission: false })).rejects.toMatchObject({ code: 1 })
+      expect(getCurrentPosition).not.toHaveBeenCalled()
+    } finally {
+      if (descriptor) Object.defineProperty(navigator, 'permissions', descriptor)
+      else Reflect.deleteProperty(navigator, 'permissions')
+    }
+  })
 })

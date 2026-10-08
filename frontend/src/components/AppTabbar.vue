@@ -13,12 +13,6 @@ const navItems = [
   { path: '/reminders', label: '提醒', icon: 'bell' },
   { path: '/profile', label: '我的', icon: 'user' }
 ] as const
-
-function handleTabClick(path: string) {
-  if (route.path === path) {
-    window.scrollTo({ left: 0, top: 0, behavior: 'auto' })
-  }
-}
 </script>
 
 <template>
@@ -29,7 +23,6 @@ function handleTabClick(path: string) {
       :to="item.path"
       class="app-tabbar-item"
       :class="{ active: activePath === item.path }"
-      @click="handleTabClick(item.path)"
     >
       <span class="nav-icon-wrap">
         <TechIcon :name="item.icon" :size="21" />

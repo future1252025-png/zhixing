@@ -8,6 +8,7 @@ import { useAuthStore } from '@/stores/auth'
 import { formatBuildingDisplayName } from '@/utils/buildings'
 import { readRecentChatEntries, rememberRecentChatEntry } from '@/utils/chat'
 import { goBack } from '@/utils/navigation'
+import { savedRouteView } from '@/utils/routeScroll'
 import { createScopedStorage } from '@/utils/scopedStorage'
 
 const route = useRoute()
@@ -17,7 +18,8 @@ const building = ref<Building | null>(null)
 const rooms = ref<BuildingChatRoom[]>([])
 const loading = ref(true)
 const errorMessage = ref('')
-const roomQuery = ref('')
+const viewState = savedRouteView(route.fullPath)
+const roomQuery = ref(typeof viewState.roomQuery === 'string' ? viewState.roomQuery : '')
 const buildingId = computed(() => Number(route.params.id))
 const generalRoom = computed(() => rooms.value.find(room => room.is_general))
 const classroomRooms = computed(() => rooms.value.filter(room => !room.is_general))
@@ -74,12 +76,15 @@ async function loadPage() {
     if (version === requestVersion) loading.value = false
   }
 }
-watch(buildingId, () => { roomQuery.value = ''; void loadPage() }, { immediate: true })
+watch(buildingId, (_id, previousId) => {
+  if (previousId !== undefined) roomQuery.value = ''
+  void loadPage()
+}, { immediate: true })
 onBeforeUnmount(() => { requestVersion++ })
 </script>
 
 <template>
-  <section class="page chatrooms-page">
+  <section class="page chatrooms-page" :data-route-content-ready="!loading" :data-route-view-state="JSON.stringify({ roomQuery })">
     <van-nav-bar title="地点频道" left-arrow @click-left="route.query.from === 'map' ? returnToMap() : goBack(router, '/home')" />
     <div class="page-content chatrooms-content">
       <div v-if="loading" class="channel-loading" role="status">正在加载这里的频道…</div>

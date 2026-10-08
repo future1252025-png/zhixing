@@ -452,7 +452,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <section class="page courses-page">
+  <section class="page courses-page" :data-route-content-ready="!loading && Boolean(semesterStore.semester || semesterErrorMessage || semesterStore.errorMessage)">
     <van-nav-bar title="我的课表" />
     <div class="page-content courses-content">
       <div v-if="semesterStore.loading && !semesterStore.semester" class="semester-loading fresh-card" aria-live="polite">

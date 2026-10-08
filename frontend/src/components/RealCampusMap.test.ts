@@ -10,7 +10,7 @@ const events: Record<string, (event?: any) => void> = {}
 const instance = { on: vi.fn((name, cb) => { events[name] = cb }), off: vi.fn(),
   add: vi.fn(), remove: vi.fn(), addControl: vi.fn(), destroy: vi.fn(),
   getCenter: vi.fn(() => ({ lng: 114.33, lat: 30.58 })), getZoom: vi.fn(() => 18),
-  setZoomAndCenter: vi.fn(), setFitView: vi.fn() }
+  setZoomAndCenter: vi.fn(), setCenter: vi.fn(), setFitView: vi.fn() }
 const sdk = { Map: vi.fn(function () { return instance }), Marker: vi.fn(),
   CircleMarker: vi.fn(function (options) { return { kind: 'position', options } }),
   Circle: vi.fn(function (options) { return { kind: 'accuracy', options } }),
@@ -97,6 +97,35 @@ describe('native campus map', () => {
     events.click({ lnglat: { lng: 114.3, lat: 30.5 } })
     await vi.advanceTimersByTimeAsync(250)
     expect(wrapper!.emitted('mapClick')).toHaveLength(1)
+  })
+  it('centers a mini map when GPS arrives after the SDK and follows later fixes without resetting zoom', async () => {
+    await render({ interactive: false, autoCenter: true })
+    const position = { latitude: 30.58, longitude: 114.32, accuracy: 12, locatedAt: new Date().toISOString(), source: 'browser' as const }
+    await wrapper!.setProps({ position })
+    expect(instance.setCenter).toHaveBeenLastCalledWith(wgs84ToGcj02(position.latitude, position.longitude))
+    await wrapper!.setProps({ position: { ...position, longitude: 114.33 } })
+    expect(instance.setCenter).toHaveBeenCalledTimes(2)
+    expect(instance.setZoomAndCenter).not.toHaveBeenCalled()
+    expect(sdk.Map).toHaveBeenCalledTimes(1)
+  })
+  it('uses an available fix as the initial expanded map center', async () => {
+    await render({ autoCenter: true, position: { latitude: 30.58, longitude: 114.32 } })
+    expect(sdk.Map).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ center: wgs84ToGcj02(30.58, 114.32) }))
+    expect(instance.setCenter).not.toHaveBeenCalled()
+  })
+  it('centers the expanded map once when its first fix arrives', async () => {
+    await render({ autoCenter: true })
+    await wrapper!.setProps({ position: { latitude: 30.58, longitude: 114.32 } as any })
+    await wrapper!.setProps({ position: { latitude: 30.58, longitude: 114.33 } as any })
+    expect(instance.setCenter).toHaveBeenCalledTimes(1)
+  })
+  it.each(['dragstart', 'zoomstart', 'selection', 'saved'])('never overrides %s with late automatic GPS', async intent => {
+    await render({ autoCenter: true, ...(intent === 'saved' ? { camera: { center: [114.31, 30.57], zoom: 19 } } : {}) })
+    if (intent === 'selection') (wrapper!.vm as any).focusCoordinate({ longitude: 114.33, latitude: 30.57 })
+    else if (intent !== 'saved') events[intent]()
+    await wrapper!.setProps({ position: { latitude: 30.58, longitude: 114.32 } as any })
+    expect(sdk.CircleMarker).toHaveBeenCalled()
+    expect(instance.setCenter).not.toHaveBeenCalled()
   })
   it('does not construct after unmount while the SDK is pending', async () => {
     const pending = deferred<any>(); vi.mocked(loadAMapSdk).mockReturnValue(pending.promise)

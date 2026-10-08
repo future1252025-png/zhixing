@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { showFailToast } from 'vant'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 
 import type { Building } from '@/api/buildings'
 import RealCampusMap from '@/components/RealCampusMap.vue'
@@ -12,7 +12,7 @@ import { useCampusClock } from '@/composables/useCampusClock'
 import { CAMPUS_TIME_ZONE, semesterAt } from '@/utils/campusTime'
 import { useAuthStore } from '@/stores/auth'
 import { useBuildingsStore } from '@/stores/buildings'
-import { useCampusMapStore } from '@/stores/campusMap'
+import { useMapAutoLocation } from '@/composables/useMapAutoLocation'
 import { useCoursesStore } from '@/stores/courses'
 import { useSemesterStore } from '@/stores/semester'
 import {
@@ -32,6 +32,7 @@ import {
 import { formatBuildingDisplayName } from '@/utils/buildings'
 import { createScopedStorage } from '@/utils/scopedStorage'
 import { CURRENT_WEEK_ANCHOR } from '@/utils/routeAnchor'
+import { savedRouteView } from '@/utils/routeScroll'
 import {
   consumeLoginIntroFlag,
   consumeLoginIntroSnapshot,
@@ -39,9 +40,10 @@ import {
 } from '@/utils/loginIntro'
 
 const router = useRouter()
+const viewState = savedRouteView(useRoute().fullPath)
 const authStore = useAuthStore()
 const buildingsStore = useBuildingsStore()
-const mapSession = useCampusMapStore()
+const mapSession = useMapAutoLocation()
 mapSession.attachUser(authStore.currentUser?.id ?? null)
 const coursesStore = useCoursesStore()
 const semesterStore = useSemesterStore()
@@ -50,7 +52,7 @@ const buildings = computed(() => buildingsStore.buildings)
 const courses = computed(() => coursesStore.courses)
 const errorMessage = computed(() => (!coursesStore.loaded ? coursesStore.errorMessage : '') || (!semesterStore.semester ? semesterStore.errorMessage : ''))
 const loading = computed(() => !errorMessage.value && (!coursesStore.loaded || !semesterStore.semester))
-const chatQuery = ref('')
+const chatQuery = ref(typeof viewState.chatQuery === 'string' ? viewState.chatQuery : '')
 const recentChats = ref<RecentChatEntry[]>([])
 const loginWelcomeVisible = ref(false)
 const loginWelcomeSnapshot = ref<LoginIntroSnapshot | null>(null)
@@ -197,7 +199,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <section class="page home-page">
+  <section class="page home-page" :data-route-content-ready="!loading" :data-route-view-state="JSON.stringify({ chatQuery })">
     <div class="page-content home-content">
       <header class="home-top home-motion-item">
         <div class="home-brand">
@@ -380,22 +382,24 @@ onUnmounted(() => {
       <section class="map-section">
         <div class="fresh-section-heading">
           <div><h2>从地点开始聊</h2><p>展开地图，选择建筑和频道</p></div>
-          <button type="button" class="mini-map-open" @click="router.push('/map')">展开地图 <TechIcon name="arrow" :size="17" /></button>
+          <button type="button" class="mini-map-open" @click="router.push('/map?locate=1')">展开地图 <TechIcon name="arrow" :size="17" /></button>
         </div>
         <div class="map-sheet fresh-card">
           <RealCampusMap
             :buildings="buildings"
             :position="mapSession.position"
             :interactive="false"
+            auto-center
             lazy
             title=""
             subtitle=""
             height="230px"
-            @map-click="router.push('/map')"
+            @map-click="router.push('/map?locate=1')"
           />
           <div class="mini-map-footer">
-            <span>{{ mapSession.position ? '蓝点为上次定位，展开后可刷新' : '定位后可在小地图看到自己' }}</span>
-            <button type="button" class="mini-map-open" @click="router.push('/map')"><TechIcon name="aim" :size="17" /> 定位与选楼</button>
+            <span role="status">{{ mapSession.locating ? '正在获取当前位置…' : mapSession.locationError ? (mapSession.position ? '定位暂未更新，蓝点为上次位置' : mapSession.locationError) : mapSession.position ? '蓝点是我的位置' : '正在准备定位…' }}</span>
+            <button v-if="mapSession.locationError" type="button" class="mini-map-open" :disabled="mapSession.locating" @click="mapSession.locate()"><TechIcon name="aim" :size="17" /> 重试定位</button>
+            <button v-else type="button" class="mini-map-open" @click="router.push('/map?locate=1')">选楼聊聊 <TechIcon name="arrow" :size="17" /></button>
           </div>
         </div>
       </section>

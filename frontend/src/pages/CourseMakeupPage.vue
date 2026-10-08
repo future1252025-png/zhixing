@@ -14,6 +14,7 @@ import { addCalendarDays, validDate } from '@/utils/reminders'
 import { useKeyboardAwarePage } from '@/utils/keyboardInset'
 import { CURRENT_WEEK_ANCHOR } from '@/utils/routeAnchor'
 import { createUuid } from '@/utils/uuid'
+import { goBack } from '@/utils/navigation'
 import type { Course, MakeupEntry } from '@/types/course'
 
 type DraftRow = { course: Course; selected: boolean; start: string; end: string; changeLocation: boolean; location: string }
@@ -156,8 +157,8 @@ onMounted(async () => {
 </script>
 
 <template>
-  <section class="page makeup-page">
-    <van-nav-bar title="快捷补课" left-arrow @click-left="!busy && router.push('/courses')" />
+  <section class="page makeup-page" :data-route-content-ready="!loading">
+    <van-nav-bar title="快捷补课" left-arrow @click-left="!busy && goBack(router, '/courses')" />
     <main class="page-content makeup-content" :style="pageStyle" @focusin="onFieldFocus">
       <header class="makeup-heading"><span class="fresh-kicker">临时调整，也能轻松安排</span><h1>{{ editingId ? '只改这一次' : '选好课程，换个时间上' }}</h1><p>老师、地点自动带入，不改变其他周的课表。</p></header>
       <p v-if="loading" role="status">正在读取已有课程…</p>

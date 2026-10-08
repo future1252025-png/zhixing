@@ -15,6 +15,7 @@ import { coursesOnDate } from '@/utils/course'
 import { addCalendarDays, buildReminderOccurrences, customOccurrences, formatReminderAt, nextCustomOccurrence,
   reminderInstant, validateReminder } from '@/utils/reminders'
 import { useKeyboardAwarePage } from '@/utils/keyboardInset'
+import { savedRouteView } from '@/utils/routeScroll'
 
 const auth = useAuthStore()
 const courses = useCoursesStore()
@@ -29,7 +30,7 @@ const editingRevision = ref(0)
 const formError = ref('')
 const { capabilityReady, permissionBusy, permissionError, enableDevice } = useReminderDevice()
 const permissionOpen = ref(false)
-const filter = ref<'active' | 'all'>('active')
+const filter = ref<'active' | 'all'>(savedRouteView(route.fullPath).filter === 'all' ? 'all' : 'active')
 const editor = ref<HTMLElement | null>(null)
 const { pageStyle, onFieldFocus } = useKeyboardAwarePage({ basePaddingPx: 95 })
 const modes: { value: ReminderMode; label: string }[] = [
@@ -156,7 +157,8 @@ onMounted(async () => {
 </script>
 
 <template>
-  <section class="page reminders-page">
+  <section class="page reminders-page" :data-route-view-state="JSON.stringify({ filter })"
+    :data-route-content-ready="(!store.loading || store.loaded) && (!courses.loading || courses.loaded) && (!semester.loading || Boolean(semester.semester))">
     <van-nav-bar title="提醒" />
     <main class="page-content reminders-content" :style="pageStyle" @focusin="onFieldFocus">
       <header class="reminder-hero reminder-arrive">

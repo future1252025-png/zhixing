@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { showConfirmDialog, showFailToast, showSuccessToast } from 'vant'
 import RealCampusMap from '@/components/RealCampusMap.vue'
@@ -7,30 +7,36 @@ import TechIcon from '@/components/TechIcon.vue'
 import { bindBuildingMapPoi, type Building } from '@/api/buildings'
 import { useAuthStore } from '@/stores/auth'
 import { useBuildingsStore } from '@/stores/buildings'
-import { useCampusMapStore } from '@/stores/campusMap'
+import { useMapAutoLocation } from '@/composables/useMapAutoLocation'
 import { formatBuildingDisplayName } from '@/utils/buildings'
 import { boundPoiBuilding, buildingMapCoordinate, nearbyBuildingCandidates, readMapCoordinate, searchCampusBuildings } from '@/utils/mapSelection'
 import { getAMapPoiDetails } from '@/utils/amap'
 import { readRecentChatEntries } from '@/utils/chat'
 import { createScopedStorage } from '@/utils/scopedStorage'
 import { goBack } from '@/utils/navigation'
+import { savedRouteView } from '@/utils/routeScroll'
 import type { MapCoordinate, NativeMapPoi } from '@/types/map'
 
 const router = useRouter()
 const route = useRoute()
+const viewState = savedRouteView(route.fullPath)
 const auth = useAuthStore()
 const buildings = useBuildingsStore()
-const session = useCampusMapStore()
+const session = useMapAutoLocation()
 session.attachUser(auth.currentUser?.id ?? null)
+const focusUserOnOpen = route.query.locate === '1'
+const focusBuildingOnOpen = Boolean(route.query.building)
 const mapView = ref<InstanceType<typeof RealCampusMap> | null>(null)
 const directoryScroll = ref<HTMLElement | null>(null)
 function revealSelection() { void nextTick(() => directoryScroll.value?.scrollTo({ top: 0 })) }
-const query = ref('')
-const category = ref('全部')
+const query = ref(typeof viewState.query === 'string' ? viewState.query : '')
+const category = ref(typeof viewState.category === 'string' && ['全部', '教学', '图书', '生活'].includes(viewState.category) ? viewState.category : '全部')
 const point = ref<MapCoordinate | null>(session.selectedPoi?.coordinate ?? null)
 const resolving = ref(false)
 const binding = ref(false)
 const categories = ['全部', '教学', '图书', '生活']
+const visibleCount = ref(typeof viewState.visibleCount === 'number' && Number.isInteger(viewState.visibleCount)
+  ? Math.max(40, Math.min(10000, viewState.visibleCount)) : 40)
 let selectionVersion = 0
 let disposed = false
 const selected = computed(() => buildings.buildings.find(item => item.id === session.selectedBuildingId) ?? null)
@@ -42,15 +48,17 @@ const results = computed(() => {
   const filtered = buildings.buildings.filter(item => category.value === '全部' || (category.value === '教学'
     ? /教学|教[一二三四五六七八九1-9]|学院|实验|双创|实训/.test(item.name)
     : category.value === '图书' ? /图书|自习|阅览/.test(item.name) : /食堂|公寓|宿舍|超市|驿站|体育|医院/.test(item.name)))
-  return searchCampusBuildings(filtered, query.value, 120)
+  return searchCampusBuildings(filtered, query.value, filtered.length)
 })
+const visibleResults = computed(() => results.value.slice(0, visibleCount.value))
+watch([query, category], () => { visibleCount.value = 40; revealSelection() })
 const recent = computed(() => {
   const userId = auth.currentUser?.id
   if (!userId) return []
   const ids = new Set(readRecentChatEntries(createScopedStorage(userId)).map(entry => entry.buildingId))
   return [...ids].map(id => buildings.buildings.find(item => item.id === id)).filter((item): item is Building => Boolean(item)).slice(0, 5)
 })
-const locationLabel = computed(() => session.position ? `定位时间 ${new Date(session.position.locatedAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false })}${session.position.accuracy ? ` · 精度约 ${Math.round(session.position.accuracy)} 米` : ' · 精度未知'}` : '定位只用于显示自己；不定位也能选楼')
+const locationLabel = computed(() => session.locating ? '正在获取当前位置…' : session.position ? `定位时间 ${new Date(session.position.locatedAt).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false })}${session.position.accuracy ? ` · 精度约 ${Math.round(session.position.accuracy)} 米` : ' · 精度未知'}` : '尚未获取位置，不影响选楼聊天')
 
 function clearSelection() {
   selectionVersion++; resolving.value = false; point.value = null
@@ -121,12 +129,16 @@ async function load() {
     else if (session.selectedPoi && !selected.value) session.selectedBuildingId = bound.value?.id ?? null
   } catch { /* Directory error is displayed with a retry action. */ }
 }
-onMounted(load)
+onMounted(() => {
+  void load()
+  if (focusUserOnOpen && !focusBuildingOnOpen) void router.replace('/map')
+})
 onBeforeUnmount(() => { disposed = true; selectionVersion++ })
 </script>
 
 <template>
-  <section class="campus-map-page">
+  <section class="campus-map-page" :data-route-content-ready="!buildings.loading || buildings.loaded"
+    :data-route-view-state="JSON.stringify({ query, category, visibleCount })">
     <header class="map-page-header">
       <button class="map-back" type="button" aria-label="返回校园" @click="goBack(router, '/home')"><TechIcon name="arrow" :size="22" /></button>
       <div class="map-page-title"><h1>校园地图</h1><p>选一栋建筑，进入这里的频道</p></div>
@@ -134,11 +146,11 @@ onBeforeUnmount(() => { disposed = true; selectionVersion++ })
     </header>
     <div class="map-workspace">
       <div class="map-canvas-pane">
-        <RealCampusMap ref="mapView" height="100%" :camera="session.camera" :position="session.position"
+        <RealCampusMap ref="mapView" height="100%" :camera="focusUserOnOpen ? null : session.camera" :position="session.position" :auto-center="!focusBuildingOnOpen"
           @camera-change="session.rememberCamera" @poi-click="onPoi" @map-click="onPoint" />
       </div>
       <aside class="map-directory" aria-label="选择建筑进入频道">
-        <div ref="directoryScroll" class="directory-scroll">
+        <div ref="directoryScroll" class="directory-scroll" data-scroll-region="map-directory">
           <p class="map-location-copy" :class="{ 'map-warning': session.locationError }" role="status">{{ session.locationError || locationLabel }}</p>
           <section v-if="selected" class="map-selected-building" aria-label="选中的建筑">
             <div class="selection-heading"><span>{{ bound?.id === selected.id ? '已关联原生地点' : session.selectedPoi ? '请核对建筑后进入' : '已选校园建筑' }}</span><button type="button" aria-label="取消建筑选择" @click="clearSelection"><TechIcon name="close" :size="18" /></button></div>
@@ -163,7 +175,8 @@ onBeforeUnmount(() => { disposed = true; selectionVersion++ })
           <div v-if="buildings.errorMessage" class="map-warning" role="alert"><p>建筑目录暂时未能加载，地图仍可查看。</p><button type="button" @click="load">重新加载建筑</button></div>
           <section class="map-building-results" aria-label="建筑列表">
             <header><h3>{{ query ? '搜索结果' : '校园建筑' }}</h3><span>{{ results.length }} 处</span></header>
-            <button v-for="building in results" :key="building.id" type="button" :aria-pressed="selected?.id === building.id" @click="selectBuilding(building, true)"><span class="directory-building-icon"><TechIcon name="building" :size="20" /></span><span><strong>{{ formatBuildingDisplayName(building.name) }}</strong><small>{{ building.type }}</small></span><TechIcon name="arrow" :size="17" /></button>
+            <button v-for="building in visibleResults" :key="building.id" type="button" :aria-pressed="selected?.id === building.id" @click="selectBuilding(building, true)"><span class="directory-building-icon"><TechIcon name="building" :size="20" /></span><span><strong>{{ formatBuildingDisplayName(building.name) }}</strong><small>{{ building.type }}</small></span><TechIcon name="arrow" :size="17" /></button>
+            <button v-if="visibleResults.length < results.length" class="directory-more" type="button" @click="visibleCount += 40">加载更多地点（已显示 {{ visibleResults.length }} / {{ results.length }}）</button>
             <p v-if="!results.length && !buildings.loading">没有找到建筑，试试名称或“教4”这样的简称。</p>
           </section>
         </div>
@@ -213,6 +226,7 @@ button:focus-visible,input:focus-visible { outline: 2px solid #4f7558; outline-o
 .map-building-results > header span { font-size: 11px; color: #65735e; }
 .map-building-results > button { display: flex; align-items: center; gap: 11px; width: 100%; min-height: 68px; text-align: left; border: 0; border-bottom: 1px solid #e8eddf; border-radius: 12px; background: transparent; padding: 10px 8px; }
 .map-building-results > button[aria-pressed=true] { background: #edf3e5; }
+.map-building-results > .directory-more { justify-content: center; min-height: 48px; color: #365b40; background: #edf3e5; margin-top: 8px; }
 .directory-building-icon { display: grid; place-items: center; width: 34px; height: 38px; flex-shrink: 0; border-radius: 10px; background: #edf1e7; color: #6b825c; }
 .map-building-results > button > span:nth-child(2) { flex: 1; min-width: 0; }
 .map-building-results strong { display: block; font-size: 13px; overflow-wrap: anywhere; }

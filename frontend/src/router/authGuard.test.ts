@@ -142,6 +142,10 @@ describe('auth route guard decisions', () => {
     expect(resolveEnvironmentRedirect({ meta: match.meta }, true)).toBeNull()
   })
 
+  it('prioritizes a history reading position over an anchor in the URL', () => {
+    expect(resolveRouteScrollPosition({ left: 0, top: 640 }, '#current-week')).toEqual({ left: 0, top: 640 })
+  })
+
   it('keeps the privacy explanation public', () => {
     const match = router.resolve('/privacy')
 

@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { useRouter } from 'vue-router'
+import { goBack } from '@/utils/navigation'
 
 const router = useRouter()
 </script>
 
 <template>
   <section class="page privacy-page">
-    <van-nav-bar title="隐私与数据说明" left-arrow @click-left="router.back()" />
+    <van-nav-bar title="隐私与数据说明" left-arrow @click-left="goBack(router, '/profile')" />
     <main class="page-content privacy-content">
       <header class="privacy-hero">
         <span>你的数据，由你决定</span>
@@ -22,7 +23,7 @@ const router = useRouter()
 
       <section class="privacy-card">
         <h2>定位</h2>
-        <p>只有在你主动定位或发送附近留言时才会请求系统定位权限。提醒功能不需要定位，关闭本机提醒或退出账号会取消本机已安排的提醒。</p>
+        <p>进入校园首页或地图时会尝试获取当前位置，首次需你同意系统定位权限。位置仅用于前台地图显示，不在后台持续追踪或保存轨迹；发布附近留言时会单独确认位置。拒绝定位仍可浏览地图与频道，提醒功能不需要定位。</p>
         <p>附近留言只保存核验后的距离，不在频道响应或数据库中保留本次精确坐标。</p>
         <p>校园地图由高德提供。地图视野和上次定位仅在本次应用会话中保留，退出账号后清空；不会把地图选点当作你发送留言的位置证明。不定位也能选楼和浏览频道。</p>
       </section>
@@ -36,6 +37,7 @@ const router = useRouter()
       <section class="privacy-card privacy-actions">
         <h2>你的选择</h2>
         <p>你可以拒绝定位权限并继续查看课表；也可以在“我的”页面永久删除账号和相关数据。</p>
+        <p>关闭本机通知或退出账号会取消本机已安排的提醒。</p>
         <router-link to="/profile">返回账号设置</router-link>
       </section>
     </main>

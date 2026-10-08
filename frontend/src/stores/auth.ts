@@ -23,6 +23,7 @@ import { extractBusinessError, resetUnauthorizedState } from '@/api/errors'
 import { SEMESTER_CACHE_KEY, useSemesterStore } from '@/stores/semester'
 import { createScopedStorage } from '@/utils/scopedStorage'
 import { useCampusMapStore } from '@/stores/campusMap'
+import { clearRouteScrollMemory } from '@/utils/routeScroll'
 import { cancelDeviceReminders, clearReminderCache } from '@/services/reminderNotifications'
 
 type AuthState = {
@@ -103,6 +104,7 @@ export const useAuthStore = defineStore('auth', {
       }
     },
     clearSession() {
+      clearRouteScrollMemory()
       void cancelDeviceReminders().catch(() => {})
       this.token = null
       this.currentUser = null

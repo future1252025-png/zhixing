@@ -38,7 +38,7 @@ router.afterEach((to, from) => {
       <main class="app-shell">
         <router-view v-slot="{ Component, route: viewRoute }">
           <Transition :name="transitionName" mode="out-in">
-            <component :is="Component" :key="viewRoute.path" />
+            <component :is="Component" :key="viewRoute.path" :data-route-scroll-key="viewRoute.fullPath" />
           </Transition>
         </router-view>
       </main>

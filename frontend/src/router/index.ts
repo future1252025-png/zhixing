@@ -9,6 +9,8 @@ import { extractBusinessError } from '@/api/errors'
 import { CURRENT_WEEK_ANCHOR, waitForRouteAnchor } from '@/utils/routeAnchor'
 import { useSemesterStore } from '@/stores/semester'
 import { semesterAt } from '@/utils/campusTime'
+import { applyRouteScroll, attachRouteScrollOwner, captureRouteScroll, historyEntryPosition,
+  rememberRouteScroll, savedRouteScroll, savedTabScroll, waitForRouteContent } from '@/utils/routeScroll'
 
 const LoginPage = () => import('@/pages/LoginPage.vue')
 const RegisterPage = () => import('@/pages/RegisterPage.vue')
@@ -80,8 +82,9 @@ export function resolveRouteScrollPosition(
   savedPosition: { left: number; top: number } | null,
   hash = ''
 ): { left: number; top: number } | { el: string; top: number; behavior: 'smooth' } {
+  if (savedPosition) return savedPosition
   if (hash) return { el: hash, top: 12, behavior: 'smooth' }
-  return savedPosition ?? { left: 0, top: 0 }
+  return { left: 0, top: 0 }
 }
 
 export function sanitizeInternalRedirect(value: unknown, fallback = '/home'): string {
@@ -187,18 +190,32 @@ const routes: RouteRecordRaw[] = [
 ]
 
 let cancelPendingScroll: (() => void) | undefined
+let activeEntryPosition = historyEntryPosition()
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes,
-  scrollBehavior(to, _from, savedPosition) {
+  scrollBehavior(to, from, savedPosition) {
     cancelPendingScroll?.()
+    // A duplicate tab tap must keep the current offset, not replay the older
+    // snapshot taken the last time this page was left.
+    if (to.fullPath === from.fullPath && !savedPosition) return false
+    // A real back/forward wins over a URL anchor. Tab switches remember their
+    // last location too, while a new detail page still starts at the top.
+    const snapshot = savedPosition
+      ? savedRouteScroll(to.fullPath) ?? { viewport: savedPosition, regions: {}, view: {} }
+      : !to.hash && !Object.keys(to.query).length ? savedTabScroll(to.path) : undefined
+    if (snapshot) {
+      const pending = waitForRouteContent(to.fullPath, () => router.currentRoute.value.fullPath === to.fullPath,
+        root => applyRouteScroll(root, snapshot))
+      cancelPendingScroll = pending.cancel
+      return pending.position
+    }
     if (to.path === '/courses' && to.hash === CURRENT_WEEK_ANCHOR) {
       const pending = waitForRouteAnchor(
         `${CURRENT_WEEK_ANCHOR}[data-scroll-ready="true"]`,
         () => router.currentRoute.value.fullPath === to.fullPath,
         () => {
           // History navigation preserves the user's browsed week and scroll position.
-          if (savedPosition) return
           const semester = useSemesterStore()
           const requestedWeek = typeof to.query.week === 'string' ? Number(to.query.week) : NaN
           const week = Number.isInteger(requestedWeek) && requestedWeek >= 1 && requestedWeek <= (semester.totalWeeks ?? 0)
@@ -207,17 +224,35 @@ const router = createRouter({
         }
       )
       cancelPendingScroll = pending.cancel
-      return pending.position.then(position => position && savedPosition ? { ...savedPosition, behavior: 'instant' as const } : position)
+      return pending.position
     }
-    return resolveRouteScrollPosition(savedPosition, to.hash)
+    // Consuming a one-shot map query must not reset its independent directory.
+    if (to.path === from.path && !to.hash) return false
+    if (to.hash) {
+      const pending = waitForRouteAnchor(to.hash, () => router.currentRoute.value.fullPath === to.fullPath)
+      cancelPendingScroll = pending.cancel
+      return pending.position
+    }
+    // A new chat owns its initial bottom position, but history returns above
+    // still restore the previous reading position.
+    if (to.name === 'building-messages' || (to.name === 'reminders' && typeof to.query.title === 'string')) return false
+    const pending = waitForRouteContent(to.fullPath, () => router.currentRoute.value.fullPath === to.fullPath,
+      () => window.scrollTo({ left: 0, top: 0, behavior: 'instant' }))
+    cancelPendingScroll = pending.cancel
+    return pending.position
   }
 })
 
-router.beforeEach(async (to) => {
+router.beforeEach(async (to, from) => {
   cancelPendingScroll?.()
+  const authStore = useAuthStore()
+  attachRouteScrollOwner(authStore.currentUser?.id ?? null)
+  if (from.matched.length && to.fullPath !== from.fullPath && (authStore.currentUser || !from.meta.requiresAuth)) {
+    const snapshot = captureRouteScroll(from.fullPath)
+    if (snapshot) rememberRouteScroll(activeEntryPosition, from.fullPath, snapshot)
+  }
   // Preserve old settings bookmarks without bringing the card back to the timetable.
   if (to.path === '/courses' && to.hash === '#semester-settings') return '/profile/semester'
-  const authStore = useAuthStore()
   const target = {
     path: to.path,
     fullPath: to.fullPath,
@@ -247,6 +282,10 @@ router.beforeEach(async (to) => {
     authStore.isAuthenticated
   )
   return redirect ?? true
+})
+
+router.afterEach((_to, _from, failure) => {
+  if (!failure) activeEntryPosition = historyEntryPosition()
 })
 
 export default router

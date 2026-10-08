@@ -14,7 +14,7 @@ vi.mock('@/stores/auth', () => ({ useAuthStore: () => mock.auth }))
 vi.mock('@/stores/courses', () => ({ useCoursesStore: () => mock.courses }))
 vi.mock('@/stores/semester', () => ({ useSemesterStore: () => mock.semester }))
 vi.mock('@/stores/reminders', () => ({ useRemindersStore: () => mock.reminders }))
-vi.mock('vue-router', () => ({ useRoute: () => ({ query: {} }), useRouter: () => ({ push: vi.fn() }) }))
+vi.mock('vue-router', () => ({ useRoute: () => ({ fullPath: '/reminders', query: {} }), useRouter: () => ({ push: vi.fn() }) }))
 vi.mock('@capacitor/core', () => ({ Capacitor: { isNativePlatform: () => false, getPlatform: () => 'web' } }))
 vi.mock('@/utils/keyboardInset', () => ({ useKeyboardAwarePage: () => ({ pageStyle: {}, onFieldFocus: vi.fn() }) }))
 vi.mock('@/services/reminderNotifications', () => ({

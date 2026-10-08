@@ -16,6 +16,7 @@ import { haversineDistanceMeters } from '@/utils/geo'
 import { useKeyboardInset } from '@/utils/keyboardInset'
 import { MESSAGE_PAGE_SIZE, hasMoreMessagePages, mergeOlderMessages } from '@/utils/messagePagination'
 import { goBack } from '@/utils/navigation'
+import { savedRouteScroll } from '@/utils/routeScroll'
 
 const MAX_MESSAGE_DISTANCE_METERS = 500
 
@@ -204,7 +205,7 @@ async function loadPage() {
     building.value = nextBuilding
     messages.value = nextMessages
     hasMoreMessages.value = hasMoreMessagePages(nextMessages)
-    await scrollToBottom()
+    if (!savedRouteScroll(route.fullPath)) await scrollToBottom()
   } catch (error) {
     if (requestSeq !== messagesRequestSeq) return
     errorMessage.value = getErrorMessage(error)
@@ -274,7 +275,7 @@ watch(composerLift, () => {
 </script>
 
 <template>
-  <section class="page message-page" :style="pageStyle">
+  <section class="page message-page" :style="pageStyle" :data-route-content-ready="!loading">
     <van-nav-bar :title="roomTitle" left-arrow @click-left="goBack(router, '/home')" />
     <div class="message-content">
       <header
