@@ -9,6 +9,7 @@
 - [../frontend/DEPLOYMENT.md](../frontend/DEPLOYMENT.md)：网页生产部署和高德代理配置。
 - [web-domain-release-plan-v1.md](web-domain-release-plan-v1.md)：域名网页版首版上线方案、实施范围、验收及更新回滚。
 - [web-release-operations.md](web-release-operations.md)：正式网页构建、Pages 环境、DNS、地图代理与日常发布操作。
+- [web-release-20261019.md](web-release-20261019.md)：域名网页版首发结果、线上验收与待处理事项。
 
 ## 当前实现
 

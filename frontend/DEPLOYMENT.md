@@ -1,6 +1,6 @@
 # 前端部署
 
-域名网页版使用 Cloudflare Pages 项目 `campusmind-web`，正式入口为 `https://campusmindapp.com`，API 为 `https://api.campusmindapp.com`。实施范围见 [上线方案](../docs/web-domain-release-plan-v1.md)，构建、域名和更新操作见 [网页发布操作说明](../docs/web-release-operations.md)。首次上线的实际验证结果记录在交付记录中。
+域名网页版使用 Cloudflare Pages 项目 `campusmind-web`，正式入口为 `https://campusmindapp.com`，API 为 `https://api.campusmindapp.com`。实施范围见 [上线方案](../docs/web-domain-release-plan-v1.md)，构建、域名和更新操作见 [网页发布操作说明](../docs/web-release-operations.md)。首次上线的实际验证与待办见 [首发记录](../docs/web-release-20261019.md)。
 
 ## HTTP 响应头
 

@@ -8,7 +8,9 @@ function gate() {
 }
 
 test('cached courses do not wait for maps or semester refresh on tab switches and restart', async ({ page }, testInfo) => {
-  await page.clock.install({ time: new Date('2026-09-07T14:09:00+08:00') })
+  // Keep the first lesson upcoming even after the six-minute cache expiry.
+  // Class-start switching is covered by course-clock; this test isolates loading.
+  await page.clock.install({ time: new Date('2026-09-07T13:40:00+08:00') })
   const user = { id: 7, student_id: 'loading-test', nickname: '同学', role: 'user', avatar_text: null, avatar_color: null, created_at: '2026-01-01T00:00:00Z' }
   const building = { id: 1, name: '教4', type: '教学楼', description: '', latitude: 30.59, longitude: 114.33, map_x: 0, map_y: 0, walk_hint: null }
   let semesterGate = gate()

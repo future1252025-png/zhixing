@@ -368,7 +368,7 @@ describe('course helpers', () => {
   })
 
   it('finds the nearest unfinished course in the current week', () => {
-    const now = new Date('2026-06-15T10:00:00')
+    const now = new Date('2026-06-15T10:00:00+08:00')
     const result = findNextCourse(
       [
         { ...baseCourse, id: 2, weekday: 1, start_time: '09:00' },
@@ -387,7 +387,7 @@ describe('course helpers', () => {
         { ...baseCourse, id: 2, weekday: 2, start_time: '08:00' },
         { ...baseCourse, id: 3, weekday: 1, start_time: '14:00', end_time: '15:40' }
       ],
-      new Date('2026-08-31T14:00:45')
+      new Date('2026-08-31T14:00:45+08:00')
     )
 
     expect(result?.id).toBe(2)
@@ -399,7 +399,7 @@ describe('course helpers', () => {
         { ...baseCourse, id: 2, weekday: 2, start_time: '08:00' },
         { ...baseCourse, id: 3, weekday: 1, start_time: '14:00', end_time: '15:40' }
       ],
-      new Date('2026-08-31T14:01:00')
+      new Date('2026-08-31T14:01:00+08:00')
     )
 
     expect(result?.id).toBe(2)
@@ -431,7 +431,7 @@ describe('course helpers', () => {
   })
 
   it('ignores pending-time imports when looking for the next departure', () => {
-    const now = new Date('2026-06-15T10:00:00')
+    const now = new Date('2026-06-15T10:00:00+08:00')
     const result = findNextCourse(
       [
         { ...baseCourse, id: 2, start_time: null, end_time: null, source_kind: 'import' },
