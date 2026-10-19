@@ -4,6 +4,7 @@ import { fetchSemester, saveSemester } from '@/api/semester'
 import type { SemesterState, SemesterUpdate } from '@/types/semester'
 import { createScopedStorage } from '@/utils/scopedStorage'
 import { semesterAt } from '@/utils/campusTime'
+import { validateCourseTimeRules } from '@/utils/courseTimeRules'
 
 const BROWSING_WEEK_KEY = 'browsing-week'
 const DEFAULT_MAX_WEEKS = 20
@@ -22,14 +23,16 @@ function readCachedSemester(userId: number): SemesterState | null {
       || !Number.isInteger(data.total_weeks) || data.total_weeks < 1 || data.total_weeks > 30) return null
     const date = new Date(`${data.start_date}T00:00:00Z`)
     if (!Number.isFinite(date.getTime()) || date.toISOString().slice(0, 10) !== data.start_date || date.getUTCDay() !== 1) return null
-    return semesterAt({ start_date: data.start_date, total_weeks: data.total_weeks, status: 'active', current_week: null }, new Date())
+    if (validateCourseTimeRules(data.time_rules ?? [])) return null
+    return semesterAt({ start_date: data.start_date, total_weeks: data.total_weeks, status: 'active', current_week: null,
+      ...(data.time_rules ? { time_rules: data.time_rules } : {}) }, new Date())
   } catch { return null }
 }
 
 function persistSemester(userId: number, semester: SemesterState): void {
   try {
     createScopedStorage(userId).set(SEMESTER_CACHE_KEY, JSON.stringify({
-      version: 1, start_date: semester.start_date, total_weeks: semester.total_weeks
+      version: 1, start_date: semester.start_date, total_weeks: semester.total_weeks, time_rules: semester.time_rules
     }))
   } catch { /* Storage restrictions must not turn a successful API response into a failure. */ }
 }
@@ -109,7 +112,8 @@ export const useSemesterStore = defineStore('semester', {
         if (revision !== this.requestRevision || this.loadedForUserId !== userId) return semester
         const hadSemester = this.semester !== null
         // An unchanged refresh must not reset an open settings editor.
-        if (this.semester?.start_date === semester.start_date && this.semester.total_weeks === semester.total_weeks) {
+        if (this.semester?.start_date === semester.start_date && this.semester.total_weeks === semester.total_weeks
+          && JSON.stringify(this.semester.time_rules ?? []) === JSON.stringify(semester.time_rules ?? [])) {
           this.semester.status = semester.status
           this.semester.current_week = semester.current_week
         } else this.semester = semester

@@ -4,7 +4,8 @@ const password = 'identity-pass-2026'
 
 test('student id is the single login identity and stays readable on a phone', async ({ context, page }, testInfo) => {
   const isMobile = testInfo.project.name.startsWith('mobile')
-  const studentId = isMobile ? '999999999999991' : '999999999999992'
+  const studentId = testInfo.project.name === 'mobile-webkit'
+    ? '999999999999993' : isMobile ? '999999999999991' : '999999999999992'
 
   await context.clearCookies()
   await page.addInitScript(() => {

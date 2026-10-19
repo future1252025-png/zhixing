@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.core.errors import BusinessError
 from app.models import Course, CourseMakeupRequest
 from app.schemas.course_makeup import MakeupCreate, MakeupTiming
-from app.services.course_calendar import occurs_on
+from app.services.course_calendar import occurs_on, course_times_on
 from app.services.semester_service import get_setting
 from app.services.user_mutation_guard import acquire_user_mutation_guard
 from app.services.week_rule import WeekExpressionError
@@ -32,13 +32,13 @@ def validate_dates(courses: list[Course], setting, dates: set[date]) -> None:
                       and course.start_time and course.end_time and course.start_time < course.end_time]
         except WeekExpressionError as exc:
             raise BusinessError(409, "course_data_invalid", "课表中有无效周次，请先修正") from exc
-        active.sort(key=lambda course: (course.start_time, course.end_time))
-        for index, left in enumerate(active):
-            for right in active[index + 1:]:
-                if right.start_time >= left.end_time:
+        timed = sorted([(course, *course_times_on(course, day, setting)) for course in active], key=lambda item: (item[1], item[2]))
+        for index, (left, start, end) in enumerate(timed):
+            for right, right_start, _ in timed[index + 1:]:
+                if right_start >= end:
                     break
                 raise BusinessError(409, "course_conflict",
-                    f"{day.isoformat()} {left.start_time}–{left.end_time}「{left.course_name}」与「{right.course_name}」时间冲突，请调整后重试",
+                    f"{day.isoformat()} {start}–{end}「{left.course_name}」与「{right.course_name}」时间冲突，请调整后重试",
                     details={"date": day.isoformat(), "course_ids": [left.id, right.id]})
 
 

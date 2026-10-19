@@ -26,7 +26,12 @@ beforeEach(() => {
   mock.checkExact.mockImplementation(async () => ({ exact_alarm: mock.exact }))
   mock.requestPermissions.mockImplementation(async () => ({ display: mock.permission }))
   mock.addListener.mockResolvedValue({ remove: vi.fn() })
-  mock.schedule.mockImplementation(async ({ notifications }) => { mock.pending.push(...notifications) })
+  mock.schedule.mockImplementation(async ({ notifications }) => {
+    // AlarmManager replaces a PendingIntent with the same ID, rather than
+    // accumulating a second alarm when the app rearms a persisted record.
+    const ids = new Set(notifications.map((value: { id: number }) => value.id))
+    mock.pending = [...mock.pending.filter(value => !ids.has(value.id)), ...notifications]
+  })
   mock.cancel.mockImplementation(async ({ notifications }) => {
     const ids = new Set(notifications.map((value: { id: number }) => value.id))
     mock.pending = mock.pending.filter(value => !ids.has(value.id))
@@ -133,7 +138,7 @@ it('does not preserve a previous account’s course alarms', async () => {
   await syncDeviceReminders(2, [], true, true)
   expect(mock.pending).toHaveLength(0)
 })
-it('removes legacy future-day course alarms even offline, retaining only today and custom plans', async () => {
+it('preserves future course alarms offline within the native horizon', async () => {
   const { syncDeviceReminders } = await import('./reminderNotifications')
   mock.pending = [
     { id: 101, extra: { owner: OWNER, userId: 1, kind: 'course', key: 'course-1-2026-09-07' } },
@@ -142,20 +147,50 @@ it('removes legacy future-day course alarms even offline, retaining only today a
   const custom = occurrence({ date: '2026-09-10', at: '2026-09-10T14:30:00+08:00' })
   await syncDeviceReminders(1, [custom], true, true)
   expect(mock.pending.some(value => value.id === 101)).toBe(true)
-  expect(mock.pending.some(value => value.id === 102)).toBe(false)
+  expect(mock.pending.some(value => value.id === 102)).toBe(true)
   expect(mock.pending.some(value => value.extra.kind === 'custom')).toBe(true)
   vi.setSystemTime(new Date('2026-09-08T00:00:00+08:00'))
   await syncDeviceReminders(1, [custom], true, true)
-  expect(mock.pending).toHaveLength(1)
-  expect(mock.pending[0].extra.kind).toBe('custom')
+  expect(mock.pending).toHaveLength(2)
+  expect(mock.pending.some(value => value.id === 101)).toBe(false)
 })
-it('does not register future-day courses even if a stale caller passes the whole week', async () => {
+it('registers upcoming native courses so tomorrow works without an open app', async () => {
   const { syncDeviceReminders } = await import('./reminderNotifications')
   const today = occurrence({ key: 'course-1-2026-09-07', kind: 'course' })
   const tomorrow = occurrence({ key: 'course-2-2026-09-08', kind: 'course', date: '2026-09-08', at: '2026-09-08T14:30:00+08:00' })
   const result = await syncDeviceReminders(1, [today, tomorrow], true)
-  expect(result?.count).toBe(1)
+  expect(result?.count).toBe(2)
   expect(mock.pending[0].extra.date).toBe('2026-09-07')
+})
+it('rearms unchanged IDs after resume even when saved plugin records still exist', async () => {
+  const { syncDeviceReminders } = await import('./reminderNotifications')
+  await syncDeviceReminders(1, [occurrence()], true)
+  const id = mock.pending[0].id
+  await syncDeviceReminders(1, [occurrence()], true, false, true)
+  expect(mock.schedule).toHaveBeenCalledTimes(2)
+  expect(mock.schedule.mock.calls[1]![0].notifications[0].id).toBe(id)
+  expect(mock.pending).toHaveLength(1)
+  expect(mock.cancel).not.toHaveBeenCalled()
+})
+it('rearms after a cold JS restart while retaining the saved native records', async () => {
+  const first = await import('./reminderNotifications')
+  await first.syncDeviceReminders(1, [occurrence()], true)
+  const id = mock.pending[0].id
+  vi.resetModules()
+  const restarted = await import('./reminderNotifications')
+  await restarted.syncDeviceReminders(1, [occurrence()], true)
+  expect(mock.schedule).toHaveBeenCalledTimes(2)
+  expect(mock.pending).toHaveLength(1)
+  expect(mock.pending[0].id).toBe(id)
+})
+it('rearms retained offline courses from their saved payload, using the same ID', async () => {
+  const { syncDeviceReminders } = await import('./reminderNotifications')
+  const course = occurrence({ kind: 'course', key: 'course-1-2026-09-08', date: '2026-09-08', at: '2026-09-08T14:30:00+08:00' })
+  await syncDeviceReminders(1, [course], true)
+  const id = mock.pending[0].id
+  await syncDeviceReminders(1, [], true, true, true)
+  expect(mock.schedule).toHaveBeenCalledTimes(2)
+  expect(mock.schedule.mock.calls[1]![0].notifications[0]).toMatchObject({ id, channelId: 'campusmind-reminder-vibrate-v1' })
 })
 it('limits large plans to 400 and reports coverage, never marking all as registered', async () => {
   const { syncDeviceReminders } = await import('./reminderNotifications')
@@ -193,6 +228,14 @@ it('background plan reconciliation leaves the five-second test notification alon
   await syncDeviceReminders(1, [], true)
   expect(mock.pending).toHaveLength(1)
   expect(mock.pending[0].extra.test).toBe(true)
+})
+it('schedules the background test for one minute with a native idle-capable alarm', async () => {
+  const { testReminderNotification } = await import('./reminderNotifications')
+  await testReminderNotification(60)
+  expect(mock.pending[0]).toMatchObject({
+    schedule: { at: new Date(Date.now() + 60_000), allowWhileIdle: true },
+    isExactNotification: true, extra: { test: true }
+  })
 })
 it('web reminders notify/vibrate once, keep silent mode silent and cancel on logout', async () => {
   mock.platform = 'web'

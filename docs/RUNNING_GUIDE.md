@@ -50,12 +50,16 @@ $env:REFRESH_SESSION_ABSOLUTE_DAYS="90"
 
 ```powershell
 cd frontend
-Copy-Item .env.example .env.local
+if (-not (Test-Path .env.local)) { Copy-Item .env.example .env.local }
 npm ci
 npm run dev
 ```
 
-`.env.local`：
+`npm run dev` 连接平板域名后端，电脑只需启动这个前端进程。浏览器访问同源 `/api/`，Vite 经验证证书的 HTTPS 转发到 `https://api.campusmindapp.com`；无需把本机地址加入生产 CORS 白名单。请使用手机端的账号登录，保存操作会修改平板真实数据，并非本地测试库。
+
+该转发严格限定在 `127.0.0.1`，校验 Host、Origin 与请求来源；不要暴露为局域网或公网服务器。保持生产 Cookie 的 Secure、HttpOnly、SameSite=Strict 标志不变，已在 Edge 验证 loopback 兼容性。
+
+需要本地隔离开发时，先启动上面的电脑后端，再运行 `npm run dev:local`。此命令读取 `.env.local` 的 API 地址：
 
 ```env
 VITE_API_BASE_URL=http://127.0.0.1:8000
@@ -66,7 +70,7 @@ VITE_AMAP_SERVICE_HOST=
 
 开发地址：`http://127.0.0.1:5173`
 
-生产环境对应 HTTPS API 和 [前端部署](../frontend/DEPLOYMENT.md) 中的高德服务代理配置。
+普通 `npm run build` 仍读取构建环境配置，不会继承 `dev` 命令的代理。不要把包含 localhost API 或开发地图安全密钥的产物直接发布。生产环境对应 HTTPS API 和 [前端部署](../frontend/DEPLOYMENT.md) 中的高德服务代理配置；当前项目的域名方案见 [网页域名部署方案](web-domain-deployment.md)。
 
 ## Android
 

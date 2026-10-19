@@ -224,7 +224,7 @@ describe('HomePage', () => {
     wrapper.unmount()
   })
 
-  it('shows the Monday 14:00 course throughout its start minute instead of Tuesday', async () => {
+  it('shows Tuesday once the final Monday course has started', async () => {
     vi.setSystemTime(new Date('2026-08-31T14:00:45+08:00'))
     vi.mocked(fetchSemester).mockResolvedValue({
       status: 'active',
@@ -246,8 +246,8 @@ describe('HomePage', () => {
 
     const wrapper = await mountHome()
 
-    expect(wrapper.text()).toContain('周一下午课')
-    expect(wrapper.text()).not.toContain('周二第一节')
+    expect(wrapper.text()).not.toContain('周一下午课')
+    expect(wrapper.text()).toContain('周二第一节')
     wrapper.unmount()
   })
 
@@ -272,19 +272,19 @@ describe('HomePage', () => {
     wrapper.unmount()
   })
 
-  it.each(['2026-09-07T14:09:00+08:00', '2026-09-07T14:30:00+08:00'])('shows the ongoing course at %s instead of Java', async (time) => {
+  it.each(['2026-09-07T14:09:00+08:00', '2026-09-07T14:30:00+08:00'])('shows Java after the preceding course has started at %s', async (time) => {
     vi.setSystemTime(new Date(time))
     vi.mocked(getCourses).mockResolvedValue(selectionFixture.courses.map(course))
     const wrapper = await mountHome()
-    expect(wrapper.get('.today-copy').text()).toContain('习近平新时代中国特色社会主义思想概论')
-    expect(wrapper.get('.today-copy').text()).toContain('正在上课')
-    expect(wrapper.get('.today-copy').text()).not.toContain('JAVA应用开发')
+    expect(wrapper.get('.today-copy').text()).not.toContain('习近平新时代中国特色社会主义思想概论')
+    expect(wrapper.get('.today-copy').text()).toContain('接下来的课程')
+    expect(wrapper.get('.today-copy').text()).toContain('JAVA应用开发')
     expect(wrapper.text()).toContain('真实第 2 周')
     wrapper.unmount()
   })
 
-  it('switches only at the end boundary while staying on the page, without reloading', async () => {
-    vi.setSystemTime(new Date('2026-09-07T15:39:59+08:00'))
+  it('switches at the start boundary while staying on the page, without reloading', async () => {
+    vi.setSystemTime(new Date('2026-09-07T13:59:59+08:00'))
     vi.mocked(getCourses).mockResolvedValue(selectionFixture.courses.map(course))
     const wrapper = await mountHome()
     expect(wrapper.get('.today-copy').text()).toContain('习近平新时代中国特色社会主义思想概论')

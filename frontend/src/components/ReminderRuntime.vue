@@ -8,7 +8,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useRemindersStore } from '@/stores/reminders'
 import { useCoursesStore } from '@/stores/courses'
 import { useSemesterStore } from '@/stores/semester'
-import { buildReminderOccurrences } from '@/utils/reminders'
+import { buildReminderOccurrences, buildDeviceReminderOccurrences } from '@/utils/reminders'
 import { campusTime } from '@/utils/campusTime'
 import { useCampusClock } from '@/composables/useCampusClock'
 import { listenNativeReminderClicks, syncDeviceReminders, tickWebReminders } from '@/services/reminderNotifications'
@@ -20,7 +20,7 @@ const semester = useSemesterStore()
 const router = useRouter()
 const now = useCampusClock()
 const today = computed(() => campusTime(now.value).date)
-const occurrences = computed(() => buildReminderOccurrences(reminders.plan,
+const occurrences = computed(() => (Capacitor.getPlatform() === 'android' ? buildDeviceReminderOccurrences : buildReminderOccurrences)(reminders.plan,
   courses.loaded ? courses.courses : [], semester.semester, today.value))
 let timer: ReturnType<typeof setInterval> | undefined
 let nativeState: PluginListenerHandle | null = null
@@ -42,20 +42,20 @@ async function refresh(force = false) {
     if (auth.currentUser?.id && auth.currentUser.id !== userId) void refresh()
   }
 }
-async function sync() {
+async function sync(rearm = false) {
   const userId = auth.currentUser?.id
   if (!userId || reminders.userId !== userId || !reminders.loaded) return
   const revision = ++syncRevision
   reminders.scheduling = true
   try {
     const preserveCourses = reminders.plan.course_settings.enabled && (!courses.loaded || !semester.semester)
-    const result = await syncDeviceReminders(userId, occurrences.value, reminders.deviceEnabled, preserveCourses)
+    const result = await syncDeviceReminders(userId, occurrences.value, reminders.deviceEnabled, preserveCourses, rearm)
     if (!result || revision !== syncRevision || auth.currentUser?.id !== userId) return
     reminders.capability = result.capability
     reminders.scheduledCount = result.count
     reminders.coverageUntil = result.until
     reminders.truncated = result.truncated
-    reminders.scheduleError = preserveCourses ? '课表尚未同步，仅保留本机已安排的当天课程通知；联网同步后更新。' : ''
+    reminders.scheduleError = preserveCourses ? '课表尚未同步，保留本机已安排的课程通知；联网同步后更新。' : ''
   } catch {
     if (revision === syncRevision) reminders.scheduleError = '提醒已保存，但本机通知安排失败，请检查权限后重试。'
   } finally { if (revision === syncRevision) reminders.scheduling = false }
@@ -72,7 +72,7 @@ watch(() => courses.loaded, (loaded) => {
 function resume() {
   if (document.visibilityState === 'visible') {
     // Permission changes and cached daily reminders must not wait for the network.
-    void sync()
+    void sync(true)
     void refresh(true)
   }
 }

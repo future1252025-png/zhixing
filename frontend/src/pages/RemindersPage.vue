@@ -181,6 +181,7 @@ onMounted(async () => {
       <p v-if="store.truncated" class="reminder-error" role="alert">仅安排了最近 400 条<span v-if="store.coverageUntil">（至 {{ formatReminderAt(store.coverageUntil) }}）</span>，请在覆盖时间结束前打开 App 继续安排。</p>
       <p v-if="capabilityReady && store.capability.permission === 'granted' && !store.deviceEnabled" class="panel-tip">本机通知已暂停。<router-link to="/profile/notifications">去开启</router-link></p>
       <p v-if="capabilityReady && store.capability.permission === 'unsupported'" class="panel-tip">当前浏览器不支持系统通知，请使用安卓 App。</p>
+      <p v-if="capabilityReady && store.capability.platform === 'web'" class="panel-tip">关闭网页后可能无法提醒，设置的事项仍会随账号同步。</p>
 
       <p v-if="store.error" class="reminder-error" role="alert">{{ store.offline ? '暂未连接服务器，显示本机缓存；修改需联网保存。' : '' }}{{ store.error }}</p>
       <p v-if="store.loading && !store.loaded" role="status">正在取回你的提醒…</p>
@@ -207,7 +208,7 @@ onMounted(async () => {
           <label>提前多久<select :value="store.plan.course_settings.lead_minutes" :disabled="store.saving" aria-label="课程提前提醒" @change="courseSetting('lead_minutes', Number(($event.target as HTMLSelectElement).value))"><option :value="0">上课时</option><option v-for="minutes in [5, 10, 15, 20, 30, 60, 120]" :key="minutes" :value="minutes">提前 {{ minutes }} 分钟</option></select></label>
           <label>提醒方式<select :value="store.plan.course_settings.mode" :disabled="store.saving" aria-label="课程提醒方式" @change="courseSetting('mode', ($event.target as HTMLSelectElement).value as ReminderMode)"><option v-for="mode in modes" :key="mode.value" :value="mode.value">{{ mode.label }}</option></select></label>
         </div>
-        <p v-if="store.plan.course_settings.enabled" class="panel-tip course-daily-tip">{{ store.capability.platform === 'android' ? '每天打开一次 App，安排今天的课程提醒。' : '保持网页打开，接收今天的课程提醒。' }}</p>
+        <p v-if="store.plan.course_settings.enabled" class="panel-tip course-daily-tip">{{ store.capability.platform === 'android' ? '列表只看今天；已安排的通知由手机系统执行。' : '保持网页打开，接收今天的课程提醒。' }}</p>
         <p v-if="!semester.semester?.start_date" class="panel-tip"><router-link to="/profile/semester">先设置开学日期</router-link>，再生成课程提醒；自定义事项不受影响。</p>
         <p v-if="pendingCourses" class="panel-tip">今天有 {{ pendingCourses }} 门课程需要补全正确的起止时间，暂不提醒。<router-link to="/courses">去补全时间</router-link></p>
         <p v-if="courses.errorMessage" class="reminder-error">课表暂未同步成功，课程通知未重新安排，请检查网络后重新同步。</p>

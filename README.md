@@ -68,12 +68,16 @@ python -m venv .venv
 
 ```powershell
 cd frontend
-Copy-Item .env.example .env.local
+if (-not (Test-Path .env.local)) { Copy-Item .env.example .env.local }
 npm ci
 npm run dev
 ```
 
 默认地址：`http://127.0.0.1:5173`
+
+`npm run dev` 默认通过仅本机可访问的开发转发连接平板上的 `https://api.campusmindapp.com`，无需启动电脑后端，使用与手机相同的账号和数据。此模式的修改会保存到平板真实数据库，请勿用真实账号运行破坏性测试。
+
+需要连接电脑上的隔离开发后端时，使用 `npm run dev:local`，由 `.env.local` 的 `VITE_API_BASE_URL` 控制地址。公网网页部署方案见 [网页域名部署方案](docs/web-domain-deployment.md)。
 
 ### Android
 

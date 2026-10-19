@@ -225,6 +225,7 @@ def test_get_unconfigured_semester_returns_exact_json(
         "start_date": None,
         "total_weeks": None,
         "current_week": None,
+        "time_rules": [],
     }
     with SessionLocal() as session:
         assert session.scalar(select(func.count()).select_from(SemesterSetting)) == 0
@@ -300,6 +301,7 @@ def test_put_semester_returns_current_week_persists_and_upserts_one_row(
         "start_date": "2026-08-31",
         "total_weeks": 20,
         "current_week": 4,
+        "time_rules": [],
     }
     assert commit_calls == 1
 

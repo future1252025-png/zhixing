@@ -5,6 +5,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator, model_validator
 
 from app.core.semester import validate_semester_setting
+from app.schemas.course_time_rule import CourseTimeRule, validate_time_rules
 
 
 ISO_DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -15,6 +16,13 @@ class SemesterUpdate(BaseModel):
 
     start_date: date
     total_weeks: StrictInt = Field(ge=1, le=30)
+    # Omitted by older clients: keep existing rules rather than erasing them.
+    time_rules: list[CourseTimeRule] | None = Field(default=None, max_length=40)
+
+    @field_validator("time_rules")
+    @classmethod
+    def validate_rules(cls, rules):
+        return validate_time_rules(rules) if rules is not None else None
 
     @field_validator("start_date", mode="before")
     @classmethod
@@ -41,3 +49,4 @@ class SemesterResponse(BaseModel):
     start_date: date | None
     total_weeks: int | None
     current_week: int | None
+    time_rules: list[CourseTimeRule] = Field(default_factory=list)

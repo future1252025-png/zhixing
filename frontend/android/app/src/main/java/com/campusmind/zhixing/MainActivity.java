@@ -12,12 +12,14 @@ import com.getcapacitor.BridgeActivity;
 
 import com.campusmind.zhixing.hubu.HubuCourseImportPlugin;
 import com.campusmind.zhixing.security.SecureSessionPlugin;
+import com.campusmind.zhixing.reminders.ReminderSettingsPlugin;
 
 public class MainActivity extends BridgeActivity {
     @Override
     public void onCreate(Bundle savedInstanceState) {
         registerPlugin(HubuCourseImportPlugin.class);
         registerPlugin(SecureSessionPlugin.class);
+        registerPlugin(ReminderSettingsPlugin.class);
         super.onCreate(savedInstanceState);
         createReminderChannels();
     }

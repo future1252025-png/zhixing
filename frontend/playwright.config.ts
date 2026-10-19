@@ -49,6 +49,10 @@ export default defineConfig({
     {
       command: 'npm run serve:e2e',
       cwd: frontendDir,
+      // SDK contract tests intercept the loader. Never inherit real local map
+      // credentials or make CI depend on a developer's private env files.
+      env: { VITE_AMAP_KEY: 'e2e_map_key_not_for_production', VITE_AMAP_SECURITY_CODE: '',
+        VITE_AMAP_SERVICE_HOST: 'https://example.invalid/_AMapService' },
       url: 'http://127.0.0.1:5179',
       reuseExistingServer,
       timeout: 120_000
@@ -70,6 +74,10 @@ export default defineConfig({
         viewport,
         channel: browserChannel
       }
-    }
+    },
+    ...(process.env.E2E_WEBKIT === 'true' ? [{
+      name: 'mobile-webkit',
+      use: { ...devices['iPhone 13'], browserName: 'webkit' as const }
+    }] : [])
   ]
 })

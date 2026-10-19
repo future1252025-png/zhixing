@@ -68,6 +68,7 @@ def get_semester_response(
         start_date=setting.start_date,
         total_weeks=setting.total_weeks,
         current_week=state.current_week,
+        time_rules=setting.time_rules or [],
     )
 
 
@@ -76,6 +77,7 @@ def upsert_setting(
     user_id: int,
     start_date: date,
     total_weeks: int,
+    time_rules: list[dict] | None = None,
 ) -> SemesterSetting:
     validate_semester_setting(start_date, total_weeks)
     if get_setting(session, user_id) is not None:
@@ -100,12 +102,16 @@ def upsert_setting(
     from types import SimpleNamespace
     from app.services.course_makeup_service import validate_dates
     courses = list(session.scalars(select(Course).where(Course.user_id == user_id)).all())
+    existing_setting = get_setting(session, user_id)
+    rules = time_rules if time_rules is not None else (getattr(existing_setting, "time_rules", None) or [])
     dates = {date.fromisoformat(course.makeup["date"]) for course in courses if course.makeup}
     if any(course.makeup and course.makeup.get("cancel_source") for course in courses):
         # A new semester baseline can move recurring lessons out of a dated
         # cancellation and expose conflicts in the vacated slot's replacement.
         dates.update(start_date + timedelta(days=day) for day in range(total_weeks * 7))
-    validate_dates(courses, SimpleNamespace(start_date=start_date, total_weeks=total_weeks), dates)
+    if rules or getattr(existing_setting, "time_rules", None):
+        dates.update(start_date + timedelta(days=day) for day in range(total_weeks * 7))
+    validate_dates(courses, SimpleNamespace(start_date=start_date, total_weeks=total_weeks, time_rules=rules), dates)
     now = datetime.now(timezone.utc)
     statement = (
         insert(SemesterSetting)
@@ -113,6 +119,7 @@ def upsert_setting(
             user_id=user_id,
             start_date=start_date,
             total_weeks=total_weeks,
+            time_rules=rules,
             created_at=now,
             updated_at=now,
         )
@@ -121,6 +128,7 @@ def upsert_setting(
             set_={
                 "start_date": start_date,
                 "total_weeks": total_weeks,
+                "time_rules": rules,
                 "updated_at": now,
             },
         )

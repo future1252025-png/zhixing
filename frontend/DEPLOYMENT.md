@@ -1,5 +1,7 @@
 # 前端部署
 
+域名网页版使用 Cloudflare Pages 项目 `campusmind-web`，正式入口为 `https://campusmindapp.com`，API 为 `https://api.campusmindapp.com`。实施范围见 [上线方案](../docs/web-domain-release-plan-v1.md)，构建、域名和更新操作见 [网页发布操作说明](../docs/web-release-operations.md)。首次上线的实际验证结果记录在交付记录中。
+
 ## HTTP 响应头
 
 Vite 的开发服务器和 `vite preview` 已返回防嵌入、禁止 MIME 嗅探及严格来源策略。`strict-origin-when-cross-origin` 在跨站请求中只发送来源，不泄露完整页面路径，同时保留地图服务常用的来源校验。构建时，`public/_headers` 会复制到 `dist/_headers`，可供支持该约定的静态托管平台读取。

@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, release/web]
   pull_request:
   workflow_dispatch:
 
@@ -46,7 +46,15 @@ jobs:
       - run: npm ci
       - run: npm audit --audit-level=high
       - run: npm run test:coverage
+      - run: npm run test:web
       - run: npm run build
+      - name: Verify production web build
+        run: npm run build:web
+        env:
+          VITE_API_BASE_URL: https://api.campusmindapp.com
+          VITE_AMAP_KEY: ci_placeholder_key_for_static_build
+          VITE_AMAP_SERVICE_HOST: https://campusmindapp.com/_AMapService
+          VITE_AMAP_SECURITY_CODE: ''
 
   e2e:
     runs-on: ubuntu-latest
@@ -67,8 +75,10 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - run: python -m pip install --require-hashes -r ../backend/requirements.lock
       - run: npm ci
-      - run: npx playwright install --with-deps chromium
+      - run: npx playwright install --with-deps chromium webkit
       - run: npm run test:e2e
+        env:
+          E2E_WEBKIT: 'true'
 
   android:
     runs-on: ubuntu-latest

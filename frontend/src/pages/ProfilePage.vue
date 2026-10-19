@@ -5,6 +5,7 @@ import { useRouter } from 'vue-router'
 
 import { extractBusinessError } from '@/api/errors'
 import TechIcon from '@/components/TechIcon.vue'
+import WebInstallHint from '@/components/WebInstallHint.vue'
 import { useCampusClock } from '@/composables/useCampusClock'
 import { semesterAt } from '@/utils/campusTime'
 import { useAuthStore } from '@/stores/auth'
@@ -376,7 +377,7 @@ async function permanentlyDeleteAccount() {
 
       <router-link class="privacy-entry" to="/profile/semester">
         <span><TechIcon name="calendar" :size="19" /></span>
-        <span><strong>学期设置</strong><small>修改开学日期和学期周数</small></span>
+        <span><strong>学期设置</strong><small>开学日期、教学周与上课时间</small></span>
         <TechIcon name="arrow" :size="18" />
       </router-link>
 
@@ -391,6 +392,8 @@ async function permanentlyDeleteAccount() {
         <span><strong>隐私与数据说明</strong><small>了解定位、课表和频道信息如何使用</small></span>
         <TechIcon name="arrow" :size="18" />
       </router-link>
+
+      <WebInstallHint />
 
       <section
         v-reveal="{ from: 'left', distance: 38 }"

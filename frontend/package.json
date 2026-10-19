@@ -8,11 +8,15 @@
     "npm": ">=10"
   },
   "scripts": {
-    "dev": "vite --host 127.0.0.1",
+    "dev": "cross-env VITE_API_BASE_URL=/ vite --config vite.tablet.config.ts --host 127.0.0.1",
+    "dev:local": "vite --host 127.0.0.1",
     "dev:e2e": "cross-env VITE_API_BASE_URL=http://127.0.0.1:8010 vite --host 127.0.0.1 --port 5179",
     "build:e2e": "cross-env VITE_API_BASE_URL=http://127.0.0.1:8010 npm run build",
     "serve:e2e": "npm run build:e2e && vite preview --host 127.0.0.1 --port 5179",
     "build": "vue-tsc --noEmit && vite build",
+    "build:web": "node tools/validateWebProductionEnv.mjs && vue-tsc --noEmit && tsc --noEmit -p tsconfig.functions.json && node tools/buildWeb.mjs && node tools/verifyWebProductionBundle.mjs",
+    "test:web": "vitest run --config vitest.web.config.ts",
+    "preview:web": "wrangler pages dev dist --ip 127.0.0.1 --port 8788",
     "preview": "vite preview --host 127.0.0.1",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
@@ -54,7 +58,8 @@
     "unplugin-vue-components": "^32.1.0",
     "vite": "^6.4.3",
     "vitest": "^4.1.10",
-    "vue-tsc": "^3.3.8"
+    "vue-tsc": "^3.3.8",
+    "wrangler": "4.151.1"
   },
   "overrides": {
     "@vue/test-utils": {

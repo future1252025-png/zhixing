@@ -28,6 +28,7 @@ from app.services.location_service import (
 )
 from app.services.semester_service import resolve_semester_state
 from app.services.week_rule import WeekExpressionError, parse_weeks
+from app.services.course_calendar import occurs_on, course_times_on
 
 
 DEFAULT_BUFFER_MINUTES = 10
@@ -39,6 +40,7 @@ class NextCourseCandidate:
     starts_at: datetime
     teaching_week: int
     start_time: time
+    end_time: str
 
 
 def _normalize_now(now: datetime) -> datetime:
@@ -119,9 +121,9 @@ def _parse_course_start_time(course: Course) -> time:
         raise _course_data_error(course, ["start_time"]) from error
 
 
-def _validate_course_end_time(course: Course, start_time: time) -> time:
+def _validate_course_end_time(course: Course, start_time: time, end_value: str | None = None) -> time:
     try:
-        end_time = parse_course_time(course.end_time)
+        end_time = parse_course_time(end_value if end_value is not None else course.end_time)
     except ValueError as error:
         raise _course_data_error(course, ["end_time"]) from error
     if end_time <= start_time:
@@ -208,22 +210,19 @@ def find_next_course(
         if target_date < current.date() or target_date > week_end:
             continue
         try:
-            occurs = course_occurs_on(
-                course,
-                target_date=target_date,
-                start_date=setting.start_date,
-                total_weeks=setting.total_weeks,
-            )
+            occurs = occurs_on(course, target_date, setting, courses)
         except WeekExpressionError as error:
             raise _course_data_error(course, ["weeks"]) from error
         if not occurs:
             continue
         start_time = _parse_course_start_time(course)
+        start_text, end_text = course_times_on(course, target_date, setting)
+        start_time = parse_course_time(start_text)
         starts_at = _course_start_datetime(target_date, start_time)
         if starts_at <= current:
             # Starting is not finishing: retain the current class for [start, end).
             # If its end is invalid we cannot assume it finished and silently skip it.
-            end_time = _validate_course_end_time(course, start_time)
+            end_time = _validate_course_end_time(course, start_time, end_text)
             if _course_start_datetime(target_date, end_time) <= current:
                 continue
         candidates.append(
@@ -232,6 +231,7 @@ def find_next_course(
                 starts_at=starts_at,
                 teaching_week=teaching_week,
                 start_time=start_time,
+                end_time=end_text,
             )
         )
 
@@ -244,7 +244,7 @@ def find_next_course(
         candidate for candidate in candidates if candidate.starts_at == earliest_start
     ]
     for candidate in earliest:
-        _validate_course_end_time(candidate.course, candidate.start_time)
+        _validate_course_end_time(candidate.course, candidate.start_time, candidate.end_time)
     complete = [
         candidate for candidate in earliest if not _location_is_incomplete(candidate.course)
     ]
@@ -400,8 +400,8 @@ def build_schedule_suggestion(
             id=course.id,
             course_name=course.course_name,
             weekday=course.weekday,
-            start_time=course.start_time,
-            end_time=course.end_time,
+            start_time=next_candidate.start_time.strftime("%H:%M"),
+            end_time=next_candidate.end_time,
             room_name=course.room_name,
             teacher=course.teacher,
             weeks=course.weeks,

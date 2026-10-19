@@ -17,6 +17,7 @@ vi.mock('@/stores/reminders', () => ({ useRemindersStore: () => mock.reminders }
 vi.mock('vue-router', () => ({ useRoute: () => ({ fullPath: '/reminders', query: {} }), useRouter: () => ({ push: vi.fn() }) }))
 vi.mock('@capacitor/core', () => ({ Capacitor: { isNativePlatform: () => false, getPlatform: () => 'web' } }))
 vi.mock('@/utils/keyboardInset', () => ({ useKeyboardAwarePage: () => ({ pageStyle: {}, onFieldFocus: vi.fn() }) }))
+vi.mock('@/native/reminderSettings', () => ({ reminderBackgroundStatus: vi.fn(async () => null), openReminderBackgroundSettings: vi.fn() }))
 vi.mock('@/services/reminderNotifications', () => ({
   reminderCapability: mock.capability, syncDeviceReminders: mock.sync, tickWebReminders: mock.tick,
   openExactReminderSettings: vi.fn(), testReminderNotification: vi.fn(), listenNativeReminderClicks: vi.fn()
@@ -117,7 +118,7 @@ it.each([
 ])('only offers permission for $permission / exact=$exact', async ({ permission, exact, prompt }) => {
   mock.capability.mockResolvedValue({ platform: 'android', permission, exact })
   const wrapper = await mountPage()
-  expect(wrapper.get('.course-daily-tip').text()).toBe('每天打开一次 App，安排今天的课程提醒。')
+  expect(wrapper.get('.course-daily-tip').text()).toBe('列表只看今天；已安排的通知由手机系统执行。')
   expect(wrapper.getComponent(Dialog).props('show')).toBe(prompt)
   expect(mock.capability).not.toHaveBeenCalledWith(true)
   expect(wrapper.find('.device-notice').exists()).toBe(false)

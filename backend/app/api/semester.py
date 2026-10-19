@@ -36,7 +36,8 @@ def update_semester(
     user_id = current_user.id
     start_date = payload.start_date
     total_weeks = payload.total_weeks
-    persist_semester_setting_with_retry(session, user_id, start_date, total_weeks)
+    rules = [rule.model_dump(mode="json") for rule in payload.time_rules] if payload.time_rules is not None else None
+    persist_semester_setting_with_retry(session, user_id, start_date, total_weeks, rules)
     return get_semester_response(session, user_id, now)
 
 
@@ -45,10 +46,11 @@ def persist_semester_setting_with_retry(
     user_id: int,
     start_date: date,
     total_weeks: int,
+    time_rules: list[dict] | None = None,
 ) -> None:
     for attempt in range(SQLITE_BUSY_RETRY_ATTEMPTS):
         try:
-            upsert_setting(session, user_id, start_date, total_weeks)
+            upsert_setting(session, user_id, start_date, total_weeks, time_rules)
             session.commit()
             return
         except OperationalError as error:

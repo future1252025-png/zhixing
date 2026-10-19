@@ -1,6 +1,6 @@
 from datetime import date, datetime, timezone
 
-from sqlalchemy import Date, ForeignKey, Integer
+from sqlalchemy import Date, ForeignKey, Integer, JSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.database import Base
@@ -18,6 +18,7 @@ class SemesterSetting(Base):
     )
     start_date: Mapped[date] = mapped_column(Date)
     total_weeks: Mapped[int] = mapped_column(Integer, default=20, server_default="20")
+    time_rules: Mapped[list] = mapped_column(JSON, default=list, server_default="[]")
     created_at: Mapped[datetime] = mapped_column(
         TZDateTime(),
         default=lambda: datetime.now(timezone.utc),

@@ -26,8 +26,7 @@ import {
 } from '@/utils/chat'
 import {
   filterCoursesByWeek,
-  findNextCourse,
-  isCourseOngoing
+  findNextCourse
 } from '@/utils/course'
 import { formatBuildingDisplayName } from '@/utils/buildings'
 import { createScopedStorage } from '@/utils/scopedStorage'
@@ -73,7 +72,6 @@ const activeCourses = computed(() =>
     : filterCoursesByWeek(courses.value, currentWeek.value, semesterStore.semester)
 )
 const nextCourse = computed(() => findNextCourse(activeCourses.value, now.value))
-const courseOngoing = computed(() => nextCourse.value && isCourseOngoing(nextCourse.value, now.value))
 const nextCourseChat = computed(() =>
   nextCourse.value ? buildNextCourseChatTarget(nextCourse.value) : null
 )
@@ -253,7 +251,7 @@ onUnmounted(() => {
           <span class="leaf-cluster leaf-cluster-b" aria-hidden="true"><i></i><i></i></span>
 
           <div class="today-copy">
-            <span class="fresh-kicker">{{ courseOngoing ? '正在上课' : '接下来的课程' }}</span>
+            <span class="fresh-kicker">接下来的课程</span>
             <p>真实第 {{ currentWeek }} 周</p>
             <template v-if="nextCourse && nextCourseChat">
               <CourseCard
@@ -265,7 +263,7 @@ onUnmounted(() => {
               />
             </template>
             <template v-else>
-              <h1>本周课程已结束或暂无安排</h1>
+              <h1>本周没有尚未开始的课程</h1>
               <strong>给自己留一点自由时间</strong>
               <small>本周有新课程时，下一节课会出现在这里。</small>
             </template>

@@ -79,8 +79,8 @@ const courseActionOptions = computed(() => activeCourse.value?.makeup ? [
   { name: '删除课程', color: '#b65f56' }
 ])
 const visibleCourses = computed(() => filterCoursesByWeek(courses.value, selectedWeek.value, semesterStore.semester))
-// Keep the semester's saved clock axis stable when browsing different weeks.
-const timeSlots = computed(() => getTimetableTimeSlots(courses.value))
+// A change may start mid-week: include both dated clocks so no course disappears.
+const timeSlots = computed(() => getTimetableTimeSlots(semesterStore.semester?.time_rules?.length ? visibleCourses.value : courses.value))
 const pendingScheduleCourses = computed(() =>
   visibleCourses.value
     .filter((course) => !course.start_time || !course.end_time)

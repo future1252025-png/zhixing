@@ -83,14 +83,15 @@ describe('course helpers', () => {
     ])
   })
 
-  it('keeps a corrected 14:30 course ahead of Java before and during the class', () => {
+  it('keeps a corrected 14:30 course until its start, then shows Java', () => {
     const courses = [
       { ...baseCourse, course_name: '思想概论', start_time: '14:30', end_time: '16:10' },
       { ...baseCourse, id: 2, course_name: 'Java', start_time: '16:25', end_time: '18:05' }
     ]
-    for (const clock of ['14:09', '14:30', '16:09']) {
+    for (const clock of ['14:09', '14:29']) {
       expect(findNextCourse(courses, new Date(`2026-09-07T${clock}:00+08:00`))?.course_name).toBe('思想概论')
     }
+    expect(findNextCourse(courses, new Date('2026-09-07T14:30:00+08:00'))?.course_name).toBe('Java')
     expect(findNextCourse(courses, new Date('2026-09-07T16:10:00+08:00'))?.course_name).toBe('Java')
   })
 
@@ -380,7 +381,7 @@ describe('course helpers', () => {
     expect(result?.id).toBe(4)
   })
 
-  it('keeps a course starting in the current minute ahead of the next day', () => {
+  it('moves past a course starting in the current minute to the next day', () => {
     const result = findNextCourse(
       [
         { ...baseCourse, id: 2, weekday: 2, start_time: '08:00' },
@@ -389,10 +390,10 @@ describe('course helpers', () => {
       new Date('2026-08-31T14:00:45')
     )
 
-    expect(result?.id).toBe(3)
+    expect(result?.id).toBe(2)
   })
 
-  it('keeps the ongoing course after its start minute has passed', () => {
+  it('skips the ongoing course after its start minute has passed', () => {
     const result = findNextCourse(
       [
         { ...baseCourse, id: 2, weekday: 2, start_time: '08:00' },
@@ -401,10 +402,15 @@ describe('course helpers', () => {
       new Date('2026-08-31T14:01:00')
     )
 
-    expect(result?.id).toBe(3)
+    expect(result?.id).toBe(2)
   })
 
-  it.each(selectionFixture.cases)('matches the frontend/backend contract at $now', ({ now, expected_id }) => {
+  it.each([
+    ['2026-08-31T14:00:00+08:00', 3], ['2026-09-07T13:59:59+08:00', 1],
+    ['2026-09-07T14:00:00+08:00', 2], ['2026-09-07T06:09:00Z', 2],
+    ['2026-09-07T15:55:00+08:00', 3], ['2026-09-08T08:00:00+08:00', null],
+    ['2026-09-13T23:59:59+08:00', null], ['2026-09-14T00:00:00+08:00', 2]
+  ] as const)('selects only not-yet-started occurrences at %s', (now, expected_id) => {
     const instant = new Date(now)
     const semester = semesterAt({ status: 'active', start_date: '2026-08-31', total_weeks: 20, current_week: 1 }, instant)
     const courses = selectionFixture.courses.map((course) => ({ ...baseCourse, ...course }))

@@ -65,6 +65,14 @@ async function expectReadableControls(page: Page): Promise<void> {
       const canScrollClearTabbar = Boolean(
         coveringTabbar && remainingScroll >= requiredScrollToClearTabbar
       )
+      // WebKit centers scrollIntoView differently. A row scrolled underneath
+      // its own sticky week header is intentionally hidden, not an unusable
+      // visible control. Only accept this if scrolling up can reveal it fully.
+      const coveringWeekHead = center?.closest('.week-head')
+      const weekHeadBottom = coveringWeekHead?.getBoundingClientRect().bottom ?? 0
+      const canScrollClearWeekHead = Boolean(coveringWeekHead
+        && element.closest('.timetable-shell') === coveringWeekHead.closest('.timetable-shell')
+        && window.scrollY >= Math.max(0, weekHeadBottom - centerY + rect.height / 2 + 8))
       const issues: string[] = []
       if (!text) issues.push('缺少可读文字或 aria-label')
       if (rect.height < 40) issues.push(`高度只有 ${rect.height.toFixed(1)}px`)
@@ -75,6 +83,7 @@ async function expectReadableControls(page: Page): Promise<void> {
         && !element.contains(center)
         && !center.closest('.van-nav-bar, .van-toast, .van-overlay')
         && !canScrollClearTabbar
+        && !canScrollClearWeekHead
       ) {
         issues.push('中心被其他元素遮挡')
       }
@@ -103,8 +112,14 @@ async function fillCourseForm(page: Page, courseName: string): Promise<void> {
 }
 
 test('core journey keeps weeks, locations, sessions, text, and actions trustworthy', async ({ page }, testInfo) => {
-  const projectSuffix = testInfo.project.name.startsWith('mobile') ? 'mobile' : 'desktop'
-  const studentId = `E2E2026${projectSuffix === 'mobile' ? '002' : '001'}`
+  // This full journey runs multiple axe audits; WebKit's isolated audit pages
+  // take longer than Chromium. Keep the same assertions with a larger budget.
+  if (testInfo.project.name === 'mobile-webkit') test.setTimeout(240_000)
+  const studentId = `E2E2026-${testInfo.project.name}`
+  // Map events have their own SDK contract test and live release smoke check.
+  // Here audit our fallback/directory, without third-party cross-origin frames
+  // delaying axe's WebKit frame collection for a minute on each home visit.
+  await page.route('https://webapi.amap.com/maps?*', route => route.abort())
   await page.clock.install({ time: new Date('2026-09-21T07:00:00+08:00') })
   await page.goto('/login')
   await screenshot(page, testInfo, 'login.png')
@@ -158,9 +173,9 @@ test('core journey keeps weeks, locations, sessions, text, and actions trustwort
   await expect(page.getByText('不应写入的冲突课程')).toHaveCount(0)
 
   await page.goto('/courses/import')
-  await expect(page.getByTestId('hubu-native-import')).toBeDisabled()
-  await expect(page.locator('.hubu-import-sheet')).toContainText('需安卓 App')
-  await expect(page.locator('.privacy-note')).toContainText('不读取密码，不导出登录 Cookie')
+  await expect(page.getByTestId('hubu-native-import')).toHaveCount(0)
+  await expect(page.locator('.hubu-import-sheet')).toHaveCount(0)
+  await expect(page.locator('.upload-sheet')).toContainText('先在学校教务系统导出课表')
   await expect(page.locator('.hubu-browser-link')).toHaveAttribute(
     'href',
     'https://jwxt.hubu.edu.cn/jsxsd/'
@@ -317,8 +332,14 @@ test('core journey keeps weeks, locations, sessions, text, and actions trustwort
   await page.waitForURL('**/reminders')
   const permissionPrompt = page.getByRole('dialog', { name: '开启通知提醒' })
   // This journey tests courses; notification authorization has its own dedicated flow.
-  await expect(permissionPrompt).toBeVisible()
-  await permissionPrompt.getByRole('button', { name: '暂不开启' }).click()
+  const supportsNotifications = await page.evaluate(() => window.isSecureContext && 'Notification' in window)
+  if (supportsNotifications) {
+    await expect(permissionPrompt).toBeVisible()
+    await permissionPrompt.getByRole('button', { name: '暂不开启' }).click()
+  } else {
+    await expect(page.getByText('当前浏览器不支持系统通知，请使用安卓 App。')).toBeVisible()
+    await expect(permissionPrompt).toHaveCount(0)
+  }
   await expect(page.getByRole('heading', { name: '课程提醒', exact: true })).toBeVisible()
   await screenshot(page, testInfo, 'reminder-center.png')
   await assertPageQuality(page)
@@ -349,8 +370,10 @@ test('core journey keeps weeks, locations, sessions, text, and actions trustwort
   await page.locator('input[name="password"]').fill(password)
   await page.getByRole('button', { name: /进入智行/ }).click()
   await page.waitForURL('**/reminders')
-  await expect(permissionPrompt).toBeVisible()
-  await permissionPrompt.getByRole('button', { name: '暂不开启' }).click()
+  if (supportsNotifications) {
+    await expect(permissionPrompt).toBeVisible()
+    await permissionPrompt.getByRole('button', { name: '暂不开启' }).click()
+  }
   await expect(permissionPrompt).not.toBeVisible()
   await expect(page.locator('.van-overlay:visible')).toHaveCount(0)
   await expect(page.getByRole('heading', { name: '课程提醒', exact: true })).toBeVisible()

@@ -3,6 +3,7 @@ import { computed, defineAsyncComponent, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import AppTabbar from '@/components/AppTabbar.vue'
+import WebUpdateNotice from '@/components/WebUpdateNotice.vue'
 const ReminderRuntime = defineAsyncComponent(() => import('@/components/ReminderRuntime.vue'))
 import { vantThemeVars as themeVars } from '@/styles/tokens'
 
@@ -44,6 +45,7 @@ router.afterEach((to, from) => {
       </main>
       <AppTabbar v-if="showTabbar" />
       <ReminderRuntime />
+      <WebUpdateNotice />
     </div>
   </van-config-provider>
 </template>

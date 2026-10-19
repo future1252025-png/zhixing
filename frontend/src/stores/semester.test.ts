@@ -37,6 +37,17 @@ describe('semester store', () => {
   })
   afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks() })
 
+  it('refreshes changed time rules even when semester dates are unchanged and restores them offline', async () => {
+    const store = useSemesterStore()
+    await store.load(12)
+    const rules = [{ start_date: '2026-09-01', end_date: null, from_start: '14:00', from_end: '15:40', start_time: '14:30', end_time: '16:10' }]
+    vi.mocked(fetchSemester).mockResolvedValue({ ...activeSemester, time_rules: rules })
+    await store.load(12, true)
+    expect(store.semester?.time_rules).toEqual(rules)
+    store.reset(); store.attachUser(12)
+    expect(store.semester?.time_rules).toEqual(rules)
+  })
+
   it('coalesces simultaneous home, login and reminder requests, then reuses fresh data', async () => {
     const response = deferred<typeof activeSemester>()
     vi.mocked(fetchSemester).mockReturnValueOnce(response.promise)

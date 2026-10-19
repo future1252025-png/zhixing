@@ -7,6 +7,8 @@
 - [RUNNING_GUIDE.md](RUNNING_GUIDE.md)：本地后端、网页端和局域网调试。
 - [ANDROID_COURSE_IMPORT.md](ANDROID_COURSE_IMPORT.md)：Android 构建与湖北大学教务系统导入。
 - [../frontend/DEPLOYMENT.md](../frontend/DEPLOYMENT.md)：网页生产部署和高德代理配置。
+- [web-domain-release-plan-v1.md](web-domain-release-plan-v1.md)：域名网页版首版上线方案、实施范围、验收及更新回滚。
+- [web-release-operations.md](web-release-operations.md)：正式网页构建、Pages 环境、DNS、地图代理与日常发布操作。
 
 ## 当前实现
 

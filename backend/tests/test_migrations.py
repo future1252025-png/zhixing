@@ -191,7 +191,7 @@ def test_latest_migration_erases_historical_precise_message_locations(
                 )
             ).one()
             assert row == (None, None, None)
-            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260915_12"
+            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20261009_13"
     finally:
         engine.dispose()
 
@@ -417,7 +417,7 @@ def test_upgrade_adopts_database_stamped_by_previous_initial_migration(
     try:
         inspector = inspect(engine)
         with engine.connect() as connection:
-            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260915_12"
+            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20261009_13"
             assert connection.scalar(text("SELECT COUNT(*) FROM courses")) == 1
             assert connection.scalar(text("SELECT weeks FROM courses WHERE id = 1")) == "1-20"
         assert {
@@ -743,7 +743,7 @@ def test_migration_round_trip_preserves_legacy_course_and_recreates_current_sche
     try:
         inspector = inspect(engine)
         with engine.connect() as connection:
-            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260915_12"
+            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20261009_13"
             assert connection.scalar(text("SELECT COUNT(*) FROM courses")) == 1
         assert "source_kind" in {
             column["name"] for column in inspector.get_columns("courses")
@@ -794,7 +794,7 @@ def test_alembic_upgrade_is_idempotent(tmp_path: Path) -> None:
     engine = create_engine(database_url)
     try:
         with engine.connect() as connection:
-            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260915_12"
+            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20261009_13"
     finally:
         engine.dispose()
 
@@ -880,7 +880,7 @@ def test_upgrade_database_serializes_simultaneous_threads(
     engine = create_engine(database_url)
     try:
         with engine.connect() as connection:
-            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260915_12"
+            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20261009_13"
         assert {
             "semester_settings",
             "course_import_sources",
@@ -925,7 +925,7 @@ def test_upgrade_database_serializes_simultaneous_processes(
     engine = create_engine(database_url)
     try:
         with engine.connect() as connection:
-            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260915_12"
+            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20261009_13"
         assert {
             "semester_settings",
             "course_import_sources",

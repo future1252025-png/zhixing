@@ -1,10 +1,10 @@
 import { expect, test } from '@playwright/test'
 import fixture from '../../tests/fixtures/course-selection.json' with { type: 'json' }
 
-// Runs on desktop + mobile viewport projects. API selection is independently
-// covered by the same fixture in backend/tests/test_schedule.py.
-test('ongoing course survives 14:09 and switches at the actual end, without reloading', async ({ page }, testInfo) => {
-  await page.clock.install({ time: new Date('2026-09-07T14:09:00+08:00') })
+// The home card intentionally differs from the legacy departure API: it only
+// shows a class that has not started. Exercise the exact start on both layouts.
+test('home switches at the class start, without waiting for its end or reloading', async ({ page }, testInfo) => {
+  await page.clock.install({ time: new Date('2026-09-07T13:58:00+08:00') })
   const user = { id: 7, student_id: 'clock-test', nickname: '同学', role: 'user', avatar_text: null, avatar_color: null, created_at: '2026-01-01T00:00:00Z' }
   const building = { id: 1, name: '教4', type: '教学楼', description: '', latitude: 30.59, longitude: 114.33, map_x: 0, map_y: 0, walk_hint: null }
   await page.route('**/api/**', async (route) => {
@@ -23,14 +23,16 @@ test('ongoing course survives 14:09 and switches at the actual end, without relo
   })
   await page.goto('/home')
   const card = page.locator('.today-copy')
-  await expect(card).toContainText('正在上课')
+  await expect(card).toContainText('接下来的课程')
   await expect(card).toContainText(fixture.courses[0].course_name)
   await expect(card).not.toContainText('JAVA应用开发')
-  await page.clock.pauseAt(new Date('2026-09-07T14:09:05+08:00'))
-  await page.screenshot({ path: testInfo.outputPath('ongoing-1409.png'), animations: 'disabled' })
-  await page.clock.fastForward(90 * 60_000 + 54_000)
+  await page.clock.pauseAt(new Date('2026-09-07T13:58:30+08:00'))
+  await page.screenshot({ path: testInfo.outputPath('upcoming-before-start.png'), animations: 'disabled' })
+  await page.clock.fastForward(89_000)
   await expect(card).toContainText(fixture.courses[0].course_name)
   await page.clock.fastForward(1000)
   await expect(card).toContainText('JAVA应用开发')
   await expect(card).not.toContainText('正在上课')
+  await page.clock.fastForward(9 * 60_000)
+  await expect(card).toContainText('JAVA应用开发')
 })

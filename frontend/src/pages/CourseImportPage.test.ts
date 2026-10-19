@@ -23,6 +23,9 @@ const mocks = vi.hoisted(() => ({
   captureToHtmlFile: vi.fn()
 }))
 
+vi.mock('@capacitor/core', async (importOriginal) => ({ ...await importOriginal<typeof import('@capacitor/core')>(),
+  Capacitor: { isNativePlatform: () => mocks.nativeHubuImportAvailable(), getPlatform: () => mocks.nativeHubuImportAvailable() ? 'android' : 'web' } }))
+
 vi.mock('vue-router', () => ({
   useRouter: () => ({ push: mocks.push })
 }))
@@ -50,6 +53,7 @@ vi.mock('@/native/hubuCourseImport', () => ({
 }))
 
 vi.mock('vant', () => ({
+  showConfirmDialog: vi.fn(),
   showFailToast: mocks.showFailToast,
   showSuccessToast: mocks.showSuccessToast
 }))
@@ -177,6 +181,7 @@ describe('CourseImportPage', () => {
       }
     ])
     mocks.previewCourseImport.mockResolvedValue(preview)
+    mocks.getCourses.mockResolvedValue([])
     mocks.commitCourseImport.mockResolvedValue({ created_count: 2, course_ids: [31, 32] })
     mocks.nativeHubuImportAvailable.mockReturnValue(false)
     mocks.captureHubuCourseTable.mockResolvedValue({ cancelled: true })
@@ -209,12 +214,12 @@ describe('CourseImportPage', () => {
   it('makes the Android-only boundary explicit without exposing a fake web capture action', async () => {
     const wrapper = await mountPage()
 
-    expect(wrapper.text()).toContain('需安卓 App')
-    expect(wrapper.get('[data-testid="hubu-native-import"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.text()).toContain('选择课表文件')
+    expect(wrapper.find('[data-testid="hubu-native-import"]').exists()).toBe(false)
     expect(wrapper.get('.hubu-browser-link').attributes('href')).toBe(
       'https://jwxt.hubu.edu.cn/jsxsd/'
     )
-    expect(wrapper.text()).toContain('不读取密码，不导出登录 Cookie')
+    expect(wrapper.text()).toContain('先在学校教务系统导出课表')
   })
 
   it('waits for time review before committing a table returned by the native Hubu browser', async () => {
@@ -234,6 +239,8 @@ describe('CourseImportPage', () => {
     await flushPromises()
 
     expect(mocks.captureHubuCourseTable).toHaveBeenCalledTimes(1)
+    expect(wrapper.find('input[type="file"]').exists()).toBe(false)
+    expect(wrapper.find('.upload-sheet').exists()).toBe(false)
     expect(mocks.captureToHtmlFile).toHaveBeenCalledWith(capture)
     expect(mocks.previewCourseImport).toHaveBeenCalledWith(capturedFile)
     expect(mocks.commitCourseImport).not.toHaveBeenCalled()

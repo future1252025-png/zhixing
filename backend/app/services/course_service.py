@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from datetime import timedelta
 from typing import Literal
 
 from sqlalchemy import select
@@ -148,7 +149,7 @@ def validate_course_batch(
                 comparison_values,
                 max_week=max_week,
             )
-            if candidate is not None
+            if candidate is not None and not getattr(setting, "time_rules", None)
             else []
         )
         if conflicts:
@@ -181,6 +182,11 @@ def validate_course_batch(
             batch_row_refs[synthetic_id] = row_ref
             comparison_values.append(candidate)
 
+    if getattr(setting, "time_rules", None):
+        rows = [row for row in list_courses(session, user_id) if not replace_existing or row.makeup]
+        rows.extend(Course(id=-index, user_id=user_id, **payload.model_dump())
+                    for index, (_, payload) in enumerate(validated, 1))
+        _validate_dated_times(rows, setting)
     return validated
 
 
@@ -272,6 +278,12 @@ def _validate_course_values(
         require_location=require_location,
         allow_incomplete_schedule=allow_incomplete_schedule,
     )
+    setting = get_setting(session, user_id)
+    if getattr(setting, "time_rules", None):
+        rows = [row for row in list_courses(session, user_id) if row.id != excluded_course_id]
+        rows.append(Course(id=excluded_course_id or -1, user_id=user_id, **{**values, "weeks": normalized_weeks}))
+        _validate_dated_times(rows, setting)
+        return normalized_weeks
     if candidate is not None and excluded_course_id is not None:
         from dataclasses import replace
         source = Course(id=excluded_course_id, weekday=candidate.weekday, weeks=normalized_weeks)
@@ -295,6 +307,12 @@ def _validate_course_values(
     if conflicts:
         raise _conflict_error(conflicts)
     return normalized_weeks
+
+
+def _validate_dated_times(courses, setting):
+    from app.services.course_makeup_service import validate_dates
+    dates = {setting.start_date + timedelta(days=day) for day in range(setting.total_weeks * 7)}
+    validate_dates(courses, setting, dates)
 
 
 def _validated_course_value(

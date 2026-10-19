@@ -2,11 +2,13 @@
 import { computed, nextTick, ref } from 'vue'
 import { showFailToast } from 'vant'
 import { useRouter } from 'vue-router'
+import { Capacitor } from '@capacitor/core'
 
 import { commitCourseImport, previewCourseImport } from '@/api/courses'
 import { extractBusinessError } from '@/api/errors'
 import ImportSummary from '@/components/import/ImportSummary.vue'
 import SemesterSettingsPanel from '@/components/course/SemesterSettingsPanel.vue'
+import CourseTimeSettingsPanel from '@/components/course/CourseTimeSettingsPanel.vue'
 import {
   captureHubuCourseTable,
   captureToHtmlFile,
@@ -52,6 +54,7 @@ const nativeImporting = ref(false)
 const importSource = ref<'file' | 'hubu'>('file')
 const captureSourceUrl = ref('')
 const nativeHubuImportAvailable = supportsNativeHubuCourseImport()
+const nativeApp = Capacitor.isNativePlatform()
 const { pageStyle, onFieldFocus } = useKeyboardAwarePage({ basePaddingPx: 34 })
 
 const candidates = computed(() => preview.value?.candidates ?? [])
@@ -421,7 +424,7 @@ async function commitImport() {
         <div>
           <span class="eyebrow">密码只留在学校官方页面</span>
           <h1>从教务系统，把整周课表带回来</h1>
-          <p>安卓 App 可直接采集当前课表；HTML 与 Excel 文件仍然可以照常导入。</p>
+          <p>{{ nativeApp ? '登录学校网站，读取课表后核对并保存。' : '可上传教务系统导出的 HTML 或 Excel 课表。' }}</p>
         </div>
         <div class="paper-garden" :class="{ busy: isBusy }" aria-hidden="true">
           <span class="paper paper-back"></span>
@@ -431,8 +434,9 @@ async function commitImport() {
       </header>
 
       <SemesterSettingsPanel v-if="state !== 'success'" />
+      <CourseTimeSettingsPanel v-if="state !== 'success'" />
 
-      <section v-reveal="{ from: 'right', distance: 30, delay: 60 }" class="hubu-import-sheet">
+      <section v-if="nativeApp" v-reveal="{ from: 'right', distance: 30, delay: 60 }" class="hubu-import-sheet">
         <header>
           <span>01</span>
           <div>
@@ -476,13 +480,16 @@ async function commitImport() {
           <span aria-hidden="true">✓</span>
           不读取密码，不导出登录 Cookie；课程和地点按课表原文保存，地点未匹配地图也不影响查看。
         </p>
+        <a v-if="nativeApp && captureSourceUrl" class="capture-source" :href="captureSourceUrl" target="_blank" rel="noopener noreferrer">已从湖北大学教务系统安全采集</a>
       </section>
 
-      <section v-reveal="{ from: 'right', distance: 30, delay: 60 }" class="upload-sheet">
+      <section v-if="!nativeApp" v-reveal="{ from: 'right', distance: 30, delay: 60 }" class="upload-sheet">
         <header>
-          <span>02</span>
-          <div><h2>或者选择原始课表文件</h2><p>支持 HTM / HTML / XLS / XLSX</p></div>
+          <span>01</span>
+          <div><h2>选择课表文件</h2><p>支持 HTM / HTML / XLS / XLSX</p></div>
         </header>
+        <p class="web-import-hint">先在学校教务系统导出课表，再选择文件。预览后可核对课程和上课时间。</p>
+        <a class="hubu-browser-link" :href="HUBU_ACADEMIC_SYSTEM_URL" target="_blank" rel="noopener noreferrer">打开学校教务系统 ↗</a>
         <label class="file-picker" :class="{ selected: selectedFile }">
           <input
             type="file"
@@ -675,6 +682,7 @@ async function commitImport() {
 </template>
 
 <style scoped>
+.web-import-hint { margin: 8px 0; color: #63705d; line-height: 1.7; font-size: 14px; }
 .import-time-editor {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

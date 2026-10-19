@@ -5,6 +5,7 @@ import { campusTime } from './campusTime'
 import { coursesOnDate, formatCourseLocation } from './course'
 
 export const MAX_DEVICE_REMINDERS = 400
+export const DEVICE_COURSE_DAYS = 30
 export const emptyReminderPlan = (): ReminderPlan => ({
   revision: 0, course_settings: { enabled: false, lead_minutes: 10, mode: 'vibrate' }, items: []
 })
@@ -92,6 +93,17 @@ export function nextCustomOccurrence(item: ReminderItem, now: Date): ReminderOcc
   const occurrences = customOccurrences(item)
   if (item.repeat === 'once') return occurrences[0] ?? null
   return occurrences.find((occurrence) => occurrence.date >= campusTime(now).date) ?? null
+}
+/** The UI stays daily. Native alarms are registered ahead so closing the WebView cannot stop tomorrow's reminders. */
+export function buildDeviceReminderOccurrences(plan: ReminderPlan, courses: Course[], semester: SemesterState | null,
+  date = campusTime(new Date()).date): ReminderOccurrence[] {
+  const occurrences = plan.items.flatMap(customOccurrences)
+  if (plan.course_settings.enabled && validDate(date)) {
+    for (let offset = 0; offset < DEVICE_COURSE_DAYS; offset++) {
+      occurrences.push(...buildReminderOccurrences({ ...plan, items: [] }, courses, semester, addCalendarDays(date, offset)))
+    }
+  }
+  return occurrences.sort((a, b) => Date.parse(a.at) - Date.parse(b.at) || a.key.localeCompare(b.key))
 }
 export function notificationId(key: string): number {
   let hash = 2166136261

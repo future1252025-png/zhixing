@@ -21,6 +21,10 @@ backend/data/
 .env.*
 !.env.example
 !.env.android.example
+!.env.web.example
+.dev.vars
+.dev.vars.*
+.wrangler/
 
 # Node / Vue
 node_modules/

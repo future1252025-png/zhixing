@@ -1,6 +1,7 @@
 import type { Course, CourseForm, CoursePayload } from '@/types/course'
 import type { SemesterState } from '@/types/semester'
 import { campusTime } from '@/utils/campusTime'
+import { courseAtDate } from '@/utils/courseTimeRules'
 
 export const WEEKDAYS = [
   { value: 1, label: '星期一' },
@@ -521,6 +522,7 @@ export function coursesOnDate(courses: Course[], date: string, semester: Semeste
   return courses.filter(course => course.makeup ? course.makeup.date === date
     : Boolean(semester?.total_weeks && week >= 1 && week <= semester.total_weeks && course.weekday === weekday
       && !cancelled.has(course.id) && isCourseActiveInWeek(course.weeks, week)))
+    .map(course => courseAtDate(course, date, semester))
     .sort((a, b) => (a.start_time ?? '').localeCompare(b.start_time ?? '') || a.id - b.id)
 }
 
@@ -539,7 +541,7 @@ export function isCourseOngoing(course: Course, now = new Date()): boolean {
     && start <= current.minutes && current.minutes < end
 }
 
-/** Caller supplies the real teaching week's courses. Keep [start, end), never wrap weeks. */
+/** Upcoming means strictly before its start. At the bell, move on; never wrap weeks. */
 export function findNextCourse(courses: Course[], now = new Date()): Course | null {
   const { weekday: currentWeekday, minutes: currentMinutes } = campusTime(now)
 
@@ -556,7 +558,7 @@ export function findNextCourse(courses: Course[], now = new Date()): Course | nu
         if (dayOffset < 0 || startMinutes === null || endMinutes === null || endMinutes <= startMinutes) {
           return false
         }
-        return dayOffset > 0 || endMinutes > currentMinutes
+        return dayOffset > 0 || startMinutes > currentMinutes
       })
       .sort((left, right) => {
         if (left.dayOffset !== right.dayOffset) {

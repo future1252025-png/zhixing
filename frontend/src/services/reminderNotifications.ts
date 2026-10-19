@@ -1,11 +1,12 @@
 import { Capacitor } from '@capacitor/core'
 import type { ReminderCapability, ReminderOccurrence } from '@/types/reminder'
-import { allocateNotificationIds, MAX_DEVICE_REMINDERS } from '@/utils/reminders'
+import { addCalendarDays, allocateNotificationIds, DEVICE_COURSE_DAYS, MAX_DEVICE_REMINDERS } from '@/utils/reminders'
 import { campusTime } from '@/utils/campusTime'
 
 const OWNER = 'campusmind-reminders'
 let queue: Promise<unknown> = Promise.resolve()
 let epoch = 0
+let rearmedUser: number | null = null
 let webItems: ReminderOccurrence[] = []
 let webUser: number | null = null
 let webStarted = Date.now()
@@ -64,24 +65,28 @@ async function cancelNativeManaged() {
 }
 export function cancelDeviceReminders(): Promise<void> {
   epoch++
+  rearmedUser = null
   webItems = []
   webUser = null
   memoryDelivered.clear()
   return serialize(async () => { if (isAndroid()) await cancelNativeManaged() })
 }
-export function syncDeviceReminders(userId: number, occurrences: ReminderOccurrence[], enabled: boolean, preserveCourses = false) {
+export function syncDeviceReminders(userId: number, occurrences: ReminderOccurrence[], enabled: boolean, preserveCourses = false, rearm = false) {
   const generation = epoch
   return serialize(async () => {
     if (generation !== epoch) return null
     const capability = await reminderCapability()
     if (generation !== epoch) return null
     if (!enabled || capability.permission !== 'granted') {
+      rearmedUser = null
       webItems = []
       if (isAndroid()) await cancelNativeManaged()
       return { capability, count: 0, until: '', truncated: false }
     }
     const today = campusTime(new Date()).date
-    const currentOccurrences = occurrences.filter((item) => item.kind !== 'course' || item.date === today)
+    const lastCourseDay = addCalendarDays(today, isAndroid() ? DEVICE_COURSE_DAYS - 1 : 0)
+    const inCourseWindow = (date: string) => date >= today && date <= lastCourseDay
+    const currentOccurrences = occurrences.filter((item) => item.kind !== 'course' || inCourseWindow(item.date))
     const upcoming = currentOccurrences.filter((item) => Date.parse(item.at) > Date.now())
     if (!isAndroid()) {
       const retained = preserveCourses && webUser === userId
@@ -93,20 +98,19 @@ export function syncDeviceReminders(userId: number, occurrences: ReminderOccurre
     }
     const { LocalNotifications: plugin } = await native()
     const pending = (await plugin.getPending()).notifications.filter((item) => item.extra?.owner === OWNER && !item.extra?.test)
-    const isTodaysCourse = (extra: Record<string, any> | undefined) => extra?.kind === 'course'
-      && (extra.date || /^course-\d+-(\d{4}-\d{2}-\d{2})$/.exec(extra.key || '')?.[1]) === today
-    // Old releases registered the whole term. Even an offline launch must remove
-    // those future-day course alarms; only today's existing alarms may survive.
-    const preserved = pending.filter((item) => preserveCourses && item.extra?.userId === userId && isTodaysCourse(item.extra))
+    const isCourseInWindow = (extra: Record<string, any> | undefined) => extra?.kind === 'course'
+      && inCourseWindow(extra.date || /^course-\d+-(\d{4}-\d{2}-\d{2})$/.exec(extra.key || '')?.[1] || '')
+    const preserved = pending.filter((item) => preserveCourses && item.extra?.userId === userId && isCourseInWindow(item.extra)).slice(0, MAX_DEVICE_REMINDERS)
     const limited = upcoming.slice(0, Math.max(0, MAX_DEVICE_REMINDERS - preserved.length))
-    const desired = allocateNotificationIds(userId, limited, preserved.map((item) => item.id)).map(({ id, occurrence }) => ({
+    const notification = (id: number, occurrence: ReminderOccurrence) => ({
       id, title: occurrence.title, body: occurrence.body, smallIcon: 'ic_stat_reminder', iconColor: '#496E52',
       schedule: { at: new Date(occurrence.at), allowWhileIdle: true },
       channelId: `campusmind-reminder-${occurrence.mode}-v1`, autoCancel: true,
       isExactNotification: capability.exact,
       extra: { owner: OWNER, userId, key: occurrence.key, date: occurrence.date,
         signature: JSON.stringify([occurrence, capability.exact]), kind: occurrence.kind }
-    }))
+    })
+    const desired = allocateNotificationIds(userId, limited, preserved.map((item) => item.id)).map(({ id, occurrence }) => notification(id, occurrence))
     const wanted = new Map(desired.map((item) => [item.id, item]))
     const keepIds = new Set(preserved.map((item) => item.id))
     const existing = new Map(pending.map((item) => [item.id, item]))
@@ -114,14 +118,27 @@ export function syncDeviceReminders(userId: number, occurrences: ReminderOccurre
       || item.extra?.userId !== userId))
     if (removed.length) await plugin.cancel({ notifications: removed.map(({ id }) => ({ id })) })
     if (generation !== epoch) return null
-    const added = desired.filter((item) => existing.get(item.id)?.extra?.signature !== item.extra.signature
+    // getPending reads persisted plugin records, not AlarmManager. Re-register
+    // on cold start/resume in case Android removed alarms but left these records.
+    const shouldRearm = rearm || rearmedUser !== userId
+    const added = desired.filter((item) => shouldRearm || existing.get(item.id)?.extra?.signature !== item.extra.signature
       || existing.get(item.id)?.extra?.userId !== userId)
+    if (shouldRearm) for (const item of preserved) {
+      try {
+        const [occurrence] = JSON.parse(item.extra?.signature ?? '[]') as [ReminderOccurrence]
+        if (occurrence?.kind === 'course' && occurrence.key === item.extra?.key && inCourseWindow(occurrence.date)
+          && Date.parse(occurrence.at) > Date.now() && ['sound', 'vibrate', 'silent'].includes(occurrence.mode)) {
+          added.push(notification(item.id, occurrence))
+        }
+      } catch { /* A damaged legacy record must not prevent all other alarms. */ }
+    }
     if (added.length) await plugin.schedule({ notifications: added })
     const activeKeys = new Set(currentOccurrences.map((item) => item.key))
     const obsolete = (await plugin.getDeliveredNotifications()).notifications.filter((item) =>
       item.extra?.owner === OWNER && !item.extra?.test && (item.extra?.userId !== userId
-        || (!activeKeys.has(item.extra?.key) && !(preserveCourses && isTodaysCourse(item.extra)))))
+        || (!activeKeys.has(item.extra?.key) && !(preserveCourses && isCourseInWindow(item.extra)))))
     if (obsolete.length) await plugin.removeDeliveredNotifications({ notifications: obsolete })
+    rearmedUser = userId
     return { capability, count: desired.length + preserved.length, until: limited.at(-1)?.at || '', truncated: upcoming.length > limited.length }
   })
 }
@@ -160,13 +177,13 @@ export async function tickWebReminders(now = Date.now()) {
     else await deliver()
   }
 }
-export async function testReminderNotification() {
+export async function testReminderNotification(delaySeconds = 5) {
   const capability = await reminderCapability()
   if (capability.permission !== 'granted') throw new Error('请先开启本机通知')
   if (isAndroid()) {
     await (await native()).LocalNotifications.schedule({ notifications: [{ id: 2_100_000_001, title: '智行提醒已就绪',
       body: '这是一条测试提醒，实际震动与声音遵循系统设置。', smallIcon: 'ic_stat_reminder',
-      schedule: { at: new Date(Date.now() + 5000), allowWhileIdle: true }, isExactNotification: capability.exact,
+      schedule: { at: new Date(Date.now() + Math.max(5, Math.min(120, delaySeconds)) * 1000), allowWhileIdle: true }, isExactNotification: capability.exact,
       channelId: 'campusmind-reminder-vibrate-v1', extra: { owner: OWNER, test: true } }] })
   } else {
     dispatchInAppReminder({ title: '智行提醒已就绪', body: '请保持网页打开，关闭网页后的提醒不能保证。' })

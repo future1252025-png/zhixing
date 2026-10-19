@@ -10,7 +10,7 @@ export default mergeConfig(
       environment: 'jsdom',
       setupFiles: ['./src/test/setup.ts'],
       clearMocks: true,
-      exclude: ['e2e/**', '**/node_modules/**', '**/dist/**', '**/test-results/**'],
+      exclude: ['e2e/**', 'functions/**', 'tools/amapProxy.test.ts', 'tools/webRouting.test.ts', 'tools/webProduction.test.mjs', '**/node_modules/**', '**/dist/**', '**/test-results/**'],
       coverage: {
         provider: 'v8',
         reporter: ['text', 'json-summary'],
