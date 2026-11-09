@@ -29,6 +29,19 @@ const courses: Course[] = [
 ]
 
 describe('courses store', () => {
+  it('ignores an old account request after attaching a different account', async () => {
+    let finish!: (value: Course[]) => void
+    vi.mocked(getCourses).mockReturnValueOnce(new Promise(resolve => { finish = resolve }))
+    const store = useCoursesStore()
+    store.attachUser(1)
+    const pending = store.ensureLoaded()
+    store.attachUser(2)
+    store.hydrate(2, [{ ...courses[0]!, id: 99, course_name: '另一个账号' }], true)
+    finish(courses)
+    await pending
+    expect(store.courses[0]?.id).toBe(99)
+    expect(store.loadedForUserId).toBe(2)
+  })
   it('preserves the last course snapshot when a background refresh goes offline', async () => {
     setActivePinia(createPinia())
     vi.mocked(getCourses).mockResolvedValueOnce(courses)

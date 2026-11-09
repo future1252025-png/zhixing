@@ -2,6 +2,8 @@
 
 日期：2026-10-19。项目：Cloudflare Pages `campusmind-web`；源码：GitHub `future1252025-png/zhixing`。
 
+2026-10-27 维护状态：网页已切换为 503 维护页，API Tunnel 已停止并移出开机启动，Pages 生产自动发布已关闭；平板 cloudflared 已从 2026.9.3 升级至 2026.10.4，升级后仍保持暂停。维护完成前不要重新启用 Tunnel 或自动发布。部署标识、验证与恢复步骤见 [公网服务维护暂停记录](maintenance-20261027.md)。
+
 ## 构建与本地验证
 
 正式构建使用 `frontend` 的 `build:web`，API 固定为 `https://api.campusmindapp.com`，地图使用主域名的 `/_AMapService` 代理。

@@ -3,6 +3,8 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.schemas.user import UserRead
+from app.schemas.course import CourseRead
+from app.schemas.semester import SemesterResponse
 
 
 def _normalize_student_id(value: str) -> str:
@@ -71,6 +73,7 @@ class RegisterRequest(StudentIdentityRequest):
 class LoginRequest(StudentIdentityRequest):
     password: str = Field(min_length=6, max_length=128)
     client_kind: Literal["web", "native"] = "web"
+    include_startup: bool = False
 
     @field_validator("password")
     @classmethod
@@ -78,11 +81,20 @@ class LoginRequest(StudentIdentityRequest):
         return _validate_password(value)
 
 
+class StartupSnapshot(BaseModel):
+    version: Literal[1] = 1
+    userId: int
+    savedAt: int
+    courses: list[CourseRead]
+    semester: SemesterResponse
+
+
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     expires_in: int
     refresh_token: str | None = None
+    startup: StartupSnapshot | None = None
 
 
 class RefreshResponse(TokenResponse):
@@ -92,6 +104,7 @@ class RefreshResponse(TokenResponse):
 class RefreshRequest(BaseModel):
     client_kind: Literal["web", "native"] = "web"
     refresh_token: str | None = Field(default=None, min_length=32, max_length=512)
+    include_startup: bool = False
 
 
 class LogoutRequest(RefreshRequest):

@@ -16,6 +16,7 @@ from app.schemas.auth import (
     RegisterRequest,
 )
 from app.schemas.user import UserProfileUpdate, UserRead
+from app.services.startup_service import read_startup_snapshot
 from app.services.auth_service import (
     DuplicateUserError,
     authenticate_user,
@@ -148,6 +149,7 @@ def login(
         expires_in=settings.access_token_expire_minutes * 60,
         refresh_token=refresh_token if payload.client_kind == "native" else None,
         user=UserRead.model_validate(user),
+        startup=read_startup_snapshot(session, user.id) if payload.include_startup else None,
     )
 
 
@@ -186,6 +188,7 @@ def refresh_access_token(
             next_refresh_token if payload.client_kind == "native" else None
         ),
         user=UserRead.model_validate(user),
+        startup=read_startup_snapshot(session, user.id) if payload.include_startup else None,
     )
 
 

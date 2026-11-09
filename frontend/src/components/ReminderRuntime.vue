@@ -62,7 +62,7 @@ async function sync(rearm = false) {
 }
 watch(() => auth.currentUser?.id, (userId, previous) => {
   syncRevision++
-  if (previous !== userId) { courses.courses = []; courses.invalidate(); reminders.reset(userId ?? null) }
+  if (previous !== userId) { courses.attachUser(userId ?? null); reminders.reset(userId ?? null) }
   if (userId) void refresh()
 }, { immediate: true })
 watch([occurrences, () => reminders.deviceEnabled, () => reminders.loaded], () => void sync(), { deep: true })

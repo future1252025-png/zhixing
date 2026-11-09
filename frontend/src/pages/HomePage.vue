@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import { showFailToast } from 'vant'
 import { useRoute, useRouter } from 'vue-router'
 
 import type { Building } from '@/api/buildings'
-import RealCampusMap from '@/components/RealCampusMap.vue'
+const RealCampusMap = defineAsyncComponent(() => import('@/components/RealCampusMap.vue').then(module => module.default))
 import TechIcon from '@/components/TechIcon.vue'
 import CourseCard from '@/components/course/CourseCard.vue'
 import SemesterGate from '@/components/course/SemesterGate.vue'
@@ -111,8 +111,13 @@ async function initializeHome() {
     }, 3600)
   }
   refreshRecentChats()
+  const homeData = loadHomeData()
   void loadBuildings()
-  await loadHomeData()
+  await homeData
+  await nextTick()
+  requestAnimationFrame(() => {
+    performance.mark('campusmind:course-visible')
+  })
 }
 
 function dismissLoginWelcome() {
@@ -428,7 +433,7 @@ onUnmounted(() => {
 }
 
 .today-card.home-motion-item {
-  animation-delay: 76ms;
+  animation: none;
 }
 
 @keyframes home-arrive {

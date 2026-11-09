@@ -1,13 +1,22 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, ref } from 'vue'
+import { computed, defineAsyncComponent, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import AppTabbar from '@/components/AppTabbar.vue'
 import WebUpdateNotice from '@/components/WebUpdateNotice.vue'
+import StartupCourses from '@/components/StartupCourses.vue'
+import { useAuthStore } from '@/stores/auth'
 const ReminderRuntime = defineAsyncComponent(() => import('@/components/ReminderRuntime.vue'))
 import { vantThemeVars as themeVars } from '@/styles/tokens'
 
 const route = useRoute()
+const auth = useAuthStore()
+const extrasReady = ref(false)
+let extrasFrame = 0
+onMounted(() => { extrasFrame = requestAnimationFrame(() => {
+  extrasFrame = requestAnimationFrame(() => { extrasReady.value = true })
+}) })
+onUnmounted(() => cancelAnimationFrame(extrasFrame))
 const router = useRouter()
 const tabbarRoutes = ['/home', '/courses', '/reminders', '/profile']
 const showTabbar = computed(() => tabbarRoutes.includes(route.path))
@@ -36,15 +45,16 @@ router.afterEach((to, from) => {
 <template>
   <van-config-provider theme="light" :theme-vars="themeVars">
     <div class="app-frame">
-      <main class="app-shell">
+      <StartupCourses v-if="auth.preview || auth.restoring" />
+      <main v-else class="app-shell">
         <router-view v-slot="{ Component, route: viewRoute }">
           <Transition :name="transitionName" mode="out-in">
             <component :is="Component" :key="viewRoute.path" :data-route-scroll-key="viewRoute.fullPath" />
           </Transition>
         </router-view>
       </main>
-      <AppTabbar v-if="showTabbar" />
-      <ReminderRuntime />
+      <AppTabbar v-if="showTabbar && !auth.preview && !auth.restoring" />
+      <ReminderRuntime v-if="extrasReady && auth.isAuthenticated && !auth.restoring" />
       <WebUpdateNotice />
     </div>
   </van-config-provider>

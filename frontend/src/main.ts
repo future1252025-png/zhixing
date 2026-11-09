@@ -16,10 +16,14 @@ import { setUnauthorizedHandler } from './api/errors'
 import { useAuthStore } from './stores/auth'
 import { installVanFieldFocusDelegation } from './utils/vanFieldFocus'
 import { installAndroidBackButton } from './utils/nativeBackButton'
+import { useCoursesStore } from './stores/courses'
+import { useSemesterStore } from './stores/semester'
+import { saveCourseSnapshot } from './utils/courseSnapshot'
 import './styles/base.css'
 import './styles/fresh.css'
 
 // 旧版本把课表浏览周当成全局真实周；新版本由后端学期状态统一裁决。
+performance.mark('campusmind:js-start')
 localStorage.removeItem('campusmind-selected-week')
 installVanFieldFocusDelegation()
 
@@ -51,9 +55,27 @@ async function bootstrap() {
     }
   })
 
-  // Access tokens are memory-only. Restore a valid session from the HttpOnly
-  // web cookie or Android Keystore before the router evaluates auth guards.
-  await useAuthStore(pinia).restoreSession()
+  const auth = useAuthStore(pinia)
+  const courses = useCoursesStore(pinia)
+  const semester = useSemesterStore(pinia)
+  const persist = () => {
+    const userId = auth.currentUser?.id
+    if (!userId || courses.loadedForUserId !== userId || semester.loadedForUserId !== userId
+      || !courses.loaded || !semester.semester || courses.loading || semester.loading || semester.saving
+      || courses.lastFetchedAt === null || semester.lastFetchedAt === null
+      || courses.errorMessage || semester.errorMessage) return
+    saveCourseSnapshot({ version: 1, userId, courses: courses.courses, semester: semester.semester,
+      savedAt: Math.min(courses.lastFetchedAt, semester.lastFetchedAt) })
+  }
+  courses.$subscribe(persist, { detached: true, flush: 'post' })
+  semester.$subscribe(persist, { detached: true, flush: 'post' })
+  auth.$subscribe(persist, { detached: true, flush: 'post' })
+
+  // Only local secure storage is awaited. The preview can paint while the
+  // router continues to wait for real server authentication.
+  await auth.prepareLocalPreview()
+  performance.mark('campusmind:cache-ready')
+  void auth.restoreSession()
 
   app.use(router)
   app.mount('#app')

@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import type { AxiosResponse } from 'axios'
 
 const session = vi.hoisted(() => ({
   accessToken: null as string | null,
@@ -23,9 +24,24 @@ vi.mock('@/auth/sessionTokens', () => ({
   setRefreshToken: session.setRefreshToken
 }))
 
-import { refreshAccessToken, sessionRequest } from './request'
+import { invalidateSessionRequests, refreshAccessToken, sessionRequest } from './request'
 
 describe('native session refresh', () => {
+  it('does not save credentials from a refresh invalidated by logout', async () => {
+    let finish!: (value: unknown) => void
+    const originalAdapter = sessionRequest.defaults.adapter
+    sessionRequest.defaults.adapter = vi.fn(config => new Promise<AxiosResponse>(resolve => { finish = data => resolve({ data,
+      status: 200, statusText: 'OK', headers: {}, config }) }))
+    try {
+      const pending = refreshAccessToken()
+      await vi.waitFor(() => expect(finish).toBeTypeOf('function'))
+      invalidateSessionRequests()
+      finish({ access_token: 'late-access', refresh_token: 'late-refresh' })
+      await expect(pending).rejects.toThrow('Session changed')
+      expect(session.setRefreshToken).not.toHaveBeenCalled()
+      expect(session.setAccessToken).not.toHaveBeenCalled()
+    } finally { sessionRequest.defaults.adapter = originalAdapter }
+  })
   beforeEach(() => {
     session.accessToken = null
     session.refreshToken = 'refresh-before-rotation'
@@ -58,7 +74,8 @@ describe('native session refresh', () => {
     expect(adapter.mock.calls[0]?.[0].data).toBe(
       JSON.stringify({
         client_kind: 'native',
-        refresh_token: 'refresh-before-rotation'
+        refresh_token: 'refresh-before-rotation',
+        include_startup: true
       })
     )
     expect(session.setRefreshToken).toHaveBeenCalledWith('refresh-after-rotation')

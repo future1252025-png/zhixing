@@ -40,7 +40,7 @@ beforeEach(() => {
   const plan = emptyReminderPlan()
   plan.course_settings.enabled = true
   mock.auth = reactive({ currentUser: { id: 1 } })
-  mock.courses = reactive({ courses: [...courses], loaded: true, errorMessage: '', invalidate: vi.fn(),
+  mock.courses = reactive({ courses: [...courses], loaded: true, errorMessage: '', invalidate: vi.fn(), attachUser: vi.fn(),
     ensureLoaded: vi.fn(async () => { mock.courses.courses = [...courses] }) })
   mock.semester = reactive({ semester: { start_date: '2026-08-31', total_weeks: 20, current_week: 19 },
     loadedForUserId: 1, load: vi.fn(async () => {}) })

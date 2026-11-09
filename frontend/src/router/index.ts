@@ -246,6 +246,7 @@ const router = createRouter({
 router.beforeEach(async (to, from) => {
   cancelPendingScroll?.()
   const authStore = useAuthStore()
+  if (authStore.restorePending) await authStore.restorePending
   attachRouteScrollOwner(authStore.currentUser?.id ?? null)
   if (from.matched.length && to.fullPath !== from.fullPath && (authStore.currentUser || !from.meta.requiresAuth)) {
     const snapshot = captureRouteScroll(from.fullPath)

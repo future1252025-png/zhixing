@@ -59,7 +59,8 @@ describe('auth api student identity contract', () => {
     expect(request.post).toHaveBeenCalledWith('/api/auth/login', {
       student_id: '999999999999991',
       password: 'secret123',
-      client_kind: 'web'
+      client_kind: 'web',
+      include_startup: true
     })
   })
 })

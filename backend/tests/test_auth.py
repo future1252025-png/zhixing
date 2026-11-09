@@ -70,6 +70,53 @@ def register_payload(student_id: str = "alice") -> dict[str, str]:
     }
 
 
+def test_optional_startup_snapshot_is_authenticated_and_account_scoped(client_and_session):
+    client, SessionLocal = client_and_session
+    for name in ("startup-alice", "startup-bob"):
+        assert client.post("/api/auth/register", json=register_payload(name)).status_code == 201
+    with SessionLocal() as session:
+        users = list(session.scalars(select(User).order_by(User.id)))
+        for user in users:
+            session.add(SemesterSetting(user_id=user.id, start_date=date(2026, 8, 31), total_weeks=20))
+            session.add(Course(user_id=user.id, course_name=f"course-{user.student_id}", weekday=1,
+                               start_time="09:00", end_time="10:00", room_name="", weeks="1-20", source_kind="import"))
+        session.commit()
+    credentials = {"student_id": "startup-alice", "password": "secret123", "client_kind": "native"}
+    legacy = client.post("/api/auth/login", json=credentials).json()
+    assert "startup" not in legacy
+    initial = client.post("/api/auth/login", json={**credentials, "include_startup": True}).json()
+    assert initial["startup"]["userId"] == initial["user"]["id"]
+    assert [c["course_name"] for c in initial["startup"]["courses"]] == ["course-startup-alice"]
+    assert initial["startup"]["semester"]["start_date"] == "2026-08-31"
+    refreshed = client.post("/api/auth/refresh", json={"client_kind": "native",
+        "refresh_token": initial["refresh_token"], "include_startup": True})
+    assert refreshed.status_code == 200
+    assert refreshed.json()["startup"]["courses"] == initial["startup"]["courses"]
+    assert refreshed.json()["refresh_token"] != initial["refresh_token"]
+    rejected = client.post("/api/auth/refresh", json={"client_kind": "native",
+        "refresh_token": "invalid-token-value-at-least-32-characters", "include_startup": True})
+    assert rejected.status_code == 401
+    assert "startup" not in rejected.json()
+
+
+def test_startup_read_failure_does_not_lose_rotated_session(client_and_session, monkeypatch):
+    from app.services import startup_service
+    client, _ = client_and_session
+    client.post("/api/auth/register", json=register_payload())
+    login = client.post("/api/auth/login", json={"student_id": "alice", "password": "secret123",
+        "client_kind": "native"}).json()
+    def fail(*_):
+        raise RuntimeError("temporary read failure")
+    monkeypatch.setattr(startup_service, "list_courses", fail)
+    result = client.post("/api/auth/refresh", json={"client_kind": "native",
+        "refresh_token": login["refresh_token"], "include_startup": True})
+    assert result.status_code == 200
+    assert "startup" not in result.json()
+    assert result.json()["refresh_token"] != login["refresh_token"]
+    assert client.post("/api/auth/refresh", json={"client_kind": "native",
+        "refresh_token": result.json()["refresh_token"]}).status_code == 200
+
+
 def test_register_success_hashes_password_and_hides_hash(
     client_and_session: tuple[TestClient, sessionmaker],
 ) -> None:

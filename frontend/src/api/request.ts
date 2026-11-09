@@ -1,6 +1,7 @@
 import axios, { AxiosHeaders, type InternalAxiosRequestConfig } from 'axios'
 
 import type { AuthUser } from './auth'
+import { bindCoursePreview, sessionFingerprint, type CourseSnapshot } from '@/utils/courseSnapshot'
 import {
   clearPendingWebLogout,
   clearSessionTokens,
@@ -24,15 +25,19 @@ type RefreshResponse = {
   expires_in: number
   refresh_token?: string
   user?: AuthUser
+  startup?: CourseSnapshot
 }
 
 export type SessionRestoreResult = {
   restored: boolean
   user: AuthUser | null
+  startup?: CourseSnapshot
+  rejected?: boolean
 }
 
 type RetryableRequestConfig = InternalAxiosRequestConfig & {
   _retriedAfterRefresh?: boolean
+  _sessionRevision?: number
 }
 
 export function resolveApiBaseURL(
@@ -65,6 +70,11 @@ const request = axios.create({
 })
 
 let refreshPromise: Promise<RefreshResponse> | null = null
+let sessionRevision = 0
+export function invalidateSessionRequests(): void {
+  sessionRevision++
+  refreshPromise = null
+}
 
 function isAuthBootstrapRequest(url: string | undefined): boolean {
   return Boolean(
@@ -75,6 +85,7 @@ function isAuthBootstrapRequest(url: string | undefined): boolean {
 }
 
 async function performRefresh(): Promise<RefreshResponse> {
+  const revision = sessionRevision
   const native = isNativeAuthClient()
   const storedRefreshToken = native ? await getRefreshToken() : null
   if (native && !storedRefreshToken) {
@@ -83,14 +94,23 @@ async function performRefresh(): Promise<RefreshResponse> {
 
   const response = await sessionRequest.post<RefreshResponse>('/api/auth/refresh', {
     client_kind: native ? 'native' : 'web',
-    refresh_token: storedRefreshToken
+    refresh_token: storedRefreshToken,
+    include_startup: true
   })
+  if (revision !== sessionRevision) throw new axios.CanceledError('Session changed')
   if (native) {
     if (!response.data.refresh_token) {
       throw new Error('The backend did not rotate the native refresh token')
     }
     await setRefreshToken(response.data.refresh_token)
+    if (response.data.user) {
+      try {
+        const fingerprint = await sessionFingerprint(response.data.refresh_token)
+        if (revision === sessionRevision) bindCoursePreview(response.data.user, fingerprint)
+      } catch { /* Optional preview binding must not fail token rotation. */ }
+    }
   }
+  if (revision !== sessionRevision) throw new axios.CanceledError('Session changed')
   setAccessToken(response.data.access_token)
   return response.data
 }
@@ -98,9 +118,10 @@ async function performRefresh(): Promise<RefreshResponse> {
 function refreshSession(): Promise<RefreshResponse> {
   if (!refreshPromise) {
     const pending = performRefresh()
-    refreshPromise = pending.finally(() => {
-      refreshPromise = null
+    const shared = pending.finally(() => {
+      if (refreshPromise === shared) refreshPromise = null
     })
+    refreshPromise = shared
   }
   return refreshPromise
 }
@@ -114,6 +135,7 @@ function isRejectedRefreshCredential(error: unknown): boolean {
 }
 
 export async function restoreSession(): Promise<SessionRestoreResult> {
+  const revision = sessionRevision
   if (!isNativeAuthClient() && hasPendingWebLogout()) {
     try {
       await sessionRequest.post('/api/auth/logout', {
@@ -131,14 +153,16 @@ export async function restoreSession(): Promise<SessionRestoreResult> {
     const restoredSession = await refreshSession()
     return {
       restored: true,
-      user: restoredSession.user ?? null
+      user: restoredSession.user ?? null,
+      ...(restoredSession.startup ? { startup: restoredSession.startup } : {})
     }
   } catch (error) {
+    if (revision !== sessionRevision) return { restored: false, user: null }
     setAccessToken(null)
     if (isRejectedRefreshCredential(error)) {
       await clearSessionTokens()
     }
-    return { restored: false, user: null }
+    return { restored: false, user: null, ...(isRejectedRefreshCredential(error) ? { rejected: true } : {}) }
   }
 }
 
@@ -161,6 +185,8 @@ export async function revokeSession(): Promise<void> {
 }
 
 request.interceptors.request.use((config) => {
+  const tracked = config as RetryableRequestConfig
+  tracked._sessionRevision ??= sessionRevision
   const token = getAccessToken()
   if (token) {
     config.headers.set('Authorization', `Bearer ${token}`)
@@ -185,6 +211,7 @@ request.interceptors.response.use(
         'status' in response &&
         response.status === 401
     )
+    if (config?._sessionRevision !== undefined && config._sessionRevision !== sessionRevision) return Promise.reject(error)
 
     if (
       unauthorized &&

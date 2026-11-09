@@ -77,6 +77,16 @@ export const useSemesterStore = defineStore('semester', {
     totalWeeks: (state): number | null => state.semester?.total_weeks ?? null
   },
   actions: {
+    hydrate(userId: number, semester: SemesterState, fresh = false): void {
+      this.attachUser(userId)
+      this.requestRevision++
+      this.pendingRequest = null
+      this.loading = false
+      this.semester = semesterAt(semester, new Date())
+      this.lastFetchedAt = fresh ? Date.now() : null
+      this.errorMessage = ''
+      this.browsingWeek = boundedWeek(this.browsingWeek, semester.total_weeks ?? DEFAULT_MAX_WEEKS)
+    },
     attachUser(userId: number): void {
       if (this.loadedForUserId === userId) return
       this.reset()
