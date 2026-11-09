@@ -4,7 +4,11 @@ import { useRoute, useRouter } from 'vue-router'
 import { getBuildingDetail, type Building } from '@/api/buildings'
 import RealCampusMap from '@/components/RealCampusMap.vue'
 import TechIcon from '@/components/TechIcon.vue'
-import { formatBuildingDisplayName } from '@/utils/buildings'
+import {
+  formatBuildingDescription,
+  formatBuildingDisplayName,
+  formatBuildingWalkHint
+} from '@/utils/buildings'
 import { goBack } from '@/utils/navigation'
 
 const route = useRoute()
@@ -29,12 +33,12 @@ async function loadBuilding() {
 }
 
 function openMessages() { router.push(`/buildings/${buildingId.value}/chats`) }
-function openSchedule() { router.push({ path: '/schedule', query: { destination: String(buildingId.value) } }) }
+function openReminder() { router.push({ path: '/reminders', query: { title: `到${building.value?.name || '这个地点'}办事` } }) }
 onMounted(loadBuilding)
 </script>
 
 <template>
-  <section class="page building-detail-page">
+  <section class="page building-detail-page" :data-route-content-ready="!loading">
     <van-nav-bar title="校园地点" left-arrow @click-left="goBack(router, '/home')" />
     <div class="page-content building-content">
       <div v-if="loading" class="place-loading" role="status" aria-live="polite">
@@ -63,17 +67,18 @@ onMounted(loadBuilding)
           <div class="place-copy">
             <span class="fresh-kicker">{{ building.type }}</span>
             <h1>{{ formatBuildingDisplayName(building.name) }}</h1>
-            <p>{{ building.description }}</p>
+            <p>{{ formatBuildingDescription(building.description) }}</p>
           </div>
           <div class="place-walk">
             <span><TechIcon name="guide" :size="18" /></span>
-            <div><small>步行提示</small><strong>{{ building.walk_hint || '校园内步行可达' }}</strong></div>
+            <div><small>步行提示</small><strong>{{ formatBuildingWalkHint(building.walk_hint) }}</strong></div>
           </div>
         </header>
 
-        <section v-reveal="{ from: 'right', distance: 40 }" class="place-map fresh-card">
+        <section class="place-map fresh-card">
           <div class="fresh-section-heading">
-            <div><h2>它在校园的这里</h2><p>拖动和缩放地图查看更多</p></div>
+            <div><h2>它在校园的这里</h2><p>使用原生地图查看周边地点</p></div>
+            <van-button size="small" @click="router.push({ path: '/map', query: { building: building.id } })">展开选楼</van-button>
           </div>
           <RealCampusMap
             :buildings="[building]"
@@ -81,8 +86,8 @@ onMounted(loadBuilding)
             title=""
             subtitle=""
             height="330px"
-            selected-action-text="打开频道"
-            @building-click="openMessages"
+            :interactive="false"
+            @map-click="router.push({ path: '/map', query: { building: building.id } })"
           />
         </section>
 
@@ -106,9 +111,9 @@ onMounted(loadBuilding)
             <span><strong>看看地点频道</strong><small>找到同在这里的人和留言</small></span>
             <TechIcon name="arrow" :size="19" />
           </button>
-          <button type="button" class="route-action" @click="openSchedule">
-            <span><TechIcon name="route" :size="20" /></span>
-            <span><strong>准备去这里</strong><small>预览步行路线和出发时间</small></span>
+          <button type="button" class="route-action" @click="openReminder">
+            <span><TechIcon name="bell" :size="20" /></span>
+            <span><strong>添加事项提醒</strong><small>到时间提醒我来这里办事</small></span>
             <TechIcon name="arrow" :size="19" />
           </button>
         </section>

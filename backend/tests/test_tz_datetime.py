@@ -25,6 +25,7 @@ def session_factory(tmp_path: Path) -> Generator[sessionmaker, None, None]:
 
 def make_user(**overrides) -> User:
     values = {
+        "student_id": "tz_user",
         "username": "tz_user",
         "password_hash": "hash",
         "nickname": "TZ",

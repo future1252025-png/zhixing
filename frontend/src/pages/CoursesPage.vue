@@ -3,15 +3,16 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { showConfirmDialog, showFailToast, showSuccessToast } from 'vant'
 import { useRouter } from 'vue-router'
 
-import { deleteCourse } from '@/api/courses'
+import { deleteCourse, deleteMakeupBatch } from '@/api/courses'
 import { extractBusinessError } from '@/api/errors'
 import TechIcon from '@/components/TechIcon.vue'
-import SemesterSettingsCard from '@/components/course/SemesterSettingsCard.vue'
+import { useCampusClock } from '@/composables/useCampusClock'
+import { campusTime, semesterAt } from '@/utils/campusTime'
 import { useAuthStore } from '@/stores/auth'
 import { useCoursesStore } from '@/stores/courses'
 import { useSemesterStore } from '@/stores/semester'
 import type { Course } from '@/types/course'
-import type { SemesterUpdate } from '@/types/semester'
+import { createScrollPositionGuard } from '@/utils/scrollPositionGuard'
 import {
   buildCourseCreateQuery,
   buildCourseColorMap,
@@ -19,8 +20,7 @@ import {
   filterCoursesByWeek,
   formatCourseLocation,
   formatTimetableCourseLocation,
-  getCourseDisplaySlot,
-  getCourseTimeSlots,
+  getTimetableTimeSlots,
   getWeekdayLabel,
   getQuickWeekOptions,
   getTeachingWeekOptions,
@@ -31,20 +31,25 @@ const router = useRouter()
 const authStore = useAuthStore()
 const coursesStore = useCoursesStore()
 const semesterStore = useSemesterStore()
-const courses = ref<Course[]>([])
-const loading = ref(true)
+if (authStore.currentUser) semesterStore.attachUser(authStore.currentUser.id)
+const courses = computed(() => coursesStore.courses)
+const loading = computed(() => !coursesStore.loaded && !coursesStore.errorMessage)
+const now = useCampusClock()
+const currentSemester = computed(() => semesterAt(semesterStore.semester, now.value))
+const overviewReady = computed(() => Boolean(semesterStore.semester && coursesStore.loaded))
 const deletingId = ref<number | null>(null)
 const activeCourse = ref<Course | null>(null)
 const actionSheetVisible = ref(false)
 const timetableGridRef = ref<HTMLElement | null>(null)
 const timetableTransitionFrameRef = ref<HTMLElement | null>(null)
+const weekHeadRef = ref<HTMLElement | null>(null)
+const weekHeadStuck = ref(false)
 const courseCardHeight = ref(170)
 const weekStageLockedHeight = ref<number | null>(null)
 const weekTransitionName = ref<'week-forward' | 'week-backward'>('week-forward')
 const errorMessage = ref('')
 const semesterErrorMessage = ref('')
-let weekScrollTop: number | null = null
-let weekScrollRestoreFrame: number | undefined
+const weekScrollGuard = createScrollPositionGuard()
 const selectedWeek = computed({
   get: () => semesterStore.browsingWeek,
   set: (week: number) => {
@@ -63,13 +68,19 @@ const selectedWeek = computed({
 const weekOptions = computed(() =>
   getTeachingWeekOptions(semesterStore.totalWeeks ?? undefined)
 )
-const timeSlots = getCourseTimeSlots()
-const courseActionOptions = [
+const courseActionOptions = computed(() => activeCourse.value?.makeup ? [
+  { name: '查看地点' }, { name: '修改这次补课' },
+  { name: '取消这次补课', color: '#b65f56' },
+  { name: '撤销整批补课', color: '#b65f56' }
+] : [
   { name: '查看地点', subname: '打开地图与地点频道' },
   { name: '编辑课程' },
+  { name: '添加补课', subname: '沿用这门课，只选日期和时间' },
   { name: '删除课程', color: '#b65f56' }
-]
-const visibleCourses = computed(() => filterCoursesByWeek(courses.value, selectedWeek.value))
+])
+const visibleCourses = computed(() => filterCoursesByWeek(courses.value, selectedWeek.value, semesterStore.semester))
+// A change may start mid-week: include both dated clocks so no course disappears.
+const timeSlots = computed(() => getTimetableTimeSlots(semesterStore.semester?.time_rules?.length ? visibleCourses.value : courses.value))
 const pendingScheduleCourses = computed(() =>
   visibleCourses.value
     .filter((course) => !course.start_time || !course.end_time)
@@ -78,9 +89,8 @@ const pendingScheduleCourses = computed(() =>
 const timetableCoursesByCell = computed(() => {
   const coursesByCell = new Map<string, Course[]>()
   for (const course of visibleCourses.value) {
-    const slot = getCourseDisplaySlot(course)
-    if (!slot) continue
-    const key = `${slot.section}-${course.weekday}`
+    if (!course.start_time || !course.end_time) continue
+    const key = `${course.start_time}-${course.end_time}-${course.weekday}`
     const cellCourses = coursesByCell.get(key) ?? []
     cellCourses.push(course)
     cellCourses.sort((left, right) =>
@@ -108,21 +118,13 @@ const courseColorMap = computed(() => buildCourseColorMap(courses.value))
 const courseCountText = computed(() =>
   visibleCourses.value.length > 0 ? `${visibleCourses.value.length} 门课` : '本周暂无课'
 )
-const todayWeekday = computed(() => {
-  const day = new Date().getDay()
-  return day === 0 ? 7 : day
-})
+const todayWeekday = computed(() => campusTime(now.value).weekday)
 // 当前时刻（分钟精度），驱动"此刻正在上的节次"呼吸高亮
-const nowMinutes = ref(getMinutesOfDay())
-let nowTimer: ReturnType<typeof setInterval> | undefined
+const nowMinutes = computed(() => campusTime(now.value).minutes)
 let timetableResizeObserver: ResizeObserver | undefined
 let courseHeightFrame: number | undefined
+let weekHeadScrollFrame: number | undefined
 let observedGridWidth = 0
-
-function getMinutesOfDay(): number {
-  const now = new Date()
-  return now.getHours() * 60 + now.getMinutes()
-}
 
 function toMinutes(time: string): number {
   const [hour, minute] = time.split(':').map(Number)
@@ -189,7 +191,7 @@ const selectedWeekDateRange = computed(() => {
 })
 
 function isTodayColumn(weekday: number): boolean {
-  return semesterStore.currentWeek === selectedWeek.value && weekday === todayWeekday.value
+  return currentSemester.value.current_week === selectedWeek.value && weekday === todayWeekday.value
 }
 
 function getErrorMessage(error: unknown): string {
@@ -197,18 +199,15 @@ function getErrorMessage(error: unknown): string {
 }
 
 async function loadCourses() {
-  loading.value = true
   errorMessage.value = ''
   try {
-    courses.value = await coursesStore.ensureLoaded()
+    await coursesStore.ensureLoaded()
   } catch (error) {
     errorMessage.value = getErrorMessage(error)
-  } finally {
-    loading.value = false
   }
 }
 
-async function loadSemester() {
+async function loadSemester(force = false) {
   const userId = authStore.currentUser?.id
   if (!userId) {
     semesterErrorMessage.value = '登录信息尚未加载完成'
@@ -216,21 +215,9 @@ async function loadSemester() {
   }
   semesterErrorMessage.value = ''
   try {
-    await semesterStore.load(userId)
+    await semesterStore.load(userId, force)
   } catch (error) {
     semesterErrorMessage.value = getErrorMessage(error)
-  }
-}
-
-async function saveSemesterSetting(payload: SemesterUpdate) {
-  semesterErrorMessage.value = ''
-  try {
-    await semesterStore.save(payload)
-    showSuccessToast('学期设置已保存')
-  } catch (error) {
-    const message = getErrorMessage(error)
-    semesterErrorMessage.value = message
-    showFailToast(message)
   }
 }
 
@@ -247,15 +234,23 @@ function openImportPage() {
 }
 
 function openEditPage(courseId: number) {
-  router.push(`/courses/${courseId}/edit`)
+  router.push(courses.value.find(course => course.id === courseId)?.makeup ? `/courses/makeups?edit=${courseId}` : `/courses/${courseId}/edit`)
+}
+
+function openMakeup(course?: Course) {
+  const date = selectedWeekDates.value[5]?.iso
+  router.push({ path: '/courses/makeups', query: {
+    ...(date ? { date } : {}),
+    ...(course ? { source: String(course.id), from: selectedWeekDates.value[course.weekday - 1]?.iso } : {})
+  } })
 }
 
 function openCreateForSlot(weekday: number, slot: { start_time: string; end_time: string }) {
   openCreatePage(buildCourseCreateQuery(weekday, slot, selectedWeek.value))
 }
 
-function getCellCourses(weekday: number, slot: { section: string }) {
-  return timetableCoursesByCell.value.get(`${slot.section}-${weekday}`) ?? []
+function getCellCourses(weekday: number, slot: { start_time: string; end_time: string }) {
+  return timetableCoursesByCell.value.get(`${slot.start_time}-${slot.end_time}-${weekday}`) ?? []
 }
 
 function getCourseStyle(course: Course): Record<string, string> {
@@ -284,46 +279,57 @@ function scheduleCourseCardHeightSync() {
   })
 }
 
+function syncWeekHeadStuckState() {
+  const weekHead = weekHeadRef.value
+  if (!weekHead || !document.documentElement.classList.contains('capacitor-android')) {
+    weekHeadStuck.value = false
+    return
+  }
+
+  const stickyTop = Number.parseFloat(window.getComputedStyle(weekHead).top) || 0
+  weekHeadStuck.value = window.scrollY > 0 && weekHead.getBoundingClientRect().top <= stickyTop + 0.5
+}
+
+function scheduleWeekHeadStuckSync() {
+  if (weekHeadScrollFrame !== undefined) return
+  weekHeadScrollFrame = window.requestAnimationFrame(() => {
+    weekHeadScrollFrame = undefined
+    syncWeekHeadStuckState()
+  })
+}
+
 function prepareWeekTransition() {
-  weekScrollTop = window.scrollY
+  weekScrollGuard.begin()
   weekStageLockedHeight.value =
     timetableTransitionFrameRef.value?.getBoundingClientRect().height ?? null
-  if (weekScrollRestoreFrame !== undefined) {
-    window.cancelAnimationFrame(weekScrollRestoreFrame)
-    weekScrollRestoreFrame = undefined
-  }
 }
 
 function restoreWeekScrollPosition() {
-  if (weekScrollTop === null) return
-  window.scrollTo({
-    left: window.scrollX,
-    top: weekScrollTop,
-    behavior: 'auto'
-  })
+  weekScrollGuard.restore()
 }
 
 function scheduleWeekScrollRestore() {
-  if (weekScrollTop === null || weekScrollRestoreFrame !== undefined) return
-  weekScrollRestoreFrame = window.requestAnimationFrame(() => {
-    weekScrollRestoreFrame = undefined
-    restoreWeekScrollPosition()
-  })
+  weekScrollGuard.scheduleRestore()
+}
+
+function releaseWeekScrollPosition() {
+  // Once the user starts a new gesture, their new position is authoritative.
+  // In particular, the transition's delayed after-enter callback must not
+  // restore the offset captured before they swiped or scrolled.
+  weekScrollGuard.release()
+}
+
+function handleWeekScrollKey(event: KeyboardEvent) {
+  if (['ArrowDown', 'ArrowUp', 'PageDown', 'PageUp', 'Home', 'End', ' '].includes(event.key)) {
+    releaseWeekScrollPosition()
+  }
 }
 
 function finishWeekTransition() {
   restoreWeekScrollPosition()
   weekStageLockedHeight.value = null
   void nextTick().then(() => {
-    if (weekScrollTop === null) return
-    if (weekScrollRestoreFrame !== undefined) {
-      window.cancelAnimationFrame(weekScrollRestoreFrame)
-    }
-    weekScrollRestoreFrame = window.requestAnimationFrame(() => {
-      weekScrollRestoreFrame = undefined
-      restoreWeekScrollPosition()
-      weekScrollTop = null
-    })
+    weekScrollGuard.scheduleRestore(true)
   })
 }
 
@@ -350,13 +356,28 @@ async function handleCourseAction(action: { name: string }) {
   if (action.name === '删除课程') {
     await confirmDelete(course)
   }
+  if (action.name === '添加补课') openMakeup(course)
+  if (action.name === '修改这次补课') openEditPage(course.id)
+  if (action.name === '取消这次补课') await confirmDelete(course)
+  if (action.name === '撤销整批补课' && course.makeup) {
+    const batch = courses.value.filter(item => item.makeup?.batch_id === course.makeup!.batch_id)
+    try { await showConfirmDialog({ title: `撤销这批 ${batch.length} 门补课？`, message: '对应补课和通知会取消；原日期停课的课程将恢复。' }) } catch { return }
+    try {
+      await deleteMakeupBatch(course.makeup.batch_id)
+      coursesStore.invalidate()
+      await loadCourses()
+      showSuccessToast('已撤销这批补课')
+    } catch (cause) { showFailToast(getErrorMessage(cause)) }
+  }
 }
 
 async function confirmDelete(course: Course) {
   try {
     await showConfirmDialog({
-      title: '删除课程',
-      message: `确认删除「${course.course_name}」吗？`
+      title: course.makeup ? '取消这次补课' : '删除课程',
+      message: course.makeup
+        ? `取消 ${course.makeup.date}「${course.course_name}」及对应提醒？${course.makeup.cancel_source ? '原日期这门课将恢复。' : '其他课程不受影响。'}`
+        : `确认删除「${course.course_name}」吗？`
     })
   } catch {
     return
@@ -366,7 +387,7 @@ async function confirmDelete(course: Course) {
   try {
     await deleteCourse(course.id)
     coursesStore.invalidate()
-    showSuccessToast('课程已删除')
+    showSuccessToast(course.makeup ? '已取消这次补课' : '课程已删除')
     await loadCourses()
   } catch (error) {
     showFailToast(getErrorMessage(error))
@@ -405,47 +426,49 @@ watch(timetableGridRef, (grid) => {
 
 onMounted(() => {
   void Promise.all([loadCourses(), loadSemester()])
-  nowTimer = setInterval(() => {
-    nowMinutes.value = getMinutesOfDay()
-  }, 60_000)
+  window.addEventListener('scroll', scheduleWeekHeadStuckSync, { passive: true })
+  window.addEventListener('resize', scheduleWeekHeadStuckSync)
+  window.addEventListener('touchstart', releaseWeekScrollPosition, { passive: true })
+  window.addEventListener('wheel', releaseWeekScrollPosition, { passive: true })
+  window.addEventListener('keydown', handleWeekScrollKey)
+  void nextTick().then(scheduleWeekHeadStuckSync)
 })
 
 onBeforeUnmount(() => {
-  if (nowTimer) clearInterval(nowTimer)
+  window.removeEventListener('scroll', scheduleWeekHeadStuckSync)
+  window.removeEventListener('resize', scheduleWeekHeadStuckSync)
+  window.removeEventListener('touchstart', releaseWeekScrollPosition)
+  window.removeEventListener('wheel', releaseWeekScrollPosition)
+  window.removeEventListener('keydown', handleWeekScrollKey)
   timetableResizeObserver?.disconnect()
   if (courseHeightFrame !== undefined) {
     window.cancelAnimationFrame(courseHeightFrame)
   }
-  if (weekScrollRestoreFrame !== undefined) {
-    window.cancelAnimationFrame(weekScrollRestoreFrame)
+  weekScrollGuard.release()
+  if (weekHeadScrollFrame !== undefined) {
+    window.cancelAnimationFrame(weekHeadScrollFrame)
   }
 })
 </script>
 
 <template>
-  <section class="page courses-page">
+  <section class="page courses-page" :data-route-content-ready="!loading && Boolean(semesterStore.semester || semesterErrorMessage || semesterStore.errorMessage)">
     <van-nav-bar title="我的课表" />
     <div class="page-content courses-content">
-      <div v-if="semesterStore.loading" class="semester-loading fresh-card" aria-live="polite">
+      <div v-if="semesterStore.loading && !semesterStore.semester" class="semester-loading fresh-card" aria-live="polite">
         <i aria-hidden="true"></i>
         <span>正在读取真实教学周...</span>
       </div>
       <van-empty
-        v-else-if="semesterErrorMessage && !semesterStore.semester"
+        v-else-if="(semesterErrorMessage || semesterStore.errorMessage) && !semesterStore.semester"
         image="error"
-        :description="semesterErrorMessage"
+        :description="semesterErrorMessage || semesterStore.errorMessage"
       >
-        <van-button type="primary" size="small" @click="loadSemester">重新加载学期</van-button>
+        <van-button type="primary" size="small" @click="loadSemester(true)">重新加载学期</van-button>
       </van-empty>
-      <SemesterSettingsCard
-        v-else
-        id="semester-settings"
-        v-reveal="{ from: 'right', distance: 32 }"
-        :semester="semesterStore.semester"
-        :saving="semesterStore.saving"
-        @save="saveSemesterSetting"
-      />
-
+      <p v-if="semesterStore.semester && semesterStore.errorMessage" class="semester-sync-hint" role="status">
+        学期暂未同步，当前按已保存设置显示。<button type="button" @click="loadSemester(true)">重试</button>
+      </p>
       <header
         v-reveal="{ from: 'left', distance: 38, stagger: 55 }"
         class="course-hero"
@@ -471,6 +494,7 @@ onBeforeUnmount(() => {
         </div>
       </header>
 
+      <div id="current-week" :data-scroll-ready="overviewReady">
       <section
         v-reveal="{ from: 'right', distance: 36, stagger: 54 }"
         class="week-book fresh-card"
@@ -493,6 +517,7 @@ onBeforeUnmount(() => {
             </select>
             <TechIcon name="chevron-down" :size="15" />
           </label>
+          <button type="button" class="makeup-shortcut" :disabled="!coursesStore.loaded" @click="openMakeup()"><TechIcon name="calendar" :size="17" />补课</button>
         </div>
 
         <div class="week-switcher">
@@ -510,6 +535,7 @@ onBeforeUnmount(() => {
           </button>
         </div>
       </section>
+      </div>
 
       <div v-if="loading" class="course-loading" aria-live="polite">
         <span><i></i><i></i><i></i></span>
@@ -568,7 +594,7 @@ onBeforeUnmount(() => {
               <span>{{ formatCourseLocation(course) }}</span>
             </div>
             <footer>
-              <button type="button" @click="openEditPage(course.id)">补全</button>
+              <button type="button" @click="openEditPage(course.id)">补全时间</button>
               <button
                 type="button"
                 class="pending-delete"
@@ -586,7 +612,7 @@ onBeforeUnmount(() => {
           class="timetable-shell fresh-card"
         >
         <header class="table-heading">
-          <div><h2>第 {{ selectedWeek }} 周课表</h2><p>{{ selectedWeekDateRange }}</p></div>
+          <div><h2>第 {{ selectedWeek }} 周课表</h2><p>{{ selectedWeekDateRange }}</p><p class="time-axis-note">时间按已保存课程显示；空白参考时段可自由修改。</p></div>
           <span><i></i> {{ courseCountText }}</span>
         </header>
 
@@ -610,7 +636,12 @@ onBeforeUnmount(() => {
               @touchend.passive="handleWeekTouchEnd"
             >
               <div class="timetable-viewport" aria-label="完整展示周一到周日的周课表">
-              <div class="week-head" aria-hidden="true">
+              <div
+                ref="weekHeadRef"
+                class="week-head"
+                :class="{ 'is-stuck': weekHeadStuck }"
+                aria-hidden="true"
+              >
                 <div class="time-head"><span>时间</span></div>
                 <div
                   v-for="weekday in WEEKDAYS"
@@ -637,18 +668,18 @@ onBeforeUnmount(() => {
               >
                 <section
                   v-for="slot in timeSlots"
-                  :key="slot.section"
+                  :key="`${slot.start_time}-${slot.end_time}`"
                   class="timetable-slot"
                 >
                   <header class="time-cell">
-                    <strong>{{ slot.section }}</strong>
+                    <strong>{{ slot.isReference ? '参考' : slot.section }}</strong>
                     <span><time>{{ slot.start_time }}</time><i></i><time>{{ slot.end_time }}</time></span>
                   </header>
 
                   <div class="slot-days">
                     <div
                       v-for="weekday in WEEKDAYS"
-                      :key="`${slot.section}-${weekday.value}`"
+                      :key="`${slot.start_time}-${slot.end_time}-${weekday.value}`"
                       class="course-cell"
                       :class="{
                         'has-course': getCellCourses(weekday.value, slot).length > 0,
@@ -670,6 +701,7 @@ onBeforeUnmount(() => {
                         v-for="course in getCellCourses(weekday.value, slot)"
                         :key="course.id"
                         class="timetable-course"
+                        :data-makeup-date="course.makeup?.date"
                         :class="{ 'is-deleting': deletingId === course.id }"
                         :style="getCourseStyle(course)"
                       >
@@ -681,6 +713,7 @@ onBeforeUnmount(() => {
                           @click="openCourseActions(course)"
                         >
                           <strong>{{ course.course_name }}</strong>
+                          <span v-if="course.makeup" class="makeup-badge">补课</span>
                           <span v-if="course.teacher" class="compact-teacher">
                             {{ course.teacher }}
                           </span>
@@ -688,7 +721,7 @@ onBeforeUnmount(() => {
                             <span class="location-mark" aria-hidden="true">@</span>
                             <span>{{ formatTimetableCourseLocation(course) }}</span>
                           </span>
-                          <time v-if="!courseUsesStandardSlotTime(course, slot)" class="exception-time">
+                          <time v-if="course.makeup || !courseUsesStandardSlotTime(course, slot)" class="exception-time">
                             {{ course.start_time }}—{{ course.end_time }}
                           </time>
                         </button>
@@ -719,6 +752,13 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.makeup-shortcut { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 44px; padding: 8px 12px; border: 1px solid #d7e1d0; border-radius: 13px; background: #f5f8ef; color: #486b4b; white-space: nowrap; font: inherit; cursor: pointer; }
+.makeup-badge { align-self: center; color: #5b4b25; background: #f4e7be; border-radius: 5px; padding: 2px 3px; font-size: clamp(9px, 1.35vw, 11px); white-space: nowrap; }
+@media (max-width: 480px) { .makeup-shortcut { padding: 8px; font-size: 13px; }.makeup-shortcut :deep(svg) { display: none; } }
+#current-week { scroll-margin-top: calc(var(--app-safe-area-top, 0px) + var(--nav-height, 58px) + 18px); }
+:global(html.capacitor-android #current-week) { scroll-margin-top: calc(var(--app-native-nav-inset-top, 0px) + 12px); }
+.semester-sync-hint { color: #6d7666; font-size: 12px; line-height: 1.7; }
+.semester-sync-hint button { min-height: 44px; padding: 8px 12px; border: 0; background: transparent; color: #3d6144; font: inherit; text-decoration: underline; cursor: pointer; }
 .courses-page {
   overflow-anchor: none;
   background:
@@ -892,7 +932,7 @@ onBeforeUnmount(() => {
 
 .week-book-heading label {
   display: flex;
-  min-height: 37px;
+  min-height: 44px;
   align-items: center;
   gap: 6px;
   border-radius: 13px;
@@ -1170,7 +1210,7 @@ onBeforeUnmount(() => {
 }
 
 .pending-courses article button {
-  min-height: 42px;
+  min-height: 44px;
   border: 1px solid var(--fresh-line-strong);
   border-radius: 12px;
   background: var(--fresh-paper);
@@ -1223,7 +1263,10 @@ onBeforeUnmount(() => {
   color: var(--fresh-green-dark);
   font-size: 12px;
   font-weight: 700;
+  flex-shrink: 0;
 }
+
+.table-heading .time-axis-note { font-family: inherit; line-height: 1.5; }
 
 .table-heading > span i {
   width: 6px;
@@ -1607,8 +1650,8 @@ onBeforeUnmount(() => {
 .week-backward-enter-active,
 .week-backward-leave-active {
   transition:
-    opacity 900ms ease,
-    transform 1150ms var(--fresh-spring);
+    opacity 220ms ease,
+    transform 320ms var(--fresh-spring);
 }
 
 .week-forward-leave-active,
@@ -1686,6 +1729,7 @@ onBeforeUnmount(() => {
   .course-cell {
     padding: 0;
   }
+
 }
 
 @media (max-width: 370px) {

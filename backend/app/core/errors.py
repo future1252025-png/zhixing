@@ -35,16 +35,20 @@ class BusinessError(Exception):
 """Stable API error details (Chinese, user-facing)."""
 
 # Auth
-USERNAME_EXISTS = "用户名已存在"
-STUDENT_ID_EXISTS = "学号已存在"
-DUPLICATE_USER = "用户名或学号已存在"
-INVALID_CREDENTIALS = "用户名或密码错误"
+DUPLICATE_USER = "学号已存在"
+INVALID_CREDENTIALS = "学号或密码错误"
 TOKEN_EXPIRED = "登录已过期，请重新登录"
 TOKEN_INVALID = "登录无效，请重新登录"
+REFRESH_TOKEN_INVALID = "登录状态已失效，请重新登录"
+REFRESH_ORIGIN_INVALID = "登录续期请求来源无效"
 
 # Resources
 BUILDING_NOT_FOUND = "建筑不存在"
 COURSE_NOT_FOUND = "课程不存在"
+USER_NOT_FOUND = "用户不存在"
+SEMESTER_UNCONFIGURED = "尚未设置学期，请先完成学期设置"
+ROOM_NAME_REQUIRES_CONFIRMATION = "上课地点尚未确认，请选择或填写有效地点"
+COURSE_DATA_REQUIRES_REPAIR = "已有课程数据不完整，请先修复后再修改课表"
 CURRENT_BUILDING_NOT_FOUND = "当前位置建筑不存在"
 NO_UPCOMING_COURSE = "暂无后续课程"
 TARGET_BUILDING_NOT_FOUND = "课程目标建筑不存在"

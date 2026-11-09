@@ -126,6 +126,250 @@ def test_upgrade_on_empty_sqlite_creates_current_schema(tmp_path: Path) -> None:
         assert not source_columns["filename"]["nullable"]
         assert not source_columns["file_sha256"]["nullable"]
         assert not source_columns["source_row"]["nullable"]
+        assert "ix_refresh_sessions_absolute_expires_at" in {
+            index["name"] for index in inspector.get_indexes("refresh_sessions")
+        }
+        user_columns = {
+            column["name"]: column for column in inspector.get_columns("users")
+        }
+        assert user_columns["token_subject"]["nullable"] is False
+        user_indexes = {
+            index["name"]: index for index in inspector.get_indexes("users")
+        }
+        assert bool(user_indexes["ix_users_token_subject"]["unique"])
+        assert any(
+            "username = student_id" in constraint["sqltext"]
+            for constraint in inspector.get_check_constraints("users")
+        )
+    finally:
+        engine.dispose()
+
+
+def test_latest_migration_erases_historical_precise_message_locations(
+    tmp_path: Path,
+) -> None:
+    database_url = make_database_url(tmp_path / "message-privacy.db")
+    config = migration_config(database_url)
+    command.upgrade(config, "20260807_07")
+    engine = create_engine(database_url)
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO users "
+                    "(id, username, password_hash, nickname, role, created_at) "
+                    "VALUES (1, 'privacy-user', 'hash', 'Privacy', 'student', CURRENT_TIMESTAMP)"
+                )
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO buildings "
+                    "(id, name, type, description, latitude, longitude, map_x, map_y, created_at) "
+                    "VALUES (1, 'Privacy building', 'teaching', 'privacy', 30, 114, 0, 0, CURRENT_TIMESTAMP)"
+                )
+            )
+            connection.execute(
+                text(
+                    "INSERT INTO messages "
+                    "(id, building_id, user_id, content, display_name, latitude, longitude, "
+                    "location_source, status, created_at) "
+                    "VALUES (1, 1, 1, 'secret location', 'anonymous', 30.123456, "
+                    "114.654321, 'native', 'normal', CURRENT_TIMESTAMP)"
+                )
+            )
+    finally:
+        engine.dispose()
+
+    command.upgrade(config, "head")
+
+    engine = create_engine(database_url)
+    try:
+        with engine.connect() as connection:
+            row = connection.execute(
+                text(
+                    "SELECT latitude, longitude, location_source FROM messages WHERE id = 1"
+                )
+            ).one()
+            assert row == (None, None, None)
+            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20261009_13"
+    finally:
+        engine.dispose()
+
+
+def test_student_identity_migration_backfills_trims_and_requires_student_id(
+    tmp_path: Path,
+) -> None:
+    database_url = make_database_url(tmp_path / "student-identity.db")
+    config = migration_config(database_url)
+    command.upgrade(config, "20260809_08")
+    engine = create_engine(database_url)
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO users "
+                    "(id, student_id, username, password_hash, nickname, role, created_at) "
+                    "VALUES "
+                    "(1, NULL, 'legacy-null', 'hash', 'Legacy Null', 'student', CURRENT_TIMESTAMP), "
+                    "(2, '　20240002\t', 'legacy-two', 'hash', 'Legacy Two', 'student', CURRENT_TIMESTAMP), "
+                    "(3, '\t　', 'legacy-empty', 'hash', 'Legacy Empty', 'student', CURRENT_TIMESTAMP)"
+                )
+            )
+    finally:
+        engine.dispose()
+
+    command.upgrade(config, "head")
+
+    engine = create_engine(database_url)
+    try:
+        student_id_column = next(
+            column
+            for column in inspect(engine).get_columns("users")
+            if column["name"] == "student_id"
+        )
+        assert student_id_column["nullable"] is False
+        with engine.connect() as connection:
+            rows = connection.execute(
+                text(
+                    "SELECT username, student_id, token_subject "
+                    "FROM users ORDER BY id"
+                )
+            ).all()
+            assert [(row.username, row.student_id) for row in rows] == [
+                ("legacy-null", "legacy-null"),
+                ("20240002", "20240002"),
+                ("legacy-empty", "legacy-empty"),
+            ]
+            assert len({row.token_subject for row in rows}) == 3
+            assert all(len(row.token_subject) == 32 for row in rows)
+    finally:
+        engine.dispose()
+
+
+def test_student_identity_migration_rejects_normalized_collisions(
+    tmp_path: Path,
+) -> None:
+    database_url = make_database_url(tmp_path / "student-identity-collision.db")
+    config = migration_config(database_url)
+    command.upgrade(config, "20260809_08")
+    engine = create_engine(database_url)
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO users "
+                    "(id, student_id, username, password_hash, nickname, role, created_at) "
+                    "VALUES "
+                    "(1, 'same-id', 'first-login', 'hash', 'First', 'student', CURRENT_TIMESTAMP), "
+                    "(2, NULL, ' same-id ', 'hash', 'Second', 'student', CURRENT_TIMESTAMP)"
+                )
+            )
+    finally:
+        engine.dispose()
+
+    with pytest.raises(RuntimeError, match="not unique"):
+        command.upgrade(config, "head")
+
+    engine = create_engine(database_url)
+    try:
+        with engine.connect() as connection:
+            assert connection.scalar(
+                text("SELECT version_num FROM alembic_version")
+            ) == "20260809_08"
+            assert "token_subject" not in {
+                column["name"] for column in inspect(engine).get_columns("users")
+            }
+            assert connection.execute(
+                text("SELECT student_id, username FROM users ORDER BY id")
+            ).all() == [("same-id", "first-login"), (None, " same-id ")]
+    finally:
+        engine.dispose()
+
+
+@pytest.mark.parametrize(
+    ("student_id", "username"),
+    [
+        (None, "ab"),
+        ("x" * 33, "valid-login"),
+        (None, "\t　"),
+    ],
+)
+def test_student_identity_migration_rejects_invalid_canonical_values_without_changes(
+    tmp_path: Path,
+    student_id: str | None,
+    username: str,
+) -> None:
+    database_url = make_database_url(tmp_path / f"invalid-{len(username)}.db")
+    config = migration_config(database_url)
+    command.upgrade(config, "20260809_08")
+    engine = create_engine(database_url)
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO users "
+                    "(id, student_id, username, password_hash, nickname, role, created_at) "
+                    "VALUES (1, :student_id, :username, 'hash', 'Invalid', "
+                    "'student', CURRENT_TIMESTAMP)"
+                ),
+                {"student_id": student_id, "username": username},
+            )
+    finally:
+        engine.dispose()
+
+    with pytest.raises(RuntimeError, match="3 to 32"):
+        command.upgrade(config, "head")
+
+    engine = create_engine(database_url)
+    try:
+        with engine.connect() as connection:
+            assert connection.scalar(
+                text("SELECT version_num FROM alembic_version")
+            ) == "20260809_08"
+            assert connection.execute(
+                text("SELECT student_id, username FROM users")
+            ).one() == (student_id, username)
+    finally:
+        engine.dispose()
+
+
+def test_student_identity_migration_collapses_cross_column_identifiers(
+    tmp_path: Path,
+) -> None:
+    database_url = make_database_url(tmp_path / "student-identity-cross-column.db")
+    config = migration_config(database_url)
+    command.upgrade(config, "20260809_08")
+    engine = create_engine(database_url)
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO users "
+                    "(id, student_id, username, password_hash, nickname, role, created_at) "
+                    "VALUES "
+                    "(1, '20240001', '20240002', 'hash', 'First', 'student', CURRENT_TIMESTAMP), "
+                    "(2, '20240002', '20240001', 'hash', 'Second', 'student', CURRENT_TIMESTAMP)"
+                )
+            )
+    finally:
+        engine.dispose()
+
+    command.upgrade(config, "head")
+
+    engine = create_engine(database_url)
+    try:
+        with engine.connect() as connection:
+            rows = connection.execute(
+                text("SELECT username, student_id FROM users ORDER BY id")
+            ).all()
+            assert rows == [
+                ("20240001", "20240001"),
+                ("20240002", "20240002"),
+            ]
+        assert any(
+            "username = student_id" in constraint["sqltext"]
+            for constraint in inspect(engine).get_check_constraints("users")
+        )
     finally:
         engine.dispose()
 
@@ -173,12 +417,14 @@ def test_upgrade_adopts_database_stamped_by_previous_initial_migration(
     try:
         inspector = inspect(engine)
         with engine.connect() as connection:
-            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260802_06"
+            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20261009_13"
             assert connection.scalar(text("SELECT COUNT(*) FROM courses")) == 1
             assert connection.scalar(text("SELECT weeks FROM courses WHERE id = 1")) == "1-20"
-        assert {"semester_settings", "course_import_sources"} <= set(
-            inspector.get_table_names()
-        )
+        assert {
+            "semester_settings",
+            "course_import_sources",
+            "refresh_sessions",
+        } <= set(inspector.get_table_names())
         assert "ix_messages_room_name" in {
             index["name"] for index in inspector.get_indexes("messages")
         }
@@ -497,14 +743,16 @@ def test_migration_round_trip_preserves_legacy_course_and_recreates_current_sche
     try:
         inspector = inspect(engine)
         with engine.connect() as connection:
-            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260802_06"
+            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20261009_13"
             assert connection.scalar(text("SELECT COUNT(*) FROM courses")) == 1
         assert "source_kind" in {
             column["name"] for column in inspector.get_columns("courses")
         }
-        assert {"semester_settings", "course_import_sources"} <= set(
-            inspector.get_table_names()
-        )
+        assert {
+            "semester_settings",
+            "course_import_sources",
+            "refresh_sessions",
+        } <= set(inspector.get_table_names())
         assert any(
             index["unique"] and index["column_names"] == ["user_id"]
             for index in inspector.get_indexes("semester_settings")
@@ -546,7 +794,68 @@ def test_alembic_upgrade_is_idempotent(tmp_path: Path) -> None:
     engine = create_engine(database_url)
     try:
         with engine.connect() as connection:
-            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260802_06"
+            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20261009_13"
+    finally:
+        engine.dispose()
+
+
+def test_native_poi_upgrade_binds_verified_building_without_touching_history(tmp_path: Path) -> None:
+    database_url = make_database_url(tmp_path / "native-poi-upgrade.db")
+    config = migration_config(database_url)
+    upgrade_to_baseline(database_url)
+    insert_legacy_course(database_url, drop_version=False)
+    command.upgrade(config, "20260908_10")
+    engine = create_engine(database_url)
+    try:
+        with engine.begin() as connection:
+            connection.execute(text(
+                "UPDATE buildings SET name = '湖北大学武昌校区图书馆', "
+                "latitude = 30.581091, longitude = 114.329114 WHERE id = 1"
+            ))
+            connection.execute(text(
+                "INSERT INTO buildings (id, name, type, description, latitude, longitude, map_x, map_y, created_at) "
+                "VALUES (41, '湖北大学武昌校区计算机学院', 'teaching', 'user-edited location', 31, 115, 0, 0, CURRENT_TIMESTAMP)"
+            ))
+            connection.execute(text(
+                "INSERT INTO messages (id, building_id, user_id, content, display_name, status, created_at) "
+                "VALUES (77, 1, 1, 'Keep this message', '匿名同学', 'normal', CURRENT_TIMESTAMP)"
+            ))
+            before = {table: connection.execute(text(f"SELECT * FROM {table} ORDER BY id")).all()
+                      for table in ("users", "courses", "messages", "buildings")}
+        command.upgrade(config, "20260910_11")
+        with engine.connect() as connection:
+            assert connection.execute(text("SELECT building_id, poi_id FROM building_map_pois")).all() == [(1, "B001B0IPJP")]
+            for table, rows in before.items():
+                assert connection.execute(text(f"SELECT * FROM {table} ORDER BY id")).all() == rows
+        command.downgrade(config, "20260908_10")
+        with engine.connect() as connection:
+            assert "building_map_pois" not in inspect(engine).get_table_names()
+            for table, rows in before.items():
+                assert connection.execute(text(f"SELECT * FROM {table} ORDER BY id")).all() == rows
+    finally:
+        engine.dispose()
+
+
+def test_makeup_upgrade_preserves_original_courses_and_downgrades(tmp_path: Path) -> None:
+    database_url = make_database_url(tmp_path / "makeup-upgrade.db")
+    config = migration_config(database_url)
+    upgrade_to_baseline(database_url)
+    insert_legacy_course(database_url, drop_version=False)
+    command.upgrade(config, "20260910_11")
+    engine = create_engine(database_url)
+    try:
+        with engine.connect() as connection:
+            columns = ", ".join(column["name"] for column in inspect(engine).get_columns("courses"))
+            before = connection.execute(text(f"SELECT {columns} FROM courses ORDER BY id")).all()
+        command.upgrade(config, "20260915_12")
+        with engine.connect() as connection:
+            assert connection.execute(text(f"SELECT {columns} FROM courses ORDER BY id")).all() == before
+            assert connection.scalar(text("SELECT COUNT(*) FROM courses WHERE makeup IS NOT NULL")) == 0
+            assert "course_makeup_requests" in inspect(engine).get_table_names()
+        command.downgrade(config, "20260910_11")
+        with engine.connect() as connection:
+            assert connection.execute(text("SELECT * FROM courses ORDER BY id")).all() == before
+            assert "course_makeup_requests" not in inspect(engine).get_table_names()
     finally:
         engine.dispose()
 
@@ -571,10 +880,12 @@ def test_upgrade_database_serializes_simultaneous_threads(
     engine = create_engine(database_url)
     try:
         with engine.connect() as connection:
-            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260802_06"
-        assert {"semester_settings", "course_import_sources"} <= set(
-            inspect(engine).get_table_names()
-        )
+            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20261009_13"
+        assert {
+            "semester_settings",
+            "course_import_sources",
+            "refresh_sessions",
+        } <= set(inspect(engine).get_table_names())
     finally:
         engine.dispose()
 
@@ -614,9 +925,11 @@ def test_upgrade_database_serializes_simultaneous_processes(
     engine = create_engine(database_url)
     try:
         with engine.connect() as connection:
-            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20260802_06"
-        assert {"semester_settings", "course_import_sources"} <= set(
-            inspect(engine).get_table_names()
-        )
+            assert connection.scalar(text("SELECT version_num FROM alembic_version")) == "20261009_13"
+        assert {
+            "semester_settings",
+            "course_import_sources",
+            "refresh_sessions",
+        } <= set(inspect(engine).get_table_names())
     finally:
         engine.dispose()

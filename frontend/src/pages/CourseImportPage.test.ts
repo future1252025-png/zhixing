@@ -3,6 +3,8 @@ import { createPinia, setActivePinia, type Pinia } from 'pinia'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { useCoursesStore } from '@/stores/courses'
+import { useAuthStore } from '@/stores/auth'
+import { useSemesterStore } from '@/stores/semester'
 import type { ImportPreviewResponse } from '@/types/courseImport'
 
 import CourseImportPage from './CourseImportPage.vue'
@@ -20,6 +22,9 @@ const mocks = vi.hoisted(() => ({
   captureHubuCourseTable: vi.fn(),
   captureToHtmlFile: vi.fn()
 }))
+
+vi.mock('@capacitor/core', async (importOriginal) => ({ ...await importOriginal<typeof import('@capacitor/core')>(),
+  Capacitor: { isNativePlatform: () => mocks.nativeHubuImportAvailable(), getPlatform: () => mocks.nativeHubuImportAvailable() ? 'android' : 'web' } }))
 
 vi.mock('vue-router', () => ({
   useRouter: () => ({ push: mocks.push })
@@ -48,6 +53,7 @@ vi.mock('@/native/hubuCourseImport', () => ({
 }))
 
 vi.mock('vant', () => ({
+  showConfirmDialog: vi.fn(),
   showFailToast: mocks.showFailToast,
   showSuccessToast: mocks.showSuccessToast
 }))
@@ -155,6 +161,12 @@ describe('CourseImportPage', () => {
     // 每个用例重置 Pinia，避免 buildings/courses store 缓存跨用例泄漏。
     pinia = createPinia()
     setActivePinia(pinia)
+    useAuthStore(pinia).currentUser = { id: 1, student_id: '20240001', nickname: '测试同学',
+      avatar_text: null, avatar_color: null, role: 'student', created_at: '2026-01-01T00:00:00Z' }
+    const semester = useSemesterStore(pinia)
+    semester.loadedForUserId = 1
+    semester.lastFetchedAt = Date.now()
+    semester.semester = { status: 'active', start_date: '2026-08-31', total_weeks: 20, current_week: 4 }
     mocks.getBuildings.mockResolvedValue([
       {
         id: 3,
@@ -169,6 +181,7 @@ describe('CourseImportPage', () => {
       }
     ])
     mocks.previewCourseImport.mockResolvedValue(preview)
+    mocks.getCourses.mockResolvedValue([])
     mocks.commitCourseImport.mockResolvedValue({ created_count: 2, course_ids: [31, 32] })
     mocks.nativeHubuImportAvailable.mockReturnValue(false)
     mocks.captureHubuCourseTable.mockResolvedValue({ cancelled: true })
@@ -201,15 +214,15 @@ describe('CourseImportPage', () => {
   it('makes the Android-only boundary explicit without exposing a fake web capture action', async () => {
     const wrapper = await mountPage()
 
-    expect(wrapper.text()).toContain('需安卓 App')
-    expect(wrapper.get('[data-testid="hubu-native-import"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.text()).toContain('选择课表文件')
+    expect(wrapper.find('[data-testid="hubu-native-import"]').exists()).toBe(false)
     expect(wrapper.get('.hubu-browser-link').attributes('href')).toBe(
       'https://jwxt.hubu.edu.cn/jsxsd/'
     )
-    expect(wrapper.text()).toContain('不读取密码，不导出登录 Cookie')
+    expect(wrapper.text()).toContain('先在学校教务系统导出课表')
   })
 
-  it('automatically commits an importable HTML table returned by the native Hubu browser', async () => {
+  it('waits for time review before committing a table returned by the native Hubu browser', async () => {
     mocks.nativeHubuImportAvailable.mockReturnValue(true)
     const capture = {
       cancelled: false,
@@ -226,9 +239,15 @@ describe('CourseImportPage', () => {
     await flushPromises()
 
     expect(mocks.captureHubuCourseTable).toHaveBeenCalledTimes(1)
+    expect(wrapper.find('input[type="file"]').exists()).toBe(false)
+    expect(wrapper.find('.upload-sheet').exists()).toBe(false)
     expect(mocks.captureToHtmlFile).toHaveBeenCalledWith(capture)
     expect(mocks.previewCourseImport).toHaveBeenCalledWith(capturedFile)
-    expect(mocks.commitCourseImport).toHaveBeenCalledWith(capturedFile, 'a'.repeat(64), [])
+    expect(mocks.commitCourseImport).not.toHaveBeenCalled()
+    expect((wrapper.get('[data-testid="start-row-1"]').element as HTMLInputElement).value).toBe('08:00')
+    await wrapper.get('[data-testid="commit-import"]').trigger('click')
+    await flushPromises()
+    expect(mocks.commitCourseImport).toHaveBeenCalledWith(capturedFile, 'a'.repeat(64), [], [])
     expect(wrapper.text()).toContain('已从湖北大学教务系统安全采集')
     expect(wrapper.get('.capture-source').attributes('href')).toBe(capture.sourceUrl)
     expect(wrapper.text()).toContain('2 门课程已覆盖导入')
@@ -247,13 +266,61 @@ describe('CourseImportPage', () => {
 
     expect(mocks.commitCourseImport).toHaveBeenCalledTimes(1)
     expect(coursesStore.loaded).toBe(false)
-    expect(mocks.commitCourseImport).toHaveBeenCalledWith(file, 'a'.repeat(64), [])
+    expect(mocks.commitCourseImport).toHaveBeenCalledWith(file, 'a'.repeat(64), [], [])
     expect(mocks.createCourse).not.toHaveBeenCalled()
     expect(mocks.push).not.toHaveBeenCalled()
     expect(wrapper.text()).toContain('2 门课程已覆盖导入')
 
     await wrapper.get('[data-testid="view-courses"]').trigger('click')
     expect(mocks.push).toHaveBeenCalledWith('/courses')
+  })
+
+  it('lets users correct imported clocks without modifying the original file or source text', async () => {
+    const wrapper = await mountPage()
+    const file = await chooseAndPreview(wrapper)
+    expect(wrapper.get('.import-time-editor').attributes('disabled')).toBeUndefined()
+    await wrapper.get('[data-testid="start-row-1"]').setValue('14:30')
+    await wrapper.get('[data-testid="end-row-1"]').setValue('16:10')
+    await wrapper.get('[data-testid="commit-import"]').trigger('click')
+    await flushPromises()
+    expect(mocks.commitCourseImport).toHaveBeenCalledWith(file, 'a'.repeat(64), [], [
+      { row_ref: 'row-1', start_time: '14:30', end_time: '16:10' }
+    ])
+    expect(preview.candidates[0]!.start_time).toBe('08:00')
+    expect(preview.candidates[0]!.source.raw_time_or_section).toBe('第1-2节 08:00-09:40')
+  })
+
+  it('requires a complete increasing time range when a user edits a clock', async () => {
+    const wrapper = await mountPage()
+    await chooseAndPreview(wrapper)
+    await wrapper.get('[data-testid="start-row-1"]').setValue('14:30')
+    expect(wrapper.get('[data-testid="commit-import"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.text()).toContain('结束时间必须晚于开始时间')
+    await wrapper.get('[data-testid="end-row-1"]').setValue('')
+    expect(wrapper.text()).toContain('请填写完整的开始和结束时间')
+    expect(mocks.commitCourseImport).not.toHaveBeenCalled()
+    await wrapper.get('[data-testid="end-row-1"]').setValue('16:10')
+    expect(wrapper.get('[data-testid="commit-import"]').attributes('disabled')).toBeUndefined()
+  })
+
+  it('fills an unrecognized clock in preview and removes its pending-time notice', async () => {
+    mocks.previewCourseImport.mockResolvedValue({
+      ...preview,
+      candidates: [{ ...preview.candidates[0]!, start_time: null, end_time: null,
+        errors: [{ code: 'time_unrecognized', field: 'time', message: '无法识别上课时间' }] }]
+    })
+    const wrapper = await mountPage()
+    const file = await chooseAndPreview(wrapper)
+    expect((wrapper.get('[data-testid="start-row-1"]').element as HTMLInputElement).value).toBe('')
+    await wrapper.get('[data-testid="start-row-1"]').setValue('14:30')
+    expect(wrapper.get('[data-testid="commit-import"]').attributes('disabled')).toBeDefined()
+    await wrapper.get('[data-testid="end-row-1"]').setValue('16:10')
+    expect(wrapper.text()).not.toContain('1 门课程之后可继续补全')
+    await wrapper.get('[data-testid="commit-import"]').trigger('click')
+    await flushPromises()
+    expect(mocks.commitCourseImport).toHaveBeenCalledWith(file, 'a'.repeat(64), [], [
+      { row_ref: 'row-1', start_time: '14:30', end_time: '16:10' }
+    ])
   })
 
   it('locates a structured server conflict on its source row', async () => {
@@ -346,9 +413,13 @@ describe('CourseImportPage', () => {
     expect(mocks.commitCourseImport).toHaveBeenCalledWith(
       file,
       'a'.repeat(64),
-      ['row-2']
+      ['row-2'],
+      []
     )
     expect(wrapper.text()).toContain('1 门课程已覆盖导入')
+    expect(wrapper.text()).toContain('另有 1 门课程未导入')
+    expect(wrapper.text()).toContain('大学英语')
+    expect(wrapper.text()).toContain('无法识别上课周次')
   })
 
   it('auto-skips invalid and empty-schedule rows returned by the native browser', async () => {
@@ -395,11 +466,19 @@ describe('CourseImportPage', () => {
     await wrapper.get('[data-testid="hubu-native-import"]').trigger('click')
     await flushPromises()
 
+    expect(mocks.commitCourseImport).not.toHaveBeenCalled()
+    await wrapper.get('[data-testid="commit-import"]').trigger('click')
+    await flushPromises()
     expect(mocks.commitCourseImport).toHaveBeenCalledWith(
       capturedFile,
       'a'.repeat(64),
-      ['row-2']
+      ['row-2'],
+      []
     )
     expect(wrapper.text()).toContain('1 门课程已覆盖导入')
+    expect(wrapper.text()).toContain('另有 1 门课程未导入')
+    expect(wrapper.text()).toContain('课程设计')
+    expect(wrapper.text()).toContain('无法识别上课周次')
+    expect(wrapper.text()).toContain('没有可用的上课时间和地点')
   })
 })

@@ -48,6 +48,7 @@ describe('device geolocation', () => {
       coarseLocation: 'granted'
     })
     mocks.getCurrentPosition.mockResolvedValue({
+      timestamp: Date.parse('2026-07-07T08:00:00.000Z'),
       coords: {
         latitude: 30.58,
         longitude: 114.32,
@@ -59,6 +60,7 @@ describe('device geolocation', () => {
       latitude: 30.58,
       longitude: 114.32,
       accuracy: 9,
+      locatedAt: '2026-07-07T08:00:00.000Z',
       source: 'native'
     })
     expect(mocks.requestPermissions).toHaveBeenCalledWith({
@@ -94,6 +96,7 @@ describe('device geolocation', () => {
 
   it('uses browser geolocation on the web', async () => {
     const getCurrentPosition = vi.fn((resolve: PositionCallback) => resolve({
+      timestamp: Date.parse('2026-07-07T08:30:00.000Z'),
       coords: {
         latitude: 30.582,
         longitude: 114.322,
@@ -110,6 +113,7 @@ describe('device geolocation', () => {
       latitude: 30.582,
       longitude: 114.322,
       accuracy: 16,
+      locatedAt: '2026-07-07T08:30:00.000Z',
       source: 'browser'
     })
     expect(getCurrentPosition).toHaveBeenCalledWith(
@@ -124,5 +128,27 @@ describe('device geolocation', () => {
 
     expect(getDeviceGeolocationErrorMessage({ code: 'OS-PLUG-GLOC-0007' }))
       .toBe('定位服务未开启，请打开定位开关后重试')
+  })
+
+  it('does not reopen an Android permission prompt during automatic refresh', async () => {
+    mocks.isNativePlatform.mockReturnValue(true)
+    mocks.checkPermissions.mockResolvedValue({ location: 'prompt', coarseLocation: 'prompt' })
+    await expect(requestDeviceCurrentPosition({ requestPermission: false })).rejects.toMatchObject({ code: 'OS-PLUG-GLOC-0003' })
+    expect(mocks.requestPermissions).not.toHaveBeenCalled()
+    expect(mocks.getCurrentPosition).not.toHaveBeenCalled()
+  })
+
+  it('does not reopen a dismissed browser permission prompt', async () => {
+    const getCurrentPosition = vi.fn()
+    Object.defineProperty(navigator, 'geolocation', { value: { getCurrentPosition }, configurable: true })
+    const descriptor = Object.getOwnPropertyDescriptor(navigator, 'permissions')
+    Object.defineProperty(navigator, 'permissions', { value: { query: vi.fn().mockResolvedValue({ state: 'prompt' }) }, configurable: true })
+    try {
+      await expect(requestDeviceCurrentPosition({ requestPermission: false })).rejects.toMatchObject({ code: 1 })
+      expect(getCurrentPosition).not.toHaveBeenCalled()
+    } finally {
+      if (descriptor) Object.defineProperty(navigator, 'permissions', descriptor)
+      else Reflect.deleteProperty(navigator, 'permissions')
+    }
   })
 })

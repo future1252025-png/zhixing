@@ -1,5 +1,22 @@
 apply plugin: 'com.android.application'
 
+def releaseVersionCodeText = System.getenv('ANDROID_VERSION_CODE')?.trim()
+def releaseVersionNameText = System.getenv('ANDROID_VERSION_NAME')?.trim()
+def releaseSigning = [
+    keystore: System.getenv('ANDROID_RELEASE_KEYSTORE')?.trim(),
+    storePassword: System.getenv('ANDROID_RELEASE_STORE_PASSWORD'),
+    keyAlias: System.getenv('ANDROID_RELEASE_KEY_ALIAS')?.trim(),
+    keyPassword: System.getenv('ANDROID_RELEASE_KEY_PASSWORD')
+]
+def hasCompleteReleaseSigning = releaseSigning.values().every { value -> value != null && !value.isEmpty() }
+def configuredVersionCode = 1
+if (releaseVersionCodeText) {
+    if (!(releaseVersionCodeText ==~ /[1-9][0-9]*/)) {
+        throw new GradleException('ANDROID_VERSION_CODE must be a positive integer.')
+    }
+    configuredVersionCode = Integer.parseInt(releaseVersionCodeText)
+}
+
 android {
     namespace = "com.campusmind.zhixing"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -7,8 +24,8 @@ android {
         applicationId "com.campusmind.zhixing"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        versionCode configuredVersionCode
+        versionName releaseVersionNameText ?: "1.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
@@ -16,11 +33,54 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    signingConfigs {
+        release {
+            if (hasCompleteReleaseSigning) {
+                storeFile file(releaseSigning.keystore)
+                storePassword releaseSigning.storePassword
+                keyAlias releaseSigning.keyAlias
+                keyPassword releaseSigning.keyPassword
+            }
+        }
+    }
     buildTypes {
         release {
-            minifyEnabled false
-            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            if (hasCompleteReleaseSigning) {
+                signingConfig signingConfigs.release
+            }
         }
+    }
+}
+
+tasks.register('verifyReleaseConfiguration') {
+    group = 'verification'
+    description = 'Fails unless release versioning and signing are explicitly configured.'
+    doLast {
+        if (!releaseVersionCodeText || !releaseVersionNameText) {
+            throw new GradleException(
+                'ANDROID_VERSION_CODE and ANDROID_VERSION_NAME are required for a publishable release.'
+            )
+        }
+        if (!hasCompleteReleaseSigning) {
+            throw new GradleException(
+                'ANDROID_RELEASE_KEYSTORE, ANDROID_RELEASE_STORE_PASSWORD, ' +
+                'ANDROID_RELEASE_KEY_ALIAS and ANDROID_RELEASE_KEY_PASSWORD are required.'
+            )
+        }
+        if (!file(releaseSigning.keystore).isFile()) {
+            throw new GradleException('ANDROID_RELEASE_KEYSTORE does not point to a readable file.')
+        }
+    }
+}
+
+if ('true'.equalsIgnoreCase(System.getenv('ANDROID_REQUIRE_RELEASE_SIGNING'))) {
+    tasks.matching { task ->
+        task.name == 'assembleRelease' || task.name == 'bundleRelease'
+    }.configureEach {
+        dependsOn tasks.named('verifyReleaseConfiguration')
     }
 }
 

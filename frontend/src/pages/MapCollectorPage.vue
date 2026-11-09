@@ -144,6 +144,7 @@ function createPoint(
 
   return {
     id: sourceId || `${name}-${gcjLongitude.toFixed(6)}-${gcjLatitude.toFixed(6)}`,
+    poiId: sourceId || null,
     name,
     type: normalizeType(type),
     address,
@@ -567,12 +568,13 @@ function buildSeedData(source: CollectedPoint[]): string {
     source.map((point) => ({
       name: point.name,
       type: point.type,
-      description: `${point.name}，来源于高德地图采点工具。`,
+      description: point.name,
       latitude: point.latitude,
       longitude: point.longitude,
       map_x: estimateMapX(point.longitude),
       map_y: estimateMapY(point.latitude),
-      walk_hint: '来自真实地图采点，建议演示前人工确认名称和位置。'
+      walk_hint: null,
+      ...(point.poiId ? { map_pois: [{ provider: 'amap', poi_id: point.poiId, name: point.name }] } : {})
     })),
     null,
     2
@@ -699,7 +701,13 @@ onBeforeUnmount(() => {
         </div>
 
         <div class="search-row">
-          <input v-model="keyword" class="collector-input" placeholder="输入地点关键词" />
+          <input
+            id="collector-keyword"
+            v-model="keyword"
+            class="collector-input"
+            placeholder="输入地点关键词"
+            aria-label="地点关键词"
+          />
           <van-button type="primary" size="small" :loading="loading" loading-text="搜索中" @click="searchCurrentKeyword">
             搜索
           </van-button>
@@ -726,14 +734,15 @@ onBeforeUnmount(() => {
             <small>
               已选坐标：{{ pendingManualPoint.latitude }}, {{ pendingManualPoint.longitude }}
             </small>
-            <label class="manual-label">地点名称</label>
+            <label class="manual-label" for="manual-point-name">地点名称</label>
             <input
+              id="manual-point-name"
               v-model="manualPointName"
               class="collector-input"
               placeholder="地点名称，例如 3号教学楼"
             />
-            <label class="manual-label">地点类型</label>
-            <select v-model="manualPointType" class="collector-input">
+            <label class="manual-label" for="manual-point-type">地点类型</label>
+            <select id="manual-point-type" v-model="manualPointType" class="collector-input">
               <option value="教学楼">教学楼</option>
               <option value="实验楼">实验楼</option>
               <option value="宿舍">宿舍</option>
@@ -741,8 +750,9 @@ onBeforeUnmount(() => {
               <option value="体育设施">体育设施</option>
               <option value="校园地点">校园地点</option>
             </select>
-            <label class="manual-label">地址信息 / 别名</label>
+            <label class="manual-label" for="manual-point-address">地址信息 / 别名</label>
             <input
+              id="manual-point-address"
               v-model="manualPointAddress"
               class="collector-input"
               placeholder="说明/别名，可填 教3、教4、实训大楼"
@@ -800,6 +810,7 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .collector-page {
+  --page-max: 980px;
   min-height: 100vh;
 }
 

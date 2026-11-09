@@ -24,7 +24,7 @@ const emit = defineEmits<{
 
 const fullLocation = computed(() => formatCourseLocation(props.course))
 const sourceLabel = computed(() =>
-  props.course.source_kind === 'import' ? '导入课程' : '手动添加'
+  props.course.makeup ? '补课 · 仅这一次' : props.course.source_kind === 'import' ? '导入课程' : '手动添加'
 )
 const scheduleLabel = computed(() =>
   props.course.start_time && props.course.end_time
@@ -65,7 +65,7 @@ const scheduleLabel = computed(() =>
       </span>
 
       <span class="course-card__meta">
-        <span>{{ course.weeks }}</span>
+        <span>{{ course.makeup?.date ?? course.weeks }}</span>
         <span v-if="course.teacher">{{ course.teacher }}</span>
         <span>{{ sourceLabel }}</span>
       </span>

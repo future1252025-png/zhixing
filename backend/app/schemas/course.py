@@ -18,24 +18,24 @@ from app.services.week_rule import normalize_weeks
 TIME_PATTERN = re.compile(r"^\d{2}:\d{2}$")
 def parse_course_time(value: str) -> time:
     if not TIME_PATTERN.match(value):
-        raise ValueError("Time must use HH:MM format")
+        raise ValueError("时间必须使用 HH:MM 格式")
     hour_text, minute_text = value.split(":")
     hour = int(hour_text)
     minute = int(minute_text)
     if hour > 23 or minute > 59:
-        raise ValueError("Time must use HH:MM format")
+        raise ValueError("时间必须使用 HH:MM 格式")
     return time(hour=hour, minute=minute)
 
 
 def ensure_end_after_start(start_time: str, end_time: str) -> None:
     if parse_course_time(end_time) <= parse_course_time(start_time):
-        raise ValueError("end_time must be later than start_time")
+        raise ValueError("下课时间必须晚于上课时间")
 
 
 def normalize_required_text(value: str) -> str:
     text = value.strip()
     if not text:
-        raise ValueError("Field cannot be empty")
+        raise ValueError("该字段不能为空")
     return text
 
 
@@ -89,7 +89,7 @@ class CourseBase(BaseModel):
     @model_validator(mode="after")
     def validate_time_range(self) -> "CourseBase":
         if (self.start_time is None) != (self.end_time is None):
-            raise ValueError("start_time and end_time must both be set or both be empty")
+            raise ValueError("上课时间和下课时间必须同时填写或同时留空")
         if self.start_time is not None and self.end_time is not None:
             ensure_end_after_start(self.start_time, self.end_time)
         return self
@@ -121,14 +121,14 @@ class CourseUpdate(BaseModel):
     @classmethod
     def reject_required_null(cls, value: object) -> object:
         if value is None:
-            raise ValueError("Field cannot be null")
+            raise ValueError("该字段不能为 null")
         return value
 
     @field_validator("weekday", "building_id", mode="before")
     @classmethod
     def reject_required_int_null(cls, value: object) -> object:
         if value is None:
-            raise ValueError("Field cannot be null")
+            raise ValueError("该字段不能为 null")
         return value
 
     @field_validator("course_name", "room_name")
@@ -147,14 +147,14 @@ class CourseUpdate(BaseModel):
     @classmethod
     def reject_null_weeks(cls, value: object) -> object:
         if value is None:
-            raise ValueError("Field cannot be null")
+            raise ValueError("该字段不能为 null")
         return value
 
     @field_validator("weeks")
     @classmethod
     def normalize_weeks_field(cls, value: str | None) -> str:
         if value is None:
-            raise ValueError("Field cannot be null")
+            raise ValueError("该字段不能为 null")
         return normalize_weeks(value, max_week=30)
 
     @field_validator("start_time", "end_time")
@@ -187,6 +187,7 @@ class CourseRead(BaseModel):
     created_at: datetime
     building: CourseBuildingRead | None
     source_location: str | None = None
+    makeup: dict | None = None
 
     @computed_field(return_type=bool)
     @property

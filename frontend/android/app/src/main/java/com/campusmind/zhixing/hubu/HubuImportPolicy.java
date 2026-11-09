@@ -2,6 +2,7 @@ package com.campusmind.zhixing.hubu;
 
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.util.Arrays;
 import java.util.HashSet;
 import java.util.Locale;
 import java.util.Set;
@@ -10,7 +11,11 @@ public final class HubuImportPolicy {
     public static final String START_URL = "https://jwxt.hubu.edu.cn/jsxsd/";
     public static final int MAX_CAPTURE_BYTES = 5 * 1024 * 1024;
 
-    private static final String OFFICIAL_DOMAIN = "hubu.edu.cn";
+    private static final Set<String> ALLOWED_HOSTS = new HashSet<>(Arrays.asList(
+        "jwxt.hubu.edu.cn",
+        "one.hubu.edu.cn",
+        "sso.hubu.edu.cn"
+    ));
     private static final String[] WEEKDAYS = {
         "星期一", "星期二", "星期三", "星期四", "星期五", "星期六", "星期日", "星期天"
     };
@@ -36,8 +41,7 @@ public final class HubuImportPolicy {
                 return false;
             }
             String normalizedHost = host.toLowerCase(Locale.ROOT);
-            return normalizedHost.equals(OFFICIAL_DOMAIN) ||
-                normalizedHost.endsWith("." + OFFICIAL_DOMAIN);
+            return ALLOWED_HOSTS.contains(normalizedHost);
         } catch (URISyntaxException error) {
             return false;
         }

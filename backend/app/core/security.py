@@ -1,4 +1,7 @@
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+import re
+import secrets
 
 import bcrypt
 import jwt
@@ -35,11 +38,27 @@ def verify_password(password: str, password_hash: str) -> bool:
         return False
 
 
-def create_access_token(subject: str) -> str:
+_ACCOUNT_SUBJECT = re.compile(r"^account:([0-9a-f]{32})$")
+
+
+@dataclass(frozen=True)
+class AccessTokenIdentity:
+    token_subject: str | None = None
+    legacy_username: str | None = None
+
+
+def create_access_token(token_subject: str) -> str:
+    if not re.fullmatch(r"[0-9a-f]{32}", token_subject):
+        raise ValueError("token_subject must be a 32-character lowercase hex value")
     now = datetime.now(timezone.utc)
     expires_at = now + timedelta(minutes=settings.access_token_expire_minutes)
     payload = {
-        "sub": subject,
+        "sub": f"account:{token_subject}",
+        "sub_kind": "account",
+        "typ": "access",
+        "iss": "campusmind-api",
+        "aud": "campusmind-client",
+        "jti": secrets.token_urlsafe(16),
         "iat": now,
         "exp": expires_at,
     }
@@ -54,12 +73,15 @@ def _credentials_exception(detail: str = errors.TOKEN_INVALID) -> HTTPException:
     )
 
 
-def decode_access_token(token: str) -> str:
+def decode_access_token(token: str) -> AccessTokenIdentity:
     try:
         payload = jwt.decode(
             token,
             settings.jwt_secret_key,
             algorithms=[settings.jwt_algorithm],
+            audience="campusmind-client",
+            issuer="campusmind-api",
+            options={"require": ["sub", "typ", "iat", "exp", "jti"]},
         )
     except ExpiredSignatureError as exc:
         raise _credentials_exception(errors.TOKEN_EXPIRED) from exc
@@ -67,9 +89,21 @@ def decode_access_token(token: str) -> str:
         raise _credentials_exception() from exc
 
     subject = payload.get("sub")
-    if not isinstance(subject, str) or not subject:
+    if payload.get("typ") != "access" or not isinstance(subject, str) or not subject:
         raise _credentials_exception()
-    return subject
+
+    subject_kind = payload.get("sub_kind")
+    if subject_kind is None:
+        # Tokens issued before account subjects stored the old login identity
+        # directly in ``sub``. Preserve them when it still matches the
+        # canonical student ID; refresh remains the recovery path otherwise.
+        return AccessTokenIdentity(legacy_username=subject)
+    if subject_kind != "account":
+        raise _credentials_exception()
+    match = _ACCOUNT_SUBJECT.fullmatch(subject)
+    if match is None:
+        raise _credentials_exception()
+    return AccessTokenIdentity(token_subject=match.group(1))
 
 
 def get_current_user(
@@ -78,8 +112,15 @@ def get_current_user(
 ) -> User:
     if credentials is None or credentials.scheme.lower() != "bearer":
         raise _credentials_exception()
-    username = decode_access_token(credentials.credentials)
-    user = session.scalar(select(User).where(User.username == username))
+    identity = decode_access_token(credentials.credentials)
+    if identity.token_subject is not None:
+        user = session.scalar(
+            select(User).where(User.token_subject == identity.token_subject)
+        )
+    else:
+        user = session.scalar(
+            select(User).where(User.username == identity.legacy_username)
+        )
     if user is None:
         raise _credentials_exception()
     return user

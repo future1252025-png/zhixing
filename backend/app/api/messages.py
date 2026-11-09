@@ -1,13 +1,16 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from datetime import datetime
+
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 
 from app.core import errors
+from app.core.clock import get_current_time
+from app.core.errors import BusinessError
 from app.core.security import get_current_user
 from app.db.database import get_session
 from app.models import Building, User
 from app.schemas.message import ChatRoomRead, MessageCreate, MessageRead
 from app.services.message_service import (
-    MessageLocationTooFarError,
     create_building_message,
     get_building,
     list_building_chatrooms,
@@ -23,9 +26,10 @@ router = APIRouter(
 def require_building(session: Session, building_id: int) -> Building:
     building = get_building(session, building_id)
     if building is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=errors.BUILDING_NOT_FOUND,
+        raise BusinessError(
+            status.HTTP_404_NOT_FOUND,
+            "building_not_found",
+            errors.BUILDING_NOT_FOUND,
         )
     return building
 
@@ -67,12 +71,13 @@ def create_message(
     payload: MessageCreate,
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_user),
+    now: datetime = Depends(get_current_time),
 ) -> MessageRead:
     building = require_building(session, building_id)
-    try:
-        return create_building_message(session, building, current_user, payload)
-    except MessageLocationTooFarError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(exc),
-        ) from exc
+    return create_building_message(
+        session,
+        building,
+        current_user,
+        payload,
+        now=now,
+    )

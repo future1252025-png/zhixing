@@ -1,4 +1,6 @@
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from app.schemas.course import parse_course_time
 
 
 class ImportFileInfo(BaseModel):
@@ -59,6 +61,20 @@ class ImportResolution(BaseModel):
         return result
 
 
+class ImportTimeResolution(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    row_ref: str = Field(min_length=1, max_length=80)
+    start_time: str = Field(pattern=r"^\d{2}:\d{2}$")
+    end_time: str = Field(pattern=r"^\d{2}:\d{2}$")
+
+    @model_validator(mode="after")
+    def validate_range(self):
+        if parse_course_time(self.end_time) <= parse_course_time(self.start_time):
+            raise ValueError("结束时间必须晚于开始时间")
+        return self
+
+
 class ImportCommitManifest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -66,6 +82,7 @@ class ImportCommitManifest(BaseModel):
     # Optional compatibility path for older app builds. New clients omit this;
     # legacy values only override internal map routing fields, never source text.
     resolutions: list[ImportResolution] = Field(default_factory=list)
+    time_resolutions: list[ImportTimeResolution] = Field(default_factory=list, max_length=500)
     excluded_row_refs: list[str] = Field(default_factory=list, max_length=500)
 
     @field_validator("excluded_row_refs")

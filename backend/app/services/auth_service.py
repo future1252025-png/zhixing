@@ -1,17 +1,25 @@
 import re
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.security import hash_password, verify_password
-from app.models import User
+from app.models import (
+    Course,
+    CourseImportSource,
+    Message,
+    RefreshSession,
+    SemesterSetting,
+    User,
+)
 from app.schemas.auth import RegisterRequest
 from app.schemas.user import UserProfileUpdate
+from app.services.user_mutation_guard import acquire_user_mutation_guard
 
 
 class DuplicateUserError(ValueError):
-    """Raised when username or student_id collides on insert."""
+    """Raised when the unique student identity collides on insert."""
 
 
 _IDENTITY_CONSTRAINT_NAMES = frozenset(
@@ -52,7 +60,9 @@ def get_user_by_student_id(session: Session, student_id: str) -> User | None:
 
 def create_user(session: Session, payload: RegisterRequest) -> User:
     user = User(
-        username=payload.username,
+        # Keep the legacy column as an internal mirror until old clients and
+        # access tokens no longer need it.  It is not a second public identity.
+        username=payload.student_id,
         student_id=payload.student_id,
         nickname=payload.nickname,
         avatar_text=payload.nickname[:1],
@@ -74,10 +84,10 @@ def create_user(session: Session, payload: RegisterRequest) -> User:
 
 def authenticate_user(
     session: Session,
-    username: str,
+    student_id: str,
     password: str,
 ) -> User | None:
-    user = get_user_by_username(session, username)
+    user = get_user_by_student_id(session, student_id)
     if user is None:
         verify_password(password, _TIMING_EQUALIZATION_HASH)
         return None
@@ -98,3 +108,19 @@ def update_user_profile(
     session.commit()
     session.refresh(user)
     return user
+
+
+def delete_user_account(session: Session, user: User) -> None:
+    """Permanently remove a user's account and every user-owned record."""
+
+    acquire_user_mutation_guard(session, user.id)
+    course_ids = select(Course.id).where(Course.user_id == user.id)
+    session.execute(
+        delete(CourseImportSource).where(CourseImportSource.course_id.in_(course_ids))
+    )
+    session.execute(delete(Message).where(Message.user_id == user.id))
+    session.execute(delete(Course).where(Course.user_id == user.id))
+    session.execute(delete(SemesterSetting).where(SemesterSetting.user_id == user.id))
+    session.execute(delete(RefreshSession).where(RefreshSession.user_id == user.id))
+    session.delete(user)
+    session.commit()

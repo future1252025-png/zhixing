@@ -57,3 +57,9 @@ export interface ImportCommitResponse {
   created_count: number
   course_ids: number[]
 }
+
+export interface ImportTimeResolution {
+  row_ref: string
+  start_time: string
+  end_time: string
+}

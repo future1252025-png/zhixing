@@ -1,4 +1,5 @@
 from collections.abc import Generator
+from hashlib import sha256
 from io import BytesIO
 import json
 from pathlib import Path
@@ -15,10 +16,84 @@ from app.db.seed import seed_demo_data
 from app.main import app
 from app.models import Building, Course, CourseImportSource, User
 from app.api.courses import MAX_IMPORT_FILE_BYTES
-from app.services.course_import_service import parse_course_cell
+from app.services.course_import_service import _parse_time, _read_rows, _rows_to_raw_courses, parse_course_cell
 
 
 FIXTURES = Path(__file__).with_name("fixtures")
+
+
+def afternoon_import_content(axis: str = "第五六节 14:30-16:10", detail: str = "") -> bytes:
+    return f"""
+    <table>
+      <tr><th>节次</th><th>星期一</th><th>星期二</th><th>星期三</th></tr>
+      <tr><td>{axis}</td><td>思想概论<br>杨老师<br>1-16(周)[05-06节]{detail}<br>教3-205</td></tr>
+    </table>
+    """.encode("utf-8")
+
+
+@pytest.mark.parametrize("filename", ["schedule.html", "schedule.htm", "schedule.xls", "schedule.xlsx"])
+def test_actual_afternoon_clocks_survive_all_import_readers(filename: str) -> None:
+    content = afternoon_import_content()
+    if filename.endswith(".xlsx"):
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.append(["节次", "星期一", "星期二", "星期三"])
+        sheet.append(["第五六节 14:30-16:10", "思想概论\n杨老师\n1-16(周)[05-06节]\n教3-205"])
+        output = BytesIO()
+        workbook.save(output)
+        content = output.getvalue()
+    raw = _rows_to_raw_courses(_read_rows(filename, content))[0]
+    start, end = _parse_time(raw.raw_time_or_section)
+    assert start.isoformat(timespec="minutes") == "14:30"
+    assert end.isoformat(timespec="minutes") == "16:10"
+    assert raw.raw_weeks == "1-16(周)"
+
+
+@pytest.mark.parametrize(
+    "axis, detail, expected",
+    [
+        ("第五六节 14:00-15:40", " 14:30-16:10", ("14:30", "16:10")),
+        ("第五六节 14:00-15:40", "<br>14:30-16:10", ("14:30", "16:10")),
+        ("第五六节 14：30 ～ 16：10", "", ("14:30", "16:10")),
+        ("第五六节 9:05 至 10:45", "", ("09:05", "10:45")),
+        ("第五六节", "", (None, None)),
+        ("第三四节 09:55-11:35", "", (None, None)),
+        ("第五六节 14:30-14:00", "", (None, None)),
+        ("第五六节 14:00-15:40", " 25:30-26:10", (None, None)),
+    ],
+)
+def test_import_never_replaces_explicit_or_unknown_clocks_with_section_defaults(axis, detail, expected) -> None:
+    raw = _rows_to_raw_courses(_read_rows("schedule.html", afternoon_import_content(axis, detail)))[0]
+    times = _parse_time(raw.raw_time_or_section)
+    assert tuple(value.isoformat(timespec="minutes") if value else None for value in times) == expected
+    assert raw.raw_location == "教3-205"
+    assert raw.raw_teacher == "杨老师"
+
+
+def test_section_mapping_comes_from_current_file_not_another_row_or_a_default() -> None:
+    rows = [
+        ["时段", "节次", "星期一", "星期二", "星期三"],
+        ["上午", "第三四节 09:55-11:35", "思想概论\n杨老师\n1-16(周)[05-06节]\n教3-205"],
+        ["下午", "第五六节 14:30-16:10", ""],
+    ]
+    raw = _rows_to_raw_courses(rows)[0]
+    assert _parse_time(raw.raw_time_or_section)[0].isoformat(timespec="minutes") == "14:30"
+    rows.append(["下午", "第五六节 14:00-15:40", ""])
+    assert _parse_time(_rows_to_raw_courses(rows)[0].raw_time_or_section) == (None, None)
+
+
+def test_unknown_section_does_not_borrow_the_morning_row_clock() -> None:
+    content = afternoon_import_content("第一二节 08:00-09:40").replace(b"[05-06", "[晚自习".encode())
+    raw = _rows_to_raw_courses(_read_rows("schedule.html", content))[0]
+    assert _parse_time(raw.raw_time_or_section) == (None, None)
+
+
+@pytest.mark.parametrize("schedule", ["1-16 14:30-16:10", "14:30-16:10 1-16(周)[05-06节]"])
+def test_clock_placement_does_not_turn_hours_into_teaching_weeks(schedule: str) -> None:
+    content = afternoon_import_content().replace("1-16(周)[05-06节]".encode(), schedule.encode())
+    raw = _rows_to_raw_courses(_read_rows("schedule.html", content))[0]
+    assert raw.raw_weeks in {"1-16", "1-16(周)"}
+    assert _parse_time(raw.raw_time_or_section)[0].isoformat(timespec="minutes") == "14:30"
 
 
 def make_test_database_url(path: Path) -> str:
@@ -33,15 +108,14 @@ def auth_headers(
     client.post(
         "/api/auth/register",
         json={
-            "username": "importer",
+            "student_id": "importer",
             "password": "secret123",
             "nickname": "Importer",
-            "student_id": "importer-2024",
         },
     )
     login = client.post(
         "/api/auth/login",
-        json={"username": "importer", "password": "secret123"},
+        json={"student_id": "importer", "password": "secret123"},
     )
     assert login.status_code == 200
     headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
@@ -156,7 +230,7 @@ def test_import_does_not_conflict_single_and_even_week_courses(
     headers = auth_headers(client)
     content = """
     <table>
-      <tr><th>节次</th><th>星期三</th></tr>
+      <tr><th>节次</th><th>星期三</th><th>星期四</th><th>星期五</th></tr>
       <tr>
         <td>第一二节<br>08:00-09:40</td>
         <td>
@@ -338,7 +412,7 @@ def test_preview_import_matches_short_teaching_building_names(
 
     html = """
     <table>
-      <tr><th></th><th>星期一</th></tr>
+      <tr><th></th><th>星期一</th><th>星期二</th><th>星期三</th></tr>
       <tr>
         <td>第一二节<br>08:00-09:40</td>
         <td>大学英语4<br>潘云昊<br>1-12(周)[01-02节]<br>教3-205</td>
@@ -360,7 +434,7 @@ def test_preview_import_matches_short_teaching_building_names(
 def test_preview_import_matches_real_seed_building_aliases(client: TestClient) -> None:
     html = """
     <table>
-      <tr><th></th><th>星期二</th><th>星期五</th></tr>
+      <tr><th></th><th>星期二</th><th>星期五</th><th>星期日</th></tr>
       <tr>
         <td>第三四节<br>09:55-11:35</td>
         <td>马克思主义基本原理<br>张楠<br>1-16(周)[03-04节]<br>教4-103</td>
@@ -476,7 +550,7 @@ def test_preview_rejects_unknown_extension_with_business_error(client: TestClien
 def valid_import_content() -> bytes:
     return """
     <table>
-      <tr><th>节次</th><th>星期一</th><th>星期二</th></tr>
+      <tr><th>节次</th><th>星期一</th><th>星期二</th><th>星期三</th></tr>
       <tr>
         <td>第一二节<br>08:00-09:40</td>
         <td>大学英语<br>李老师<br>1-16(周)[01-02节]<br>教3-205</td>
@@ -489,7 +563,7 @@ def valid_import_content() -> bytes:
 def conflicting_import_content() -> bytes:
     return """
     <table>
-      <tr><th>节次</th><th>星期一</th></tr>
+      <tr><th>节次</th><th>星期一</th><th>星期二</th><th>星期三</th></tr>
       <tr>
         <td>第一二节<br>08:00-09:40</td>
         <td>
@@ -535,6 +609,7 @@ def commit_import_request(
     digest: str,
     resolutions: list[dict[str, object]] | None = None,
     excluded_row_refs: list[str] | None = None,
+    time_resolutions: list[dict[str, object]] | None = None,
     filename: str = "valid.html",
 ):
     manifest_data: dict[str, object] = {"sha256": digest}
@@ -542,6 +617,8 @@ def commit_import_request(
         manifest_data["resolutions"] = resolutions
     if excluded_row_refs is not None:
         manifest_data["excluded_row_refs"] = excluded_row_refs
+    if time_resolutions is not None:
+        manifest_data["time_resolutions"] = time_resolutions
     manifest = json.dumps(manifest_data, ensure_ascii=False)
     return client.post(
         "/api/courses/import",
@@ -565,6 +642,136 @@ def importer_counts(SessionLocal: sessionmaker) -> tuple[int, int]:
             .where(Course.user_id == user_id)
         )
         return int(course_count or 0), int(source_count or 0)
+
+
+@pytest.mark.parametrize("axis", ["第五六节", "第五六节 14:00-15:40", "第五六节 14:30-16:10"])
+def test_confirmed_import_time_is_persisted_without_changing_source(client_and_session, axis) -> None:
+    client, SessionLocal = client_and_session
+    headers = auth_headers(client)
+    content = afternoon_import_content(axis)
+    digest, _, preview = preview_and_resolutions(client, headers, content)
+    response = commit_import_request(
+        client, headers, content, digest=digest,
+        time_resolutions=[{"row_ref": "row-1", "start_time": "14:30", "end_time": "16:10"}],
+    )
+    assert response.status_code == 201, response.text
+    saved = client.get("/api/courses", headers=headers).json()
+    assert len(saved) == 1
+    assert (saved[0]["start_time"], saved[0]["end_time"]) == ("14:30", "16:10")
+    with SessionLocal() as session:
+        source = session.scalar(select(CourseImportSource).where(CourseImportSource.course_id == saved[0]["id"]))
+        assert source.raw_time_or_section == preview["candidates"][0]["source"]["raw_time_or_section"]
+
+
+def test_recognized_afternoon_clocks_persist_without_manual_override(client: TestClient) -> None:
+    headers = auth_headers(client)
+    content = afternoon_import_content()
+    digest, _, _ = preview_and_resolutions(client, headers, content)
+    response = commit_import_request(client, headers, content, digest=digest)
+    assert response.status_code == 201
+    saved = client.get("/api/courses", headers=headers).json()[0]
+    assert (saved["start_time"], saved["end_time"]) == ("14:30", "16:10")
+
+
+@pytest.mark.parametrize(
+    "overrides, status",
+    [
+        ([{"row_ref": "row-1", "start_time": "16:10", "end_time": "14:30"}], 422),
+        ([{"row_ref": "row-1", "start_time": "25:30", "end_time": "26:10"}], 422),
+        ([{"row_ref": "row-1", "start_time": "14:30", "end_time": "14:30"}], 422),
+        ([{"row_ref": "row-99", "start_time": "14:30", "end_time": "16:10"}], 409),
+        ([{"row_ref": "row-1", "start_time": "14:30", "end_time": "16:10"}] * 2, 409),
+    ],
+)
+def test_invalid_import_time_corrections_preserve_existing_courses(client: TestClient, overrides, status) -> None:
+    headers = auth_headers(client)
+    content = afternoon_import_content()
+    digest, _, _ = preview_and_resolutions(client, headers, content)
+    assert commit_import_request(client, headers, content, digest=digest).status_code == 201
+    original = client.get("/api/courses", headers=headers).json()
+    response = commit_import_request(client, headers, content, digest=digest, time_resolutions=overrides)
+    assert response.status_code == status, response.text
+    assert client.get("/api/courses", headers=headers).json() == original
+
+
+def test_import_conflicts_are_checked_after_time_corrections(client: TestClient) -> None:
+    headers = auth_headers(client)
+    content = conflicting_import_content()
+    digest, _, _ = preview_and_resolutions(client, headers, content)
+    response = commit_import_request(
+        client, headers, content, digest=digest,
+        time_resolutions=[{"row_ref": "row-2", "start_time": "14:30", "end_time": "16:10"}],
+    )
+    assert response.status_code == 201, response.text
+    assert response.json()["created_count"] == 2
+    original = client.get("/api/courses", headers=headers).json()
+    conflicting = [{"row_ref": "row-2", "start_time": "08:30", "end_time": "10:10"}]
+    response = commit_import_request(client, headers, content, digest=digest, time_resolutions=conflicting)
+    assert response.status_code == 409
+    assert response.json()["code"] == "course_conflict"
+    assert client.get("/api/courses", headers=headers).json() == original
+
+
+def test_non_timetable_news_table_is_rejected_without_replacing_courses(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    client, SessionLocal = client_and_session
+    headers = auth_headers(client)
+    original = valid_import_content()
+    original_digest, _, _ = preview_and_resolutions(client, headers, original)
+    assert commit_import_request(
+        client,
+        headers,
+        original,
+        digest=original_digest,
+    ).status_code == 201
+
+    news_page = """
+    <html><body><h1>校园资讯</h1><table>
+      <tr><th>周一活动</th></tr>
+      <tr><td>校园新闻<br>记者张<br>1-16(周) [01-02节]<br>随机地点</td></tr>
+    </table></body></html>
+    """.encode("utf-8")
+    preview = client.post(
+        "/api/courses/import/preview",
+        files={"file": ("news.html", news_page, "text/html")},
+        headers=headers,
+    )
+    commit = commit_import_request(
+        client,
+        headers,
+        news_page,
+        digest=sha256(news_page).hexdigest(),
+        filename="news.html",
+    )
+    events_page = """
+    <table>
+      <tr><th>时间</th><th>周一</th></tr>
+      <tr><td>08:00-09:40</td><td>校园活动<br>学生会<br>1-16(周) [01-02节]<br>广场</td></tr>
+    </table>
+    """.encode("utf-8")
+    events_preview = client.post(
+        "/api/courses/import/preview",
+        files={"file": ("events.html", events_page, "text/html")},
+        headers=headers,
+    )
+    events_commit = commit_import_request(
+        client,
+        headers,
+        events_page,
+        digest=sha256(events_page).hexdigest(),
+        filename="events.html",
+    )
+
+    assert preview.status_code == 422
+    assert preview.json()["code"] == "weekday_header_missing"
+    assert commit.status_code == 422
+    assert commit.json()["code"] == "weekday_header_missing"
+    assert events_preview.status_code == 422
+    assert events_preview.json()["code"] == "timetable_confidence_low"
+    assert events_commit.status_code == 422
+    assert events_commit.json()["code"] == "timetable_confidence_low"
+    assert importer_counts(SessionLocal) == (2, 2)
 
 
 def test_import_reparses_uploaded_file_and_rejects_wrong_sha(
@@ -615,7 +822,7 @@ def test_import_can_exclude_one_unrecognized_course_and_keep_the_rest(
     headers = auth_headers(client, configure_semester=False)
     content = """
     <table>
-      <tr><th>节次</th><th>星期一</th><th>星期二</th></tr>
+      <tr><th>节次</th><th>星期一</th><th>星期二</th><th>星期三</th></tr>
       <tr>
         <td>第一二节<br>08:00-09:40</td>
         <td>可导入课程<br>李老师<br>1-16(周)[01-02节]<br>教4-205</td>
@@ -662,7 +869,7 @@ def test_import_automatically_skips_course_without_time_and_location(
     headers = auth_headers(client, configure_semester=False)
     content = """
     <table>
-      <tr><th>节次</th><th>星期一</th></tr>
+      <tr><th>节次</th><th>星期一</th><th>星期二</th><th>星期三</th></tr>
       <tr>
         <td>第一二节<br>08:00-09:40</td>
         <td>可导入课程<br>李老师<br>1-16(周)[01-02节]<br>教4-205</td>
@@ -765,7 +972,7 @@ def test_import_keeps_unrecognized_location_without_blocking_timetable(
     raw_location = "校外创新基地 C 座 501"
     content = f"""
     <table>
-      <tr><th>节次</th><th>星期一</th></tr>
+      <tr><th>节次</th><th>星期一</th><th>星期二</th><th>星期三</th></tr>
       <tr>
         <td>第一二节<br>08:00-09:40</td>
         <td>创新实践<br>陈老师<br>1-12(周)[01-02节]<br>{raw_location}</td>
@@ -899,7 +1106,11 @@ def test_import_success_persists_sources_and_same_file_can_replace_again(
     with SessionLocal() as session:
         sources = list(
             session.scalars(
-                select(CourseImportSource).order_by(CourseImportSource.source_row)
+                select(CourseImportSource)
+                .join(Course, Course.id == CourseImportSource.course_id)
+                .join(User, User.id == Course.user_id)
+                .where(User.username == "importer")
+                .order_by(CourseImportSource.source_row)
             ).all()
         )
         courses = list(
@@ -973,8 +1184,8 @@ def test_import_defers_missing_room_review_until_route_time(
     headers = auth_headers(client)
     content = """
     <table>
-      <tr><th>节次</th><th>星期四</th></tr>
-      <tr><td>第一二节</td><td>形势与政策<br>周老师<br>1-4(周)[01-02节]<br>教4</td></tr>
+      <tr><th>节次</th><th>星期四</th><th>星期五</th><th>星期六</th></tr>
+      <tr><td>第一二节 08:00-09:40</td><td>形势与政策<br>周老师<br>1-4(周)[01-02节]<br>教4</td></tr>
     </table>
     """.encode("utf-8")
     digest, _, preview = preview_and_resolutions(client, headers, content)
@@ -1040,7 +1251,7 @@ def test_import_keeps_course_when_time_cannot_be_parsed(
     headers = auth_headers(client)
     content = """
     <table>
-      <tr><th>节次</th><th>星期五</th></tr>
+      <tr><th>节次</th><th>星期五</th><th>星期六</th><th>星期日</th></tr>
       <tr><td>晚间</td><td>创新实践<br>陈老师<br>1-12(周)[晚自习]<br>教4-203</td></tr>
     </table>
     """.encode("utf-8")
@@ -1151,7 +1362,7 @@ def test_import_keeps_room_name_longer_than_legacy_limit(
     assert 64 < len(long_room) <= 120
     content = f"""
     <table>
-      <tr><th>节次</th><th>星期二</th></tr>
+      <tr><th>节次</th><th>星期二</th><th>星期三</th><th>星期四</th></tr>
       <tr>
         <td>第三四节</td>
         <td>机器学习<br>吴笛<br>1-16(周)[03-04节]<br>实训大楼{long_room}</td>

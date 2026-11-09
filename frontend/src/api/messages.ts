@@ -7,13 +7,10 @@ export type BuildingMessage = {
   display_name: string
   room_name: string | null
   created_at: string
-  latitude: number | null
-  longitude: number | null
-  location_source: 'native' | 'browser' | 'manual' | null
   distance_to_building_meters: number | null
 }
 
-export type MessageLocationSource = 'native' | 'browser' | 'manual'
+export type MessageLocationSource = 'native' | 'browser'
 
 export type CreateBuildingMessagePayload = {
   content: string
@@ -21,6 +18,8 @@ export type CreateBuildingMessagePayload = {
   latitude: number
   longitude: number
   location_source: MessageLocationSource
+  located_at: string
+  location_accuracy_meters: number
 }
 
 export type BuildingChatRoom = {

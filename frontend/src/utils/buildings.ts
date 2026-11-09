@@ -8,6 +8,13 @@ export type SearchableBuilding = {
 
 const CAMPUS_BUILDING_PREFIX = /^湖北大学\s*(?:(?:[（(]\s*武昌(?:主)?校区\s*[）)])|武昌(?:主)?校区)?\s*(?:[-—–·•:：/\\|]\s*)*/
 
+function cleanDisplayCopy(value: string | null | undefined): string {
+  return (value ?? '')
+    .replace(/\s+/g, ' ')
+    .replace(/^[，,。.]|[，,]\s*$/g, '')
+    .trim()
+}
+
 /**
  * 地点原名用于搜索、匹配和路线；界面只展示校区前缀之后的具体建筑名。
  */
@@ -17,6 +24,16 @@ export function formatBuildingDisplayName(value: string): string {
 
   const conciseName = name.replace(CAMPUS_BUILDING_PREFIX, '').trim()
   return conciseName || name
+}
+
+/** 规范化地点简介，并为缺失内容提供稳定的展示文案。 */
+export function formatBuildingDescription(value: string | null | undefined): string {
+  return cleanDisplayCopy(value) || '校园里的常用地点。'
+}
+
+/** 规范化步行说明，并为缺失内容提供稳定的展示文案。 */
+export function formatBuildingWalkHint(value: string | null | undefined): string {
+  return cleanDisplayCopy(value) || '校园内步行可达'
 }
 
 function normalizeKeyword(value: string): string {

@@ -21,6 +21,10 @@ backend/data/
 .env.*
 !.env.example
 !.env.android.example
+!.env.web.example
+.dev.vars
+.dev.vars.*
+.wrangler/
 
 # Node / Vue
 node_modules/
@@ -32,6 +36,7 @@ yarn-error.log*
 pnpm-debug.log*
 frontend/test-results/
 frontend/playwright-report/
+frontend/coverage/
 /.e2e-artifacts/
 
 # IDE / OS
@@ -43,9 +48,6 @@ Thumbs.db
 # Logs
 logs/
 *.log
-
-# Superpowers visual brainstorming artifacts
-.superpowers/
 
 # Isolated feature worktrees
 .worktrees/

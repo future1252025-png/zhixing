@@ -9,7 +9,8 @@ async function createTestRouter() {
     history: createMemoryHistory(),
     routes: [
       { path: '/', component: { template: '<div />' } },
-      { path: '/courses', component: { template: '<div />' } }
+      { path: '/courses/import', component: { template: '<div />' } },
+      { path: '/profile/semester', component: { template: '<div />' } }
     ]
   })
   await router.push('/')
@@ -30,7 +31,7 @@ describe('SemesterGate', () => {
     expect(wrapper.find('.semester-gate').exists()).toBe(false)
   })
 
-  it('links an unconfigured user to timetable settings', async () => {
+  it('links an unconfigured user to the import setup', async () => {
     const router = await createTestRouter()
     const wrapper = mount(SemesterGate, {
       props: { status: 'unconfigured' },
@@ -38,7 +39,7 @@ describe('SemesterGate', () => {
     })
 
     expect(wrapper.text()).toContain('请先设置学期')
-    expect(wrapper.get('a').attributes('href')).toContain('/courses#semester-settings')
+    expect(wrapper.get('a').attributes('href')).toBe('/courses/import')
   })
 
   it('supports distinct before-term and after-term content', async () => {

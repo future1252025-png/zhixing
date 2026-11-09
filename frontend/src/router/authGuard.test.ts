@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import router, {
   resolveAuthRedirect,
+  resolveEnvironmentRedirect,
   resolveRouteScrollPosition,
   sanitizeInternalRedirect,
   shouldLoadCurrentUser
@@ -131,11 +132,26 @@ describe('auth route guard decisions', () => {
     expect(editMatch.meta.requiresAuth).toBe(true)
   })
 
-  it('registers map collector as a protected route', () => {
+  it('registers map collector as a protected development-only route', () => {
     const match = router.resolve('/map-collector')
 
     expect(match.name).toBe('map-collector')
     expect(match.meta.requiresAuth).toBe(true)
+    expect(match.meta.devOnly).toBe(true)
+    expect(resolveEnvironmentRedirect({ meta: match.meta }, false)).toEqual({ path: '/home' })
+    expect(resolveEnvironmentRedirect({ meta: match.meta }, true)).toBeNull()
+  })
+
+  it('prioritizes a history reading position over an anchor in the URL', () => {
+    expect(resolveRouteScrollPosition({ left: 0, top: 640 }, '#current-week')).toEqual({ left: 0, top: 640 })
+  })
+
+  it('keeps the privacy explanation public', () => {
+    const match = router.resolve('/privacy')
+
+    expect(match.name).toBe('privacy')
+    expect(match.meta.requiresAuth).toBeUndefined()
+    expect(match.meta.publicOnly).toBeUndefined()
   })
 
   it.each([

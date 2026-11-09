@@ -103,9 +103,10 @@ html {
   background: var(--fresh-bg);
 }
 
-/* Android WebView can report a zero top inset while the status bar still overlays content. */
+/* Keep a fallback for non-navigation native content such as the home header. */
 html.capacitor-android {
   --app-safe-area-top: max(env(safe-area-inset-top, 0px), 32px);
+  --app-native-nav-inset-top: var(--safe-area-inset-top, env(safe-area-inset-top, 0px));
 }
 
 body {
@@ -182,9 +183,11 @@ body {
   backdrop-filter: blur(18px) saturate(1.08);
 }
 
-/* Native-only breathing room; browser pages deliberately retain their current layout. */
+/* Capacitor already keeps older WebViews below the system bar; use only its
+   reported inset here so navigation does not reserve the same area twice. */
 html.capacitor-android .van-nav-bar {
-  margin-top: calc(var(--app-safe-area-top) + 12px);
+  top: var(--app-native-nav-inset-top);
+  margin-top: calc(var(--app-native-nav-inset-top) + 12px);
 }
 
 html.capacitor-android .home-content {
@@ -200,6 +203,51 @@ html.capacitor-android .page > .van-nav-bar + .collector-layout {
 html.capacitor-android #semester-settings {
   margin-top: 12px;
   scroll-margin-top: calc(var(--app-safe-area-top) + var(--nav-height, 58px) + 44px);
+}
+
+/* The Android WebView already starts below the system bar. Keep the primary
+   title cards close to that boundary, then give all three first cards the same
+   visible break. The inset in the content padding offsets Vant's relative top
+   shift, so the course page keeps its existing lower gap while schedule and
+   profile receive the missing space. */
+html.capacitor-android .courses-page > .van-nav-bar,
+html.capacitor-android .reminders-page > .van-nav-bar,
+html.capacitor-android .profile-page > .van-nav-bar,
+html.capacitor-android .course-import-page > .van-nav-bar {
+  position: relative;
+  top: var(--app-native-nav-inset-top);
+  margin-top: 12px;
+}
+
+/* On Android the course title card scrolls away with the page. Keep the
+   weekday/date strip at the real top safe area instead of reserving another
+   58px for a navigation card that is no longer visible. */
+html.capacitor-android .courses-page .week-head {
+  top: var(--app-native-nav-inset-top, env(safe-area-inset-top, 0px));
+}
+
+/* Once the weekday strip sticks, extend its paper surface through the status
+   bar safe area. Earlier course cards must not remain visible above it. */
+html.capacitor-android .courses-page .week-head.is-stuck::before {
+  position: absolute;
+  right: 0;
+  bottom: 100%;
+  left: 0;
+  height: var(--app-native-nav-inset-top, env(safe-area-inset-top, 0px));
+  background: rgba(246, 247, 252, 0.98);
+  content: "";
+  pointer-events: none;
+}
+
+html.capacitor-android .courses-page > .van-nav-bar + .page-content,
+html.capacitor-android .reminders-page > .van-nav-bar + .page-content,
+html.capacitor-android .profile-page > .van-nav-bar + .page-content,
+html.capacitor-android .course-import-page > .van-nav-bar + .page-content {
+  padding-top: calc(var(--app-native-nav-inset-top) + 8px);
+}
+
+html.capacitor-android .courses-page #semester-settings {
+  margin-top: 0;
 }
 
 .van-nav-bar::after {

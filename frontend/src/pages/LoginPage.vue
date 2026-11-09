@@ -3,11 +3,11 @@ import { computed, reactive, ref } from 'vue'
 import { showFailToast } from 'vant'
 import { useRoute, useRouter } from 'vue-router'
 
-import { getCourses } from '@/api/courses'
 import { extractBusinessError } from '@/api/errors'
-import { fetchSemester } from '@/api/semester'
 import TechIcon from '@/components/TechIcon.vue'
 import { useAuthStore } from '@/stores/auth'
+import { useCoursesStore } from '@/stores/courses'
+import { useSemesterStore } from '@/stores/semester'
 import { sanitizeInternalRedirect } from '@/router'
 import { useKeyboardAwarePage } from '@/utils/keyboardInset'
 import { prepareLoginIntro } from '@/utils/loginIntro'
@@ -17,7 +17,7 @@ const route = useRoute()
 const authStore = useAuthStore()
 const submitting = ref(false)
 const showPassword = ref(false)
-const form = reactive({ username: '', password: '' })
+const form = reactive({ student_id: '', password: '' })
 // 会话过期被踢回来时给一句温和的解释，比一闪而过的 toast 更不容易错过
 const sessionExpired = computed(() => route.query.reason === 'expired')
 const { keyboardInset, onFieldFocus } = useKeyboardAwarePage({ basePaddingPx: 24 })
@@ -29,10 +29,10 @@ const pageStyle = computed(() => ({
 async function handleSubmit() {
   submitting.value = true
   try {
-    await authStore.login(form)
+    const user = await authStore.login(form)
     // 乐观导航：登录成功立刻进首页，欢迎卡数据在后台预取；
     // 首页欢迎卡是唯一的欢迎反馈，这里不再叠加 toast
-    void prepareLoginIntro(getCourses, fetchSemester)
+    void prepareLoginIntro(() => useCoursesStore().ensureLoaded(), () => useSemesterStore().load(user.id))
     const redirect = sanitizeInternalRedirect(route.query.redirect)
     await router.replace(redirect)
   } catch (error) {
@@ -58,7 +58,7 @@ async function handleSubmit() {
       <section class="welcome-scene" aria-labelledby="login-title">
         <div class="welcome-copy">
           <span>嗨，今天也要去校园里走走</span>
-          <h1 id="login-title">把课程、地点和出发时间<br />轻轻放在一起。</h1>
+          <h1 id="login-title">把课程、地点和日常提醒<br />轻轻放在一起。</h1>
           <p>不赶路，也不错过。智行为你整理今天的校园节奏。</p>
         </div>
 
@@ -85,7 +85,7 @@ async function handleSubmit() {
           </svg>
           <span class="path-dot dot-a"><TechIcon name="calendar" :size="17" /></span>
           <span class="path-dot dot-b"><TechIcon name="route" :size="17" /></span>
-          <span class="path-ready"><i></i>路线慢慢铺好了</span>
+          <span class="path-ready"><i></i>一天慢慢安排好了</span>
         </div>
       </section>
 
@@ -105,13 +105,13 @@ async function handleSubmit() {
         <van-form class="auth-form" @submit="handleSubmit">
           <van-cell-group inset>
             <van-field
-              v-model="form.username"
-              name="username"
-              label="账号"
-              placeholder="输入用户名"
+              v-model="form.student_id"
+              name="student_id"
+              label="学号"
+              placeholder="输入学号"
               autocomplete="username"
               left-icon="contact"
-              :rules="[{ required: true, message: '请输入用户名' }]"
+              :rules="[{ required: true, message: '请输入学号' }]"
             />
             <van-field
               v-model="form.password"
@@ -127,7 +127,7 @@ async function handleSubmit() {
             />
           </van-cell-group>
 
-          <p class="privacy-note"><i></i> 登录信息只用于你的校园账户</p>
+          <p class="privacy-note"><i></i> 登录信息只用于你的校园账号</p>
 
           <div class="page-actions">
             <van-button

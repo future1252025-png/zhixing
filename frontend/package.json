@@ -8,25 +8,34 @@
     "npm": ">=10"
   },
   "scripts": {
-    "dev": "vite --host 127.0.0.1",
+    "dev": "cross-env VITE_API_BASE_URL=/ vite --config vite.tablet.config.ts --host 127.0.0.1",
+    "dev:local": "vite --host 127.0.0.1",
     "dev:e2e": "cross-env VITE_API_BASE_URL=http://127.0.0.1:8010 vite --host 127.0.0.1 --port 5179",
     "build:e2e": "cross-env VITE_API_BASE_URL=http://127.0.0.1:8010 npm run build",
     "serve:e2e": "npm run build:e2e && vite preview --host 127.0.0.1 --port 5179",
     "build": "vue-tsc --noEmit && vite build",
+    "build:web": "node tools/validateWebProductionEnv.mjs && vue-tsc --noEmit && tsc --noEmit -p tsconfig.functions.json && node tools/buildWeb.mjs && node tools/verifyWebProductionBundle.mjs",
+    "test:web": "vitest run --config vitest.web.config.ts",
+    "preview:web": "wrangler pages dev dist --ip 127.0.0.1 --port 8788",
     "preview": "vite preview --host 127.0.0.1",
     "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
     "test:e2e": "playwright test",
     "test:e2e:wide": "cross-env E2E_VIEWPORT_WIDTH=430 E2E_VIEWPORT_HEIGHT=932 playwright test",
     "build:android": "vue-tsc --noEmit && vite build --mode android",
-    "android:sync": "npm run build:android && cross-env CAPACITOR_ALLOW_MIXED_CONTENT=true cap sync android",
+    "android:sync": "node tools/validateAndroidProductionEnv.mjs && npm run build:android && cross-env CAPACITOR_ALLOW_MIXED_CONTENT=false cap sync android && node tools/verifyAndroidProductionBundle.mjs",
+    "android:sync:dev": "npm run build:android && cross-env CAPACITOR_ALLOW_MIXED_CONTENT=true cap sync android",
     "android:test": "cd android && gradlew.bat test",
-    "android:open": "cap open android"
+    "android:open": "cap open android",
+    "android:release": "npm run android:sync && cross-env-shell ANDROID_REQUIRE_RELEASE_SIGNING=true \"cd android && gradlew.bat clean bundleRelease --no-daemon\""
   },
   "dependencies": {
     "@amap/amap-jsapi-loader": "^1.0.1",
     "@capacitor/android": "^8.4.2",
+    "@capacitor/app": "^8.1.1",
     "@capacitor/core": "^8.4.2",
     "@capacitor/geolocation": "^8.2.0",
+    "@capacitor/local-notifications": "^8.3.1",
     "axios": "^1.18.1",
     "lxgw-wenkai-screen-webfont": "^1.7.0",
     "pinia": "^3.0.0",
@@ -41,6 +50,7 @@
     "@types/node": "^22.10.2",
     "@vant/auto-import-resolver": "^1.3.0",
     "@vitejs/plugin-vue": "^5.2.1",
+    "@vitest/coverage-v8": "^4.1.10",
     "@vue/test-utils": "^2.4.11",
     "cross-env": "^10.1.0",
     "jsdom": "^25.0.1",
@@ -48,7 +58,8 @@
     "unplugin-vue-components": "^32.1.0",
     "vite": "^6.4.3",
     "vitest": "^4.1.10",
-    "vue-tsc": "^3.3.8"
+    "vue-tsc": "^3.3.8",
+    "wrangler": "4.151.1"
   },
   "overrides": {
     "@vue/test-utils": {

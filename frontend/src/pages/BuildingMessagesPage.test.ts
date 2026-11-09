@@ -75,9 +75,6 @@ function message(id: number): BuildingMessage {
     display_name: '匿名同学',
     room_name: null,
     created_at: '2026-07-07T08:00:00',
-    latitude: null,
-    longitude: null,
-    location_source: null,
     distance_to_building_meters: null
   }
 }
@@ -99,7 +96,11 @@ async function mountPage() {
           props: ['description'],
           template: '<div class="van-empty">{{ description }}<slot /></div>'
         },
-        'van-field': { template: '<label><slot name="input" /></label>' },
+        'van-field': {
+          props: ['modelValue'],
+          emits: ['update:modelValue'],
+          template: '<label><textarea :value="modelValue" @input="$emit(\'update:modelValue\', $event.target.value)" /></label>'
+        },
         'van-button': { template: '<button><slot /></button>' },
         TechIcon: { template: '<i />' }
       },
@@ -121,6 +122,7 @@ describe('BuildingMessagesPage', () => {
       latitude: building.latitude,
       longitude: building.longitude,
       accuracy: 12,
+      locatedAt: '2026-07-07T08:00:00.000Z',
       source: 'native'
     })
     mocks.getDeviceGeolocationErrorMessage.mockReturnValue('定位失败，请稍后重试')
@@ -205,6 +207,44 @@ describe('BuildingMessagesPage', () => {
     expect(wrapper.text()).not.toContain('GPS')
     expect(wrapper.text()).not.toContain('浏览器定位')
     expect(mocks.showSuccessToast).toHaveBeenCalledWith('定位成功')
+    wrapper.unmount()
+  })
+
+  it('posts the original location sampling time and accuracy', async () => {
+    mocks.validateMessageContent.mockReturnValue(null)
+    mocks.createBuildingMessage.mockResolvedValue(message(4))
+    const wrapper = await mountPage()
+
+    await wrapper.get('.location-actions button').trigger('click')
+    await wrapper.find('textarea').setValue('刚到教室')
+    await wrapper.get('.message-composer').trigger('submit')
+    await flushPromises()
+
+    expect(mocks.createBuildingMessage).toHaveBeenCalledWith(1, expect.objectContaining({
+      location_source: 'native',
+      located_at: '2026-07-07T08:00:00.000Z',
+      location_accuracy_meters: 12
+    }))
+    wrapper.unmount()
+  })
+
+  it('does not publish when the sampled location accuracy is worse than 100 metres', async () => {
+    mocks.requestDeviceCurrentPosition.mockResolvedValueOnce({
+      latitude: building.latitude,
+      longitude: building.longitude,
+      accuracy: 140,
+      locatedAt: '2026-07-07T08:00:00.000Z',
+      source: 'browser'
+    })
+    const wrapper = await mountPage()
+
+    await wrapper.get('.location-actions button').trigger('click')
+    await wrapper.find('textarea').setValue('不应发送')
+    await wrapper.get('.message-composer').trigger('click')
+    await flushPromises()
+
+    expect(mocks.showFailToast).toHaveBeenCalledWith('这次定位精度不足，请移动到开阔处后重新定位')
+    expect(mocks.createBuildingMessage).not.toHaveBeenCalled()
     wrapper.unmount()
   })
 

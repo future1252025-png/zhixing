@@ -7,7 +7,7 @@
     <meta name="color-scheme" content="light" />
     <meta
       name="description"
-      content="智行，把课表、校园地点和出发路线放进轻松自然的校园日常。"
+      content="智行，把课表、校园地点和日常提醒放进轻松自然的校园日常。"
     />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
@@ -16,10 +16,79 @@
     <link rel="preconnect" href="https://vdata.amap.com" crossorigin />
     <link rel="dns-prefetch" href="https://vdata.amap.com" />
     <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" type="image/svg+xml" href="/icons/icon.svg" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
     <title>智行 · 校园日常</title>
+    <style>
+      .app-startup {
+        min-height: 100vh;
+        min-height: 100dvh;
+        display: grid;
+        place-content: center;
+        justify-items: center;
+        gap: 18px;
+        padding: 32px;
+        background:
+          radial-gradient(circle at 22% 18%, rgba(242, 200, 111, .2), transparent 18rem),
+          radial-gradient(circle at 82% 72%, rgba(135, 168, 120, .2), transparent 20rem),
+          #f4f6ef;
+        color: #26362a;
+        font-family: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+        text-align: center;
+      }
+      .app-startup__mark {
+        position: relative;
+        width: 72px;
+        height: 72px;
+        border-radius: 24px 24px 14px 24px;
+        background: #4f7d58;
+        box-shadow: 0 16px 38px rgba(53, 95, 64, .2);
+      }
+      .app-startup__mark::before,
+      .app-startup__mark::after {
+        content: "";
+        position: absolute;
+        width: 29px;
+        height: 15px;
+        border-radius: 100% 0 100% 0;
+        background: #eef5e9;
+        transform: rotate(-34deg);
+      }
+      .app-startup__mark::before { top: 18px; left: 14px; }
+      .app-startup__mark::after { right: 12px; bottom: 17px; transform: rotate(146deg); }
+      .app-startup strong { font-size: 25px; letter-spacing: .16em; }
+      .app-startup p { margin: -10px 0 0; color: #5f6f62; font-size: 13px; }
+      .app-startup__pulse {
+        width: 44px;
+        height: 4px;
+        overflow: hidden;
+        border-radius: 999px;
+        background: rgba(79, 125, 88, .14);
+      }
+      .app-startup__pulse::after {
+        content: "";
+        display: block;
+        width: 55%;
+        height: 100%;
+        border-radius: inherit;
+        background: #87a878;
+        animation: startup-pulse 900ms ease-in-out infinite alternate;
+      }
+      @keyframes startup-pulse { to { transform: translateX(82%); } }
+      @media (prefers-reduced-motion: reduce) {
+        .app-startup__pulse::after { animation: none; transform: translateX(40%); }
+      }
+    </style>
   </head>
   <body>
-    <div id="app"></div>
+    <div id="app">
+      <main class="app-startup" aria-live="polite">
+        <span class="app-startup__mark" aria-hidden="true"></span>
+        <strong>智行</strong>
+        <p>正在接上今天的校园日常</p>
+        <span class="app-startup__pulse" aria-hidden="true"></span>
+      </main>
+    </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

@@ -27,3 +27,4 @@ class Building(Base):
     courses = relationship("Course", back_populates="building")
     messages = relationship("Message", back_populates="building")
     location_presets = relationship("LocationPreset", back_populates="building")
+    map_pois = relationship("BuildingMapPoi", back_populates="building", cascade="all, delete-orphan", passive_deletes=True)

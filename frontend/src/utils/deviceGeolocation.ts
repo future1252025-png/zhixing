@@ -7,6 +7,8 @@ export type DevicePosition = {
   latitude: number
   longitude: number
   accuracy: number | null
+  /** 定位采样发生的时刻，而不是用户稍后点击发送的时刻。 */
+  locatedAt: string
   source: DeviceLocationSource
 }
 
@@ -28,9 +30,18 @@ function hasGrantedPermission(status: {
   return status.location === 'granted' || status.coarseLocation === 'granted'
 }
 
-async function requestNativePosition(): Promise<DevicePosition> {
+function formatLocatedAt(timestamp: unknown): string {
+  if (typeof timestamp === 'number' && Number.isFinite(timestamp)) {
+    const sampledAt = new Date(timestamp)
+    if (!Number.isNaN(sampledAt.getTime())) return sampledAt.toISOString()
+  }
+  // 某些原生实现不返回 timestamp；此处紧邻定位结果采集完成，仍能准确表示采样时刻。
+  return new Date().toISOString()
+}
+
+async function requestNativePosition(requestPermission: boolean): Promise<DevicePosition> {
   let permission = await Geolocation.checkPermissions()
-  if (!hasGrantedPermission(permission)) {
+  if (!hasGrantedPermission(permission) && requestPermission) {
     permission = await Geolocation.requestPermissions({ permissions: ['location'] })
   }
   if (!hasGrantedPermission(permission)) {
@@ -42,8 +53,8 @@ async function requestNativePosition(): Promise<DevicePosition> {
   const position = await Geolocation.getCurrentPosition({
     enableHighAccuracy: true,
     enableLocationFallback: true,
-    // “定位我”是用户主动触发的确认动作，必须读取当前位置，不能复用
-    // 上一次进入频道或出发页时留下的缓存坐标。
+    // 每次实际采样读取新位置；地图内的短期复用由独立 store 控制，
+    // 不影响频道发布时必须重新定位的校验流程。
     maximumAge: 0,
     timeout: 15_000
   })
@@ -53,15 +64,22 @@ async function requestNativePosition(): Promise<DevicePosition> {
     accuracy: Number.isFinite(position.coords.accuracy)
       ? position.coords.accuracy
       : null,
+    locatedAt: formatLocatedAt(position.timestamp),
     source: 'native'
   }
 }
 
-function requestBrowserPosition(): Promise<DevicePosition> {
+async function requestBrowserPosition(requestPermission: boolean): Promise<DevicePosition> {
   if (typeof navigator === 'undefined' || !navigator.geolocation) {
     return Promise.reject(Object.assign(new Error('当前环境不支持定位'), {
       code: 'GEOLOCATION_UNAVAILABLE'
     }))
+  }
+  if (!requestPermission) {
+    // Automatic refreshes must not reopen a dismissed permission prompt. If
+    // permission queries are unavailable, the explicit retry remains usable.
+    const permission = await navigator.permissions?.query({ name: 'geolocation' }).catch(() => null)
+    if (permission?.state !== 'granted') throw Object.assign(new Error('定位尚未授权'), { code: 1 })
   }
   return new Promise((resolve, reject) => {
     navigator.geolocation.getCurrentPosition(
@@ -71,6 +89,7 @@ function requestBrowserPosition(): Promise<DevicePosition> {
         accuracy: Number.isFinite(position.coords.accuracy)
           ? position.coords.accuracy
           : null,
+        locatedAt: formatLocatedAt(position.timestamp),
         source: 'browser'
       }),
       reject,
@@ -83,10 +102,10 @@ function requestBrowserPosition(): Promise<DevicePosition> {
   })
 }
 
-export function requestDeviceCurrentPosition(): Promise<DevicePosition> {
+export function requestDeviceCurrentPosition(options: { requestPermission?: boolean } = {}): Promise<DevicePosition> {
   return Capacitor.isNativePlatform()
-    ? requestNativePosition()
-    : requestBrowserPosition()
+    ? requestNativePosition(options.requestPermission !== false)
+    : requestBrowserPosition(options.requestPermission !== false)
 }
 
 export function getDeviceGeolocationErrorMessage(error: unknown): string {

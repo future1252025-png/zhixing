@@ -68,6 +68,52 @@ describe('API errors', () => {
     ).toBe('该时间与已有课程冲突')
   })
 
+  it('localizes known business errors returned by an older backend', () => {
+    expect(
+      extractBusinessError({
+        response: {
+          status: 409,
+          data: {
+            code: 'semester_unconfigured',
+            message: 'Semester is not configured',
+            fields: [],
+            details: {}
+          }
+        }
+      }).message
+    ).toBe('尚未设置学期，请先完成学期设置')
+  })
+
+  it.each([
+    [405, '/api/courses/makeups'],
+    [404, 'https://campus.example/api/courses/makeups?retry=1'],
+    [405, '/api/courses/makeups/12'],
+    [404, '/api/courses/makeups/batches/test-batch']
+  ])('explains an unavailable makeup endpoint (%s, %s)', (status, url) => {
+    const result = extractBusinessError({ config: { url }, response: { status, data: { detail: 'Method Not Allowed' } } })
+    expect(result.code).toBe('makeup_api_unavailable')
+    expect(result.message).toContain('平板后端已更新')
+    expect(result.status).toBe(status)
+  })
+
+  it('also reads the request URL from the response config', () => {
+    expect(extractBusinessError({ response: { status: 405, config: { url: '/api/courses/makeups' } } }).code)
+      .toBe('makeup_api_unavailable')
+  })
+
+  it('preserves a real missing course error on the makeup endpoint', () => {
+    expect(extractBusinessError({ config: { url: '/api/courses/makeups' }, response: { status: 404,
+      data: { code: 'course_not_found', message: '课程不存在', fields: [], details: {} }
+    } }).code).toBe('course_not_found')
+  })
+
+  it.each([
+    [405, '/api/courses'], [404, '/api/courses/makeups-other'], [500, '/api/courses/makeups'], [401, '/api/courses/makeups']
+  ])('does not mislabel other failures (%s, %s)', (status, url) => {
+    expect(extractBusinessError({ config: { url }, response: { status, data: { detail: 'original message' } } }).message)
+      .toBe('original message')
+  })
+
   it.each<[unknown, number]>([
     [null, 0],
     [{ response: { status: 500, data: { detail: '   ' } } }, 500],

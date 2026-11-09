@@ -16,6 +16,7 @@ import { haversineDistanceMeters } from '@/utils/geo'
 import { useKeyboardInset } from '@/utils/keyboardInset'
 import { MESSAGE_PAGE_SIZE, hasMoreMessagePages, mergeOlderMessages } from '@/utils/messagePagination'
 import { goBack } from '@/utils/navigation'
+import { savedRouteScroll } from '@/utils/routeScroll'
 
 const MAX_MESSAGE_DISTANCE_METERS = 500
 
@@ -38,7 +39,14 @@ const selectedRoomName = computed(() => {
 })
 const roomTitle = computed(() => selectedRoomName.value || '地点频道')
 const remainingCount = computed(() => Math.max(0, 200 - draft.value.length))
-const currentLocation = ref<{ latitude: number; longitude: number; location_source: MessageLocationSource; label: string } | null>(null)
+const currentLocation = ref<{
+  latitude: number
+  longitude: number
+  location_source: MessageLocationSource
+  located_at: string
+  location_accuracy_meters: number | null
+  label: string
+} | null>(null)
 const distanceToBuildingMeters = computed(() => {
   if (!currentLocation.value || !building.value) return null
   return haversineDistanceMeters(currentLocation.value, building.value)
@@ -47,11 +55,17 @@ const isLocationInsideBuildingRange = computed(() =>
   distanceToBuildingMeters.value !== null &&
   distanceToBuildingMeters.value <= MAX_MESSAGE_DISTANCE_METERS
 )
+const hasUsableLocationAccuracy = computed(() => {
+  const accuracy = currentLocation.value?.location_accuracy_meters
+  return accuracy !== null && accuracy !== undefined &&
+    Number.isFinite(accuracy) && accuracy >= 0 && accuracy <= 100
+})
 const composerDisabled = computed(() =>
-  !currentLocation.value || !isLocationInsideBuildingRange.value
+  !currentLocation.value || !hasUsableLocationAccuracy.value || !isLocationInsideBuildingRange.value
 )
 const composerPrompt = computed(() => {
   if (!currentLocation.value) return '请先点击“定位我”，确认你在该建筑附近后才能留言'
+  if (!hasUsableLocationAccuracy.value) return '这次定位精度不足，请移动到开阔处后重新定位'
   if (!isLocationInsideBuildingRange.value) {
     return `当前位置距该建筑约 ${formatDistance(distanceToBuildingMeters.value)}，超过 ${MAX_MESSAGE_DISTANCE_METERS} 米，不能在这里留言`
   }
@@ -191,7 +205,7 @@ async function loadPage() {
     building.value = nextBuilding
     messages.value = nextMessages
     hasMoreMessages.value = hasMoreMessagePages(nextMessages)
-    await scrollToBottom()
+    if (!savedRouteScroll(route.fullPath)) await scrollToBottom()
   } catch (error) {
     if (requestSeq !== messagesRequestSeq) return
     errorMessage.value = getErrorMessage(error)
@@ -207,9 +221,12 @@ async function requestCurrentLocation() {
       latitude: position.latitude,
       longitude: position.longitude,
       location_source: position.source,
+      located_at: position.locatedAt,
+      location_accuracy_meters: position.accuracy,
       label: position.source === 'native' ? '手机当前位置' : '当前位置'
     }
-    showSuccessToast('定位成功')
+    if (hasUsableLocationAccuracy.value) showSuccessToast('定位成功')
+    else showFailToast('这次定位精度不足，请移动到开阔处后重新定位')
   } catch (error) {
     showFailToast(getDeviceGeolocationErrorMessage(error))
   } finally {
@@ -223,7 +240,15 @@ async function submitMessage() {
   if (!currentLocation.value) return showFailToast('请先获取当前位置')
   sending.value = true
   try {
-    await createBuildingMessage(buildingId.value, { content: draft.value, room_name: selectedRoomName.value, latitude: currentLocation.value.latitude, longitude: currentLocation.value.longitude, location_source: currentLocation.value.location_source })
+    await createBuildingMessage(buildingId.value, {
+      content: draft.value,
+      room_name: selectedRoomName.value,
+      latitude: currentLocation.value.latitude,
+      longitude: currentLocation.value.longitude,
+      location_source: currentLocation.value.location_source,
+      located_at: currentLocation.value.located_at,
+      location_accuracy_meters: currentLocation.value.location_accuracy_meters as number
+    })
     draft.value = ''; showSuccessToast('留言已发送'); await loadMessages()
   } catch (error) { showFailToast(getErrorMessage(error)) } finally { sending.value = false }
 }
@@ -250,7 +275,7 @@ watch(composerLift, () => {
 </script>
 
 <template>
-  <section class="page message-page" :style="pageStyle">
+  <section class="page message-page" :style="pageStyle" :data-route-content-ready="!loading">
     <van-nav-bar :title="roomTitle" left-arrow @click-left="goBack(router, '/home')" />
     <div class="message-content">
       <header
@@ -275,8 +300,8 @@ watch(composerLift, () => {
         v-reveal="{ from: 'right', distance: 36, stagger: 45 }"
         class="location-card"
         :class="{
-          verified: currentLocation && isLocationInsideBuildingRange,
-          denied: currentLocation && !isLocationInsideBuildingRange,
+          verified: currentLocation && hasUsableLocationAccuracy && isLocationInsideBuildingRange,
+          denied: currentLocation && (!hasUsableLocationAccuracy || !isLocationInsideBuildingRange),
           locating
         }"
         aria-live="polite"
@@ -287,10 +312,10 @@ watch(composerLift, () => {
         </span>
         <div class="location-copy">
           <small>
-            {{ locating ? '正在获取位置' : !currentLocation ? '还没有确认位置' : isLocationInsideBuildingRange ? '位置已确认' : '距离有点远' }}
+            {{ locating ? '正在获取位置' : !currentLocation ? '还没有确认位置' : !hasUsableLocationAccuracy ? '定位精度不足' : isLocationInsideBuildingRange ? '位置已确认' : '距离有点远' }}
           </small>
           <strong>
-            {{ locating ? '稍等一下' : !currentLocation ? '在附近才能发布留言' : isLocationInsideBuildingRange ? '现在可以留言了' : '请靠近这个地点' }}
+            {{ locating ? '稍等一下' : !currentLocation ? '在附近才能发布留言' : !hasUsableLocationAccuracy ? '请重新定位' : isLocationInsideBuildingRange ? '现在可以留言了' : '请靠近这个地点' }}
           </strong>
           <p>{{ locationText }}</p>
           <span v-if="distanceToBuildingMeters !== null">

@@ -96,7 +96,9 @@ describe('message api', () => {
       room_name: '教4-203',
       latitude: 30.581,
       longitude: 114.329,
-      location_source: 'browser'
+      location_source: 'browser',
+      located_at: '2026-05-29T08:00:00.000Z',
+      location_accuracy_meters: 16
     })
 
     expect(request.post).toHaveBeenCalledWith('/api/buildings/1/messages', {
@@ -104,7 +106,9 @@ describe('message api', () => {
       room_name: '教4-203',
       latitude: 30.581,
       longitude: 114.329,
-      location_source: 'browser'
+      location_source: 'browser',
+      located_at: '2026-05-29T08:00:00.000Z',
+      location_accuracy_meters: 16
     })
     expect(result.content).toBe('今天这里很安静')
   })

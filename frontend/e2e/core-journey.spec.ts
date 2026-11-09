@@ -5,7 +5,6 @@ import { fileURLToPath } from 'node:url'
 
 const currentDir = dirname(fileURLToPath(import.meta.url))
 const fixturePath = resolve(currentDir, 'fixtures/import-schedule.html')
-const username = 'e2e_student'
 const password = 'e2e-pass-2026'
 const fullManualRoom = '东区三层 A101 交互设计实验室'
 
@@ -55,6 +54,25 @@ async function expectReadableControls(page: Page): Promise<void> {
       const center = controlIsFullyInViewport && !centerIsClipped
         ? document.elementFromPoint(centerX, centerY)
         : null
+      const coveringTabbar = center?.closest('.app-tabbar')
+      const tabbarTop = coveringTabbar?.getBoundingClientRect().top ?? window.innerHeight
+      const requiredScrollToClearTabbar = Math.max(0, centerY - tabbarTop + rect.height / 2 + 8)
+      const documentHeight = Math.max(
+        document.documentElement.scrollHeight,
+        document.body.scrollHeight
+      )
+      const remainingScroll = Math.max(0, documentHeight - window.innerHeight - window.scrollY)
+      const canScrollClearTabbar = Boolean(
+        coveringTabbar && remainingScroll >= requiredScrollToClearTabbar
+      )
+      // WebKit centers scrollIntoView differently. A row scrolled underneath
+      // its own sticky week header is intentionally hidden, not an unusable
+      // visible control. Only accept this if scrolling up can reveal it fully.
+      const coveringWeekHead = center?.closest('.week-head')
+      const weekHeadBottom = coveringWeekHead?.getBoundingClientRect().bottom ?? 0
+      const canScrollClearWeekHead = Boolean(coveringWeekHead
+        && element.closest('.timetable-shell') === coveringWeekHead.closest('.timetable-shell')
+        && window.scrollY >= Math.max(0, weekHeadBottom - centerY + rect.height / 2 + 8))
       const issues: string[] = []
       if (!text) issues.push('缺少可读文字或 aria-label')
       if (rect.height < 40) issues.push(`高度只有 ${rect.height.toFixed(1)}px`)
@@ -63,7 +81,9 @@ async function expectReadableControls(page: Page): Promise<void> {
         center
         && center !== element
         && !element.contains(center)
-        && !center.closest('.app-tabbar, .van-nav-bar, .van-toast, .van-overlay')
+        && !center.closest('.van-nav-bar, .van-toast, .van-overlay')
+        && !canScrollClearTabbar
+        && !canScrollClearWeekHead
       ) {
         issues.push('中心被其他元素遮挡')
       }
@@ -81,17 +101,25 @@ async function assertPageQuality(page: Page): Promise<void> {
 
 async function fillCourseForm(page: Page, courseName: string): Promise<void> {
   await page.locator('.van-field').filter({ hasText: '课程名称' }).locator('input').fill(courseName)
-  await page.getByLabel('选择星期').selectOption('1')
+  await page.getByLabel('星期', { exact: true }).selectOption('1')
   await page.locator('.van-field').filter({ hasText: '上课周次' }).locator('input').fill('1-16')
-  await page.locator('.van-field').filter({ hasText: '开始时间' }).locator('input').fill('09:00')
-  await page.locator('.van-field').filter({ hasText: '结束时间' }).locator('input').fill('10:40')
+  await page.locator('[name="start_time"]').fill('09:00')
+  await page.locator('[name="end_time"]').fill('10:40')
   await page.locator('.building-picker .picker-trigger').click()
   await page.locator('.picker-sheet .sheet-search input').fill('国际教育学院')
   await page.locator('.picker-sheet .sheet-option', { hasText: '国际教育学院' }).first().click()
   await page.locator('.van-field').filter({ hasText: /^教室/ }).locator('input').fill(fullManualRoom)
 }
 
-test('mobile core journey keeps weeks, locations, sessions, text, and actions trustworthy', async ({ page }, testInfo) => {
+test('core journey keeps weeks, locations, sessions, text, and actions trustworthy', async ({ page }, testInfo) => {
+  // This full journey runs multiple axe audits; WebKit's isolated audit pages
+  // take longer than Chromium. Keep the same assertions with a larger budget.
+  if (testInfo.project.name === 'mobile-webkit') test.setTimeout(240_000)
+  const studentId = `E2E2026-${testInfo.project.name}`
+  // Map events have their own SDK contract test and live release smoke check.
+  // Here audit our fallback/directory, without third-party cross-origin frames
+  // delaying axe's WebKit frame collection for a minute on each home visit.
+  await page.route('https://webapi.amap.com/maps?*', route => route.abort())
   await page.clock.install({ time: new Date('2026-09-21T07:00:00+08:00') })
   await page.goto('/login')
   await screenshot(page, testInfo, 'login.png')
@@ -100,8 +128,7 @@ test('mobile core journey keeps weeks, locations, sessions, text, and actions tr
   await page.getByRole('button', { name: /创建账号/ }).click()
   await page.waitForURL('**/register')
   await page.locator('input[name="nickname"]').fill('端到端同学')
-  await page.locator('input[name="username"]').fill(username)
-  await page.locator('input[name="student_id"]').fill('E2E2026001')
+  await page.locator('input[name="student_id"]').fill(studentId)
   await page.locator('input[name="password"]').fill(password)
   await page.locator('input[name="confirm_password"]').fill(password)
   await page.getByRole('button', { name: /创建账号/ }).click()
@@ -113,6 +140,9 @@ test('mobile core journey keeps weeks, locations, sessions, text, and actions tr
 
   await page.getByRole('link', { name: '课表', exact: true }).click()
   await page.waitForURL('**/courses')
+  await expect(page.locator('.semester-card')).toHaveCount(0)
+  await page.getByRole('button', { name: '导入', exact: true }).click()
+  await page.waitForURL('**/courses/import')
   await page.locator('input[name="start_date"]').fill('2026-08-31')
   await page.locator('input[name="total_weeks"]').fill('20')
   await page.getByRole('button', { name: '保存学期设置' }).click()
@@ -138,20 +168,14 @@ test('mobile core journey keeps weeks, locations, sessions, text, and actions tr
   expect((await conflictResponse).status()).toBe(409)
   await expect(page.getByRole('alert')).toContainText('这段时间已有课程')
   await expect(page.getByRole('alert')).toContainText('交互设计基础')
-  const coursesAfterConflict = await page.evaluate(async () => {
-    const token = localStorage.getItem('campusmind_token')
-    const response = await fetch('http://127.0.0.1:8010/api/courses', {
-      headers: { Authorization: `Bearer ${token}` }
-    })
-    return response.json() as Promise<Array<{ course_name: string }>>
-  })
-  expect(coursesAfterConflict.filter((course) => course.course_name === '交互设计基础')).toHaveLength(1)
-  expect(coursesAfterConflict.some((course) => course.course_name === '不应写入的冲突课程')).toBe(false)
+  await page.goto('/courses')
+  await expect(page.getByText('交互设计基础').first()).toBeVisible()
+  await expect(page.getByText('不应写入的冲突课程')).toHaveCount(0)
 
   await page.goto('/courses/import')
-  await expect(page.getByTestId('hubu-native-import')).toBeDisabled()
-  await expect(page.locator('.hubu-import-sheet')).toContainText('需安卓 App')
-  await expect(page.locator('.privacy-note')).toContainText('不读取密码，不导出登录 Cookie')
+  await expect(page.getByTestId('hubu-native-import')).toHaveCount(0)
+  await expect(page.locator('.hubu-import-sheet')).toHaveCount(0)
+  await expect(page.locator('.upload-sheet')).toContainText('先在学校教务系统导出课表')
   await expect(page.locator('.hubu-browser-link')).toHaveAttribute(
     'href',
     'https://jwxt.hubu.edu.cn/jsxsd/'
@@ -166,8 +190,26 @@ test('mobile core journey keeps weeks, locations, sessions, text, and actions tr
   await expect(page.getByTestId('commit-import')).toBeEnabled()
   await page.getByTestId('commit-import').click()
   await expect(page.getByText('1 门课程已覆盖导入')).toBeVisible()
+  await expect(page.locator('.semester-card')).toHaveCount(0)
   await page.getByTestId('view-courses').click()
   await page.waitForURL('**/courses')
+
+  await expect(page.locator('.semester-card')).toHaveCount(0)
+  await page.getByRole('link', { name: '我的', exact: true }).click()
+  await page.getByRole('link', { name: /学期设置/ }).click()
+  await expect(page).toHaveURL(/\/profile\/semester$/)
+  await expect(page.locator('.semester-facts')).toContainText('2026-08-31')
+  await page.getByTestId('edit-semester').click()
+  await page.locator('input[name="total_weeks"]').fill('18')
+  await page.getByRole('button', { name: '保存学期设置' }).click()
+  await expect(page.locator('.semester-facts')).toContainText('18 周')
+  await screenshot(page, testInfo, 'profile-semester-settings.png')
+  await assertPageQuality(page)
+  await page.goto('/courses#semester-settings')
+  await expect(page).toHaveURL(/\/profile\/semester$/)
+  await page.goto('/courses')
+  await expect(page.locator('.semester-card')).toHaveCount(0)
+  await expect(page.locator('#courseWeekSelect option')).toHaveCount(18)
 
   const manualCourseCard = page.locator('.timetable-course').filter({ hasText: '交互设计基础' })
   const importedCourseCard = page.locator('.timetable-course').filter({ hasText: '自然语言处理' })
@@ -177,7 +219,7 @@ test('mobile core journey keeps weeks, locations, sessions, text, and actions tr
   await expect(importedCourseCard.locator('time')).toHaveCount(0)
 
   // 整批导入按产品规则覆盖原课表。覆盖行为确认后，再添加一门手工课，
-  // 继续验证课程布局、首页摘要和出发建议这条完整用户链路。
+  // 继续验证课程布局、首页摘要和提醒中心这条完整用户链路。
   await page.goto('/courses/new')
   await fillCourseForm(page, '交互设计基础')
   const recreateResponse = page.waitForResponse((response) =>
@@ -188,7 +230,7 @@ test('mobile core journey keeps weeks, locations, sessions, text, and actions tr
   await page.waitForURL('**/courses')
   await expect(manualCourseCard).toHaveCount(1)
   await expect(manualCourseCard.getByText(`国际教育学院 · ${fullManualRoom}`)).toBeVisible()
-  await expect(manualCourseCard.locator('time')).toHaveText('09:00—10:40')
+  await expect(page.locator('.timetable-slot').filter({ has: manualCourseCard }).locator('.time-cell time')).toHaveText(['09:00', '10:40'])
   await expect(page.locator('.course-place-index')).toHaveCount(0)
   await settleMotion(page)
   await expect(page.locator('.week-head .weekday-head')).toHaveCount(7)
@@ -257,7 +299,8 @@ test('mobile core journey keeps weeks, locations, sessions, text, and actions tr
       return duration.trim().endsWith('ms') ? value : value * 1000
     }))
   )
-  expect(weekAnimationDuration).toBeGreaterThanOrEqual(1100)
+  expect(weekAnimationDuration).toBeGreaterThan(0)
+  expect(weekAnimationDuration).toBeLessThanOrEqual(400)
   await expect(page.locator('.timetable-week-stage[data-week="9"]')).toBeVisible()
   expect(await page.evaluate(() => window.scrollY)).toBe(scrollBeforeWeekChange)
   await settleMotion(page)
@@ -273,34 +316,66 @@ test('mobile core journey keeps weeks, locations, sessions, text, and actions tr
   await screenshot(page, testInfo, 'home-current-week.png')
   await assertPageQuality(page)
 
-  const prefixedPlaceNames = await page.locator('.place-grid strong').allTextContents()
-  expect(prefixedPlaceNames.filter((name) => name.trim().startsWith('湖北大学'))).toEqual([])
+  await expect(page.getByRole('heading', { name: '校园里的常去处' })).toHaveCount(0)
+  await expect(page.locator('.place-grid')).toHaveCount(0)
   const homeMap = page.locator('.map-section')
   await homeMap.scrollIntoViewIfNeeded()
-  await homeMap.getByPlaceholder('搜索地点、学院、食堂、公寓').fill('国际教育学院')
-  await expect(homeMap.locator('.map-search-results')).toContainText('国际教育学院')
-  await expect(homeMap.locator('.map-search-results')).not.toContainText('湖北大学')
-  await screenshot(page, testInfo, 'home-map-concise-names.png')
+  await homeMap.getByRole('button', { name: '展开地图' }).click()
+  await page.getByRole('searchbox', { name: '搜索校园建筑' }).fill('国际教育学院')
+  await expect(page.locator('.map-building-results')).toContainText('国际教育学院')
+  await expect(page.locator('.map-building-results')).not.toContainText('湖北大学')
+  await screenshot(page, testInfo, 'campus-map-concise-names.png')
+  await page.getByRole('button', { name: '返回校园' }).click()
+  await page.waitForURL('**/home')
 
-  await page.getByRole('link', { name: /出发/ }).click()
-  await page.waitForURL('**/schedule')
-  await page.getByRole('button', { name: /看看什么时候出发/ }).click()
-  await expect(page.getByText(`国际教育学院 · ${fullManualRoom}`)).toBeVisible()
-  await page.getByText(`国际教育学院 · ${fullManualRoom}`).scrollIntoViewIfNeeded()
-  await screenshot(page, testInfo, 'departure-advice.png')
+  await page.getByRole('link', { name: /提醒/ }).click()
+  await page.waitForURL('**/reminders')
+  const permissionPrompt = page.getByRole('dialog', { name: '开启通知提醒' })
+  // This journey tests courses; notification authorization has its own dedicated flow.
+  const supportsNotifications = await page.evaluate(() => window.isSecureContext && 'Notification' in window)
+  if (supportsNotifications) {
+    await expect(permissionPrompt).toBeVisible()
+    await permissionPrompt.getByRole('button', { name: '暂不开启' }).click()
+  } else {
+    await expect(page.getByText('当前浏览器不支持系统通知，请使用安卓 App。')).toBeVisible()
+    await expect(permissionPrompt).toHaveCount(0)
+  }
+  await expect(page.getByRole('heading', { name: '课程提醒', exact: true })).toBeVisible()
+  await screenshot(page, testInfo, 'reminder-center.png')
   await assertPageQuality(page)
 
-  await page.evaluate(() => localStorage.setItem('campusmind_token', 'invalid-e2e-token'))
-  await page.getByRole('link', { name: /校园/ }).click()
+  // Access tokens are memory-only; a reload must silently restore the session
+  // from the rotating HttpOnly refresh cookie.
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('campusmind_token')))
+    .toBeNull()
+  await page.reload()
+  await page.waitForURL('**/reminders')
+  await expect(page.getByRole('heading', { name: '课程提醒', exact: true })).toBeVisible()
+
+  // Revoke the refresh family through the cookie-authenticated logout route,
+  // then reload to verify that the app cannot silently recreate a session.
+  await page.evaluate(async () => {
+    await fetch('http://127.0.0.1:8010/api/auth/logout', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}'
+    })
+  })
+  await page.reload()
   await page.waitForURL('**/login?**')
-  const expiredToasts = page.locator('.van-toast').filter({ hasText: '登录已过期，请重新登录' })
-  await expect(expiredToasts).toHaveCount(1)
   await screenshot(page, testInfo, 'session-expired.png')
 
-  await page.locator('input[name="username"]').fill(username)
+  await page.locator('input[name="student_id"]').fill(studentId)
   await page.locator('input[name="password"]').fill(password)
   await page.getByRole('button', { name: /进入智行/ }).click()
-  await page.waitForURL('**/home')
-  await expect(page.getByText('真实第 4 周')).toBeVisible()
+  await page.waitForURL('**/reminders')
+  if (supportsNotifications) {
+    await expect(permissionPrompt).toBeVisible()
+    await permissionPrompt.getByRole('button', { name: '暂不开启' }).click()
+  }
+  await expect(permissionPrompt).not.toBeVisible()
+  await expect(page.locator('.van-overlay:visible')).toHaveCount(0)
+  await expect(page.getByRole('heading', { name: '课程提醒', exact: true })).toBeVisible()
   await expectReadableControls(page)
 })

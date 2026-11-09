@@ -4,7 +4,7 @@ defineProps<{
     | 'orbit' | 'calendar' | 'route' | 'user' | 'scan' | 'upload' | 'arrow' | 'spark'
     | 'aim' | 'chevron-down' | 'to-top' | 'certificate' | 'chat' | 'contact' | 'close'
     | 'edit' | 'flag' | 'guide' | 'location' | 'notes' | 'plus' | 'refresh' | 'check'
-    | 'home' | 'users'
+    | 'home' | 'users' | 'bell' | 'search' | 'building'
   size?: number
 }>()
 </script>
@@ -18,7 +18,13 @@ defineProps<{
     fill="none"
     aria-hidden="true"
   >
-    <template v-if="name === 'orbit'">
+    <template v-if="name === 'search'">
+      <circle cx="10.5" cy="10.5" r="6.75" /><path d="m15.5 15.5 5 5" />
+    </template>
+    <template v-else-if="name === 'building'">
+      <path d="M4 21V4l10-2v19M14 8h6v13M2 21h20M8 7h2M8 11h2M8 15h2M17 12h1M17 16h1" />
+    </template>
+    <template v-else-if="name === 'orbit'">
       <circle cx="12" cy="12" r="2.25" fill="currentColor" stroke="none" />
       <ellipse cx="12" cy="12" rx="9" ry="4.8" />
       <ellipse cx="12" cy="12" rx="4.8" ry="9" transform="rotate(38 12 12)" />
@@ -28,6 +34,10 @@ defineProps<{
       <rect x="3.25" y="4.75" width="17.5" height="16" rx="3.25" />
       <path d="M7.5 2.75v4M16.5 2.75v4M3.5 9.25h17" />
       <path d="M7.25 13h2.5v2.5h-2.5zM14.25 13h2.5v2.5h-2.5z" />
+    </template>
+    <template v-else-if="name === 'bell'">
+      <path d="M18 9a6 6 0 0 0-12 0v5l-2 3h16l-2-3V9Z" />
+      <path d="M10 20a2 2 0 0 0 4 0M12 2v1" />
     </template>
     <template v-else-if="name === 'route'">
       <circle cx="5" cy="18.5" r="2.25" />

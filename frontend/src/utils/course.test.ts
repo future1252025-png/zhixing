@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest'
+import selectionFixture from '../../../tests/fixtures/course-selection.json'
+import { semesterAt } from './campusTime'
 
 import {
   COURSE_ACCENT_PALETTE,
@@ -16,6 +18,7 @@ import {
   findNextCourse,
   findCourseTimeOverlap,
   getCourseTimeSlots,
+  getTimetableTimeSlots,
   getQuickWeekOptions,
   getTeachingWeekOptions,
   groupCoursesByWeekday,
@@ -57,6 +60,41 @@ const baseCourse: Course = {
 }
 
 describe('course helpers', () => {
+  it('uses the imported afternoon clock on the timetable axis and preset', () => {
+    const course = { ...baseCourse, start_time: '14:30', end_time: '16:10' }
+    const slots = getTimetableTimeSlots([course])
+    expect(slots).toContainEqual(expect.objectContaining({ start_time: '14:30', end_time: '16:10' }))
+    expect(slots.some((slot) => slot.start_time === '14:00')).toBe(false)
+    expect(getCourseTimeSlots([course]).find((slot) => slot.section === '5-6')).toMatchObject({
+      start_time: '14:30', end_time: '16:10'
+    })
+  })
+
+  it('keeps different real clock ranges in separate rows even within one reference section', () => {
+    const slots = getTimetableTimeSlots([
+      { ...baseCourse, start_time: '14:30', end_time: '16:10' },
+      { ...baseCourse, id: 2, weekday: 2, start_time: '14:00', end_time: '15:40' },
+      { ...baseCourse, id: 3, weekday: 3, start_time: '14:30', end_time: '16:10' },
+      { ...baseCourse, id: 4, start_time: null, end_time: null }
+    ])
+    const actual = slots.filter((slot) => !slot.isReference)
+    expect(actual.map((slot) => [slot.start_time, slot.end_time])).toEqual([
+      ['14:00', '15:40'], ['14:30', '16:10']
+    ])
+  })
+
+  it('keeps a corrected 14:30 course until its start, then shows Java', () => {
+    const courses = [
+      { ...baseCourse, course_name: '思想概论', start_time: '14:30', end_time: '16:10' },
+      { ...baseCourse, id: 2, course_name: 'Java', start_time: '16:25', end_time: '18:05' }
+    ]
+    for (const clock of ['14:09', '14:29']) {
+      expect(findNextCourse(courses, new Date(`2026-09-07T${clock}:00+08:00`))?.course_name).toBe('思想概论')
+    }
+    expect(findNextCourse(courses, new Date('2026-09-07T14:30:00+08:00'))?.course_name).toBe('Java')
+    expect(findNextCourse(courses, new Date('2026-09-07T16:10:00+08:00'))?.course_name).toBe('Java')
+  })
+
   it('creates an empty form with sensible defaults', () => {
     const form = buildEmptyCourseForm()
 
@@ -329,13 +367,13 @@ describe('course helpers', () => {
     expect(findCourseTimeOverlap(baseForm, [baseCourse], 1)).toBeNull()
   })
 
-  it('finds the nearest future course across the next seven days', () => {
-    const now = new Date('2026-06-15T10:00:00')
+  it('finds the nearest unfinished course in the current week', () => {
+    const now = new Date('2026-06-15T10:00:00+08:00')
     const result = findNextCourse(
       [
         { ...baseCourse, id: 2, weekday: 1, start_time: '09:00' },
         { ...baseCourse, id: 3, weekday: 2, start_time: '08:00' },
-        { ...baseCourse, id: 4, weekday: 1, start_time: '14:00' }
+        { ...baseCourse, id: 4, weekday: 1, start_time: '14:00', end_time: '15:40' }
       ],
       now
     )
@@ -343,8 +381,57 @@ describe('course helpers', () => {
     expect(result?.id).toBe(4)
   })
 
+  it('moves past a course starting in the current minute to the next day', () => {
+    const result = findNextCourse(
+      [
+        { ...baseCourse, id: 2, weekday: 2, start_time: '08:00' },
+        { ...baseCourse, id: 3, weekday: 1, start_time: '14:00', end_time: '15:40' }
+      ],
+      new Date('2026-08-31T14:00:45+08:00')
+    )
+
+    expect(result?.id).toBe(2)
+  })
+
+  it('skips the ongoing course after its start minute has passed', () => {
+    const result = findNextCourse(
+      [
+        { ...baseCourse, id: 2, weekday: 2, start_time: '08:00' },
+        { ...baseCourse, id: 3, weekday: 1, start_time: '14:00', end_time: '15:40' }
+      ],
+      new Date('2026-08-31T14:01:00+08:00')
+    )
+
+    expect(result?.id).toBe(2)
+  })
+
+  it.each([
+    ['2026-08-31T14:00:00+08:00', 3], ['2026-09-07T13:59:59+08:00', 1],
+    ['2026-09-07T14:00:00+08:00', 2], ['2026-09-07T06:09:00Z', 2],
+    ['2026-09-07T15:55:00+08:00', 3], ['2026-09-08T08:00:00+08:00', null],
+    ['2026-09-13T23:59:59+08:00', null], ['2026-09-14T00:00:00+08:00', 2]
+  ] as const)('selects only not-yet-started occurrences at %s', (now, expected_id) => {
+    const instant = new Date(now)
+    const semester = semesterAt({ status: 'active', start_date: '2026-08-31', total_weeks: 20, current_week: 1 }, instant)
+    const courses = selectionFixture.courses.map((course) => ({ ...baseCourse, ...course }))
+    const result = findNextCourse(filterCoursesByWeek(courses, semester.current_week!), instant)
+    expect(result?.id ?? null).toBe(expected_id)
+  })
+
+  it('uses the saved 14:30 time instead of assuming a standard 14:00 slot', () => {
+    const courses = [
+      { ...baseCourse, id: 1, start_time: '14:30', end_time: '15:40' },
+      { ...baseCourse, id: 2, start_time: '15:55', end_time: '17:35' }
+    ]
+    expect(findNextCourse(courses, new Date('2026-09-07T14:09:00+08:00'))?.id).toBe(1)
+  })
+
+  it.each([null, 'bad', '13:00'])('does not invent an end time for %s', (end_time) => {
+    expect(findNextCourse([{ ...baseCourse, start_time: '14:00', end_time }], new Date('2026-09-07T14:09:00+08:00'))).toBeNull()
+  })
+
   it('ignores pending-time imports when looking for the next departure', () => {
-    const now = new Date('2026-06-15T10:00:00')
+    const now = new Date('2026-06-15T10:00:00+08:00')
     const result = findNextCourse(
       [
         { ...baseCourse, id: 2, start_time: null, end_time: null, source_kind: 'import' },

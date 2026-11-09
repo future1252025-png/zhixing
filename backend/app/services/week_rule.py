@@ -34,12 +34,12 @@ class _WeekToken:
 
 def _validate_max_week(max_week: int) -> None:
     if isinstance(max_week, bool) or not isinstance(max_week, int) or max_week <= 0:
-        raise WeekExpressionError("max_week must be a positive integer")
+        raise WeekExpressionError("最大学期周数必须是正整数")
 
 
 def _prepare_expression(value: str) -> list[str]:
     if not isinstance(value, str):
-        raise WeekExpressionError("Week expression must be a string")
+        raise WeekExpressionError("上课周次必须是文字")
 
     text = value.translate(_CHARACTER_NORMALIZATION).strip()
     if text.startswith("第"):
@@ -48,30 +48,30 @@ def _prepare_expression(value: str) -> list[str]:
         text = text[:-1].rstrip()
     text = re.sub(r"\s*(?=[,()\-])|(?<=[,()\-])\s*", "", text)
     if not text:
-        raise WeekExpressionError("Week expression cannot be empty")
+        raise WeekExpressionError("上课周次不能为空")
 
     tokens = text.split(",")
     if any(not token for token in tokens):
-        raise WeekExpressionError("Week expression contains an empty token")
+        raise WeekExpressionError("上课周次中存在空白项")
     return tokens
 
 
 def _parse_token(token: str, max_week: int) -> _WeekToken:
     match = _TOKEN_RE.fullmatch(token)
     if match is None:
-        raise WeekExpressionError(f"Invalid week token: {token}")
+        raise WeekExpressionError(f"无法识别周次：{token}")
 
     start = int(match.group("start"))
     end_text = match.group("end")
     parity = match.group("parity")
     if parity is not None and end_text is None:
-        raise WeekExpressionError("Parity is only allowed on a week range")
+        raise WeekExpressionError("单双周只能用于周次范围")
 
     end = int(end_text) if end_text is not None else start
     if start < 1 or end < 1 or start > max_week or end > max_week:
-        raise WeekExpressionError(f"Week must be between 1 and {max_week}")
+        raise WeekExpressionError(f"周次必须在第 1 至 {max_week} 周之间")
     if start > end:
-        raise WeekExpressionError("Week range start must not exceed end")
+        raise WeekExpressionError("起始周不能晚于结束周")
 
     if parity is None:
         weeks = frozenset(range(start, end + 1))
@@ -80,7 +80,7 @@ def _parse_token(token: str, max_week: int) -> _WeekToken:
     expected_parity = 1 if parity == "单" else 0
     weeks = frozenset(week for week in range(start, end + 1) if week % 2 == expected_parity)
     if not weeks:
-        raise WeekExpressionError("Parity range does not include any matching week")
+        raise WeekExpressionError("所选范围内没有符合单双周条件的周次")
     return _WeekToken(weeks=weeks, parity=parity)
 
 

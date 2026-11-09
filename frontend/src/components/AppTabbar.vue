@@ -10,15 +10,9 @@ const activePath = computed(() => route.path)
 const navItems = [
   { path: '/home', label: '校园', icon: 'orbit' },
   { path: '/courses', label: '课表', icon: 'calendar' },
-  { path: '/schedule', label: '出发', icon: 'route' },
+  { path: '/reminders', label: '提醒', icon: 'bell' },
   { path: '/profile', label: '我的', icon: 'user' }
 ] as const
-
-function handleTabClick(path: string) {
-  if (route.path === path) {
-    window.scrollTo({ left: 0, top: 0, behavior: 'auto' })
-  }
-}
 </script>
 
 <template>
@@ -29,7 +23,6 @@ function handleTabClick(path: string) {
       :to="item.path"
       class="app-tabbar-item"
       :class="{ active: activePath === item.path }"
-      @click="handleTabClick(item.path)"
     >
       <span class="nav-icon-wrap">
         <TechIcon :name="item.icon" :size="21" />
@@ -43,12 +36,12 @@ function handleTabClick(path: string) {
 .app-tabbar {
   position: fixed;
   right: max(14px, calc((100vw - var(--page-max)) / 2 + 14px));
-  bottom: max(12px, env(safe-area-inset-bottom));
+  bottom: max(8px, env(safe-area-inset-bottom));
   left: max(14px, calc((100vw - var(--page-max)) / 2 + 14px));
   z-index: 1000;
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  height: 74px;
+  height: 64px;
   overflow: hidden;
   border: 1px solid rgba(79, 125, 88, 0.13);
   border-radius: 25px;
@@ -64,9 +57,9 @@ function handleTabClick(path: string) {
   display: grid;
   place-content: center;
   justify-items: center;
-  gap: 5px;
+  gap: 3px;
   color: var(--fresh-muted);
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 700;
   -webkit-tap-highlight-color: transparent;
   transition:
@@ -76,7 +69,7 @@ function handleTabClick(path: string) {
 
 .app-tabbar-item::before {
   position: absolute;
-  inset: 7px 8px;
+  inset: 5px 8px;
   z-index: -1;
   border-radius: 18px 18px 14px 18px;
   background: transparent;

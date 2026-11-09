@@ -2,6 +2,7 @@ import type { LatLngPoint } from './geo'
 
 export type CollectorPoint = {
   id: string
+  poiId?: string | null
   name: string
   type: string
   address: string
@@ -81,6 +82,7 @@ function isPoint(value: unknown): value is CollectorPoint {
   const point = value as CollectorPoint
   return (
     typeof point?.id === 'string' &&
+    (point.poiId == null || (typeof point.poiId === 'string' && /^[A-Za-z0-9_-]{1,80}$/.test(point.poiId))) &&
     typeof point.name === 'string' &&
     typeof point.type === 'string' &&
     typeof point.address === 'string' &&

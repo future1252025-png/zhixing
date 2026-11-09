@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 
 BACKEND_DIR = Path(__file__).resolve().parents[2]
 DEFAULT_DATABASE_PATH = BACKEND_DIR / "data" / "campusmind.db"
+DEFAULT_DEV_JWT_SECRET_PATH = BACKEND_DIR / "data" / ".jwt-secret"
 # Retained only so production validation can reject the historical public
 # default value; it is never used as an actual signing key anymore.
 DEFAULT_JWT_SECRET = "dev-only-change-me-before-production"
@@ -29,22 +30,48 @@ MIN_JWT_SECRET_BYTES: Final = 32
 # One day is intentionally the maximum bearer-token lifetime. This limits stale
 # credential exposure and catches the common seconds-vs-minutes configuration error.
 MAX_ACCESS_TOKEN_EXPIRE_MINUTES: Final = 24 * 60
+MAX_REFRESH_TOKEN_EXPIRE_DAYS: Final = 90
+MAX_REFRESH_SESSION_ABSOLUTE_DAYS: Final = 365
+ALLOWED_APP_ENVS: Final = frozenset(
+    {"development", "dev", "test", "testing", "production", "prod"}
+)
 _UNSET: Final = object()
 _DOMAIN_LABEL = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
 _generated_dev_jwt_secret: str | None = None
 
 
 def _dev_fallback_jwt_secret() -> str:
-    """Per-process random fallback so a public default never signs tokens.
-
-    Cached at module level: every Settings instance created in this process
-    sees the same secret, keeping issued tokens verifiable until restart.
-    """
+    """Load or create a private local key so development sessions survive restarts."""
     global _generated_dev_jwt_secret
     if _generated_dev_jwt_secret is None:
-        _generated_dev_jwt_secret = secrets.token_urlsafe(48)
+        secret_path = Path(
+            os.environ.get("JWT_SECRET_FILE", str(DEFAULT_DEV_JWT_SECRET_PATH))
+        )
+        secret_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            secret = secret_path.read_text(encoding="utf-8").strip()
+        except FileNotFoundError:
+            secret = secrets.token_urlsafe(48)
+            try:
+                descriptor = os.open(
+                    secret_path,
+                    os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                    0o600,
+                )
+            except FileExistsError:
+                # Another worker won the creation race.
+                secret = secret_path.read_text(encoding="utf-8").strip()
+            else:
+                with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+                    handle.write(secret)
+        if len(secret.encode("utf-8")) < MIN_JWT_SECRET_BYTES:
+            raise RuntimeError(
+                f"Development JWT secret file is invalid: {secret_path}"
+            )
+        _generated_dev_jwt_secret = secret
         logger.warning(
-            "JWT_SECRET_KEY 未设置，开发模式使用临时随机密钥；进程重启后已签发的 token 将失效。"
+            "JWT_SECRET_KEY 未设置，开发模式使用本地持久密钥 %s；生产环境仍必须显式配置环境变量。",
+            secret_path,
         )
     return _generated_dev_jwt_secret
 
@@ -187,6 +214,8 @@ class Settings:
     jwt_secret_key_explicit: bool
     jwt_algorithm: str
     access_token_expire_minutes: int
+    refresh_token_expire_days: int
+    refresh_session_absolute_days: int
     cors_allow_origins: tuple[str, ...]
     cors_allow_origins_explicit: bool
 
@@ -198,6 +227,8 @@ class Settings:
         jwt_secret_key: str | object = _UNSET,
         jwt_algorithm: str = "HS256",
         access_token_expire_minutes: int | object = _UNSET,
+        refresh_token_expire_days: int | object = _UNSET,
+        refresh_session_absolute_days: int | object = _UNSET,
         cors_allow_origins: tuple[str, ...] | object = _UNSET,
         *,
         environ: Mapping[str, str] | None = None,
@@ -224,9 +255,19 @@ class Settings:
         if resolved_secret is None:
             resolved_secret = _dev_fallback_jwt_secret()
         resolved_expire_minutes = (
-            int(source.get("ACCESS_TOKEN_EXPIRE_MINUTES", "60"))
+            int(source.get("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
             if access_token_expire_minutes is _UNSET
             else access_token_expire_minutes
+        )
+        resolved_refresh_days = (
+            int(source.get("REFRESH_TOKEN_EXPIRE_DAYS", "30"))
+            if refresh_token_expire_days is _UNSET
+            else refresh_token_expire_days
+        )
+        resolved_absolute_days = (
+            int(source.get("REFRESH_SESSION_ABSOLUTE_DAYS", "90"))
+            if refresh_session_absolute_days is _UNSET
+            else refresh_session_absolute_days
         )
         cors_explicit = (
             "CORS_ALLOW_ORIGINS" in source if cors_allow_origins is _UNSET else True
@@ -248,6 +289,16 @@ class Settings:
             self,
             "access_token_expire_minutes",
             int(resolved_expire_minutes),
+        )
+        object.__setattr__(
+            self,
+            "refresh_token_expire_days",
+            int(resolved_refresh_days),
+        )
+        object.__setattr__(
+            self,
+            "refresh_session_absolute_days",
+            int(resolved_absolute_days),
         )
         object.__setattr__(self, "cors_allow_origins", resolved_cors)
         object.__setattr__(self, "cors_allow_origins_explicit", cors_explicit)
@@ -286,9 +337,27 @@ def validate_settings(config: Settings | None = None) -> None:
     """Fail fast on unsafe or unusable runtime configuration."""
     current = settings if config is None else config
 
+    if current.app_env not in ALLOWED_APP_ENVS:
+        allowed = ", ".join(sorted(ALLOWED_APP_ENVS))
+        raise RuntimeError(f"APP_ENV must be one of: {allowed}.")
+
     if not 1 <= current.access_token_expire_minutes <= MAX_ACCESS_TOKEN_EXPIRE_MINUTES:
         raise RuntimeError(
             "ACCESS_TOKEN_EXPIRE_MINUTES must be between 1 and 1440 minutes."
+        )
+
+    if not 1 <= current.refresh_token_expire_days <= MAX_REFRESH_TOKEN_EXPIRE_DAYS:
+        raise RuntimeError(
+            "REFRESH_TOKEN_EXPIRE_DAYS must be between 1 and 90 days."
+        )
+    if not (
+        current.refresh_token_expire_days
+        <= current.refresh_session_absolute_days
+        <= MAX_REFRESH_SESSION_ABSOLUTE_DAYS
+    ):
+        raise RuntimeError(
+            "REFRESH_SESSION_ABSOLUTE_DAYS must be at least the refresh-token "
+            "lifetime and no more than 365 days."
         )
 
     if not current.is_production:

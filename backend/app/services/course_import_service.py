@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections import Counter
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import time
 from hashlib import sha256
 from html.parser import HTMLParser
@@ -27,6 +27,7 @@ from app.schemas.course_import import (
     ImportFileInfo,
     ImportIssueResponse,
     ImportResolution,
+    ImportTimeResolution,
     RawCourseSourceResponse,
 )
 from app.services.course_policy import location_requires_review
@@ -53,16 +54,8 @@ WEEKDAY_LABELS = {
     "周天": 7,
 }
 
-SECTION_TIMES = {
-    "01-02": (time(8, 0), time(9, 40)),
-    "03-04": (time(9, 55), time(11, 35)),
-    "05-06": (time(14, 0), time(15, 40)),
-    "07-08": (time(15, 55), time(17, 35)),
-    "09-10": (time(19, 0), time(21, 35)),
-}
-
 TIME_RANGE_RE = re.compile(
-    r"(?P<start>\d{1,2}:\d{2})\s*[-~—–至]\s*(?P<end>\d{1,2}:\d{2})"
+    r"(?P<start>\d{1,2}\s*[:：]\s*\d{2})\s*[-~—–至～－]\s*(?P<end>\d{1,2}\s*[:：]\s*\d{2})"
 )
 SECTION_RE = re.compile(
     r"[\[【](?P<start>\d{1,2})\s*[-~—–]\s*(?P<end>\d{1,2})\s*节?[\]】]"
@@ -75,6 +68,12 @@ RAW_WEEKS_RE = re.compile(
 DASH_RE = re.compile(r"^-{3,}$")
 CONNECTOR_CHARS = " -—–·()（）"
 MAX_XLSX_EXPANDED_BYTES = 50 * 1024 * 1024
+TIMETABLE_AXIS_LABELS = frozenset({"节次", "时间", "上课时间", "课节", "节数"})
+TIMETABLE_AXIS_RE = re.compile(
+    r"(?:\d{1,2}:\d{2}\s*[-~—–至]\s*\d{1,2}:\d{2})"
+    r"|(?:第?[\d一二三四五六七八九十]+(?:[-~—–、]?"
+    r"[\d一二三四五六七八九十]+)?节)"
+)
 NON_BLOCKING_IMPORT_ISSUE_CODES = frozenset(
     {"building_unrecognized", "room_missing", "time_unrecognized"}
 )
@@ -299,16 +298,58 @@ def _find_header_row(
         weekday_columns: dict[int, tuple[int, str]] = {}
         for column_index, cell in enumerate(row):
             compact = re.sub(r"\s+", "", cell)
-            for label, weekday in WEEKDAY_LABELS.items():
-                if label in compact:
-                    weekday_columns[column_index] = (weekday, cell)
-                    break
+            weekday = WEEKDAY_LABELS.get(compact)
+            if weekday is not None:
+                weekday_columns[column_index] = (weekday, cell)
         if weekday_columns:
+            _require_timetable_structure(rows, row_index, weekday_columns)
             return row_index, weekday_columns
     raise BusinessError(
         422,
         "weekday_header_missing",
         "未在课表中找到星期表头",
+        fields=["file"],
+    )
+
+
+def _require_timetable_structure(
+    rows: Sequence[Sequence[str]],
+    header_index: int,
+    weekday_columns: dict[int, tuple[int, str]],
+) -> None:
+    """Reject generic tables before they can enter the destructive import flow.
+
+    A supported timetable has a leading time/section axis followed by exact
+    weekday headers. Requiring that independent structural signal prevents an
+    events/news table containing text such as "周一活动" from being treated as a
+    full timetable snapshot.
+    """
+
+    first_weekday_column = min(weekday_columns)
+    if first_weekday_column <= 0:
+        _raise_low_timetable_confidence()
+
+    header = rows[header_index]
+    leading_header_cells = [
+        re.sub(r"\s+", "", cell)
+        for cell in header[:first_weekday_column]
+    ]
+    has_named_axis = any(cell in TIMETABLE_AXIS_LABELS for cell in leading_header_cells)
+    has_timed_axis_row = any(
+        row
+        and bool(TIMETABLE_AXIS_RE.search(_clean_cell_text(row[0])))
+        for row in rows[header_index + 1 :]
+    )
+    has_full_week_shape = len(set(weekday for weekday, _ in weekday_columns.values())) >= 3
+    if not (has_full_week_shape and (has_named_axis or has_timed_axis_row)):
+        _raise_low_timetable_confidence()
+
+
+def _raise_low_timetable_confidence() -> None:
+    raise BusinessError(
+        422,
+        "timetable_confidence_low",
+        "文件结构不像完整课表，已终止导入以保护原课表",
         fields=["file"],
     )
 
@@ -319,14 +360,18 @@ def _extract_source_fields(
     row_ref: str,
     raw_weekday: str,
     row_time_text: str,
+    section_times: dict[str, str] | None = None,
 ) -> RawCourseRow:
     course_name = lines[0].strip() if lines else ""
     detail_lines = list(lines[1:])
+    def week_text(line: str) -> str:
+        return BRACKET_TOKEN_RE.sub("", TIME_RANGE_RE.sub("", line))
+
     week_index = next(
         (
             index
             for index, line in enumerate(detail_lines)
-            if RAW_WEEKS_RE.search(line)
+            if RAW_WEEKS_RE.search(week_text(line))
             and ("周" in line or BRACKET_TOKEN_RE.search(line) or TIME_RANGE_RE.search(line))
         ),
         -1,
@@ -341,19 +386,37 @@ def _extract_source_fields(
         teacher_lines = detail_lines[:1]
         location_lines = detail_lines[1:]
 
-    raw_weeks_match = RAW_WEEKS_RE.search(schedule_line)
+    raw_weeks_match = RAW_WEEKS_RE.search(week_text(schedule_line))
     raw_weeks = raw_weeks_match.group("weeks").strip() if raw_weeks_match else ""
-    time_or_section_match = BRACKET_TOKEN_RE.search(schedule_line)
-    if time_or_section_match is None:
-        time_or_section_match = TIME_RANGE_RE.search(schedule_line)
-    if time_or_section_match is None:
-        time_or_section_match = TIME_RANGE_RE.search(row_time_text)
+    # Explicit course clocks outrank row clocks; section numbers are not clocks.
+    explicit_time = next(
+        (match for line in detail_lines if (match := TIME_RANGE_RE.search(line))),
+        None,
+    )
+    section = _section_key(schedule_line)
+    row_section = _section_key(row_time_text)
+    row_range = TIME_RANGE_RE.search(row_time_text)
+    raw_section = BRACKET_TOKEN_RE.search(schedule_line)
+    time_text = explicit_time.group(0) if explicit_time else ""
+    unknown_section = raw_section is not None and section is None
+    if (
+        not time_text and row_range and not unknown_section
+        and (not section or not row_section or section == row_section)
+    ):
+        time_text = row_range.group(0)
+    if not time_text and section:
+        time_text = (section_times or {}).get(section, "")
+    raw_time = " ".join(
+        part for part in [raw_section.group(0) if raw_section else "", time_text] if part
+    ) or row_time_text
+    teacher_lines = [line for line in teacher_lines if not TIME_RANGE_RE.fullmatch(line.strip())]
+    location_lines = [line for line in location_lines if not TIME_RANGE_RE.fullmatch(line.strip())]
 
     return RawCourseRow(
         row_ref=row_ref,
         raw_course_name=course_name,
         raw_weekday=raw_weekday,
-        raw_time_or_section=time_or_section_match.group(0) if time_or_section_match else "",
+        raw_time_or_section=raw_time,
         raw_teacher="\n".join(teacher_lines).strip(),
         raw_weeks=raw_weeks,
         raw_location="\n".join(location_lines).strip(),
@@ -362,9 +425,19 @@ def _extract_source_fields(
 
 def _rows_to_raw_courses(rows: Sequence[Sequence[str]]) -> list[RawCourseRow]:
     header_index, weekday_columns = _find_header_row(rows)
+    axis_width = min(weekday_columns)
+    # Learn from this file only. Conflicting section mappings remain unconfirmed.
+    observed_times: dict[str, set[str]] = {}
+    for row in rows[header_index + 1:]:
+        axis = " ".join(row[:axis_width])
+        section = _section_key(axis)
+        clock = TIME_RANGE_RE.search(axis)
+        if section and clock:
+            observed_times.setdefault(section, set()).add(clock.group(0))
+    section_times = {section: next(iter(times)) for section, times in observed_times.items() if len(times) == 1}
     raw_courses: list[RawCourseRow] = []
     for row in rows[header_index + 1 :]:
-        row_time_text = row[0] if row else ""
+        row_time_text = " ".join(row[:axis_width])
         for column_index, (_weekday, raw_weekday) in weekday_columns.items():
             if column_index >= len(row) or not row[column_index].strip():
                 continue
@@ -375,6 +448,7 @@ def _rows_to_raw_courses(rows: Sequence[Sequence[str]]) -> list[RawCourseRow]:
                         row_ref=f"row-{len(raw_courses) + 1}",
                         raw_weekday=raw_weekday,
                         row_time_text=row_time_text,
+                        section_times=section_times,
                     )
                 )
     return raw_courses
@@ -390,21 +464,34 @@ def normalize_weeks(raw_weeks: str) -> str:
     return normalized.replace("(周)", "").strip()
 
 
+def _section_key(value: str) -> str | None:
+    without_clocks = TIME_RANGE_RE.sub("", value).strip()
+    # Never mistake the teaching-week range (e.g. 1-16周) for section numbers.
+    match = (
+        SECTION_RE.search(value)
+        or re.search(r"第?\s*(\d{1,2})\s*[-—–、~]\s*(\d{1,2})\s*节", without_clocks)
+        or re.fullmatch(r"(\d{1,2})\s*[-—–、~]\s*(\d{1,2})", without_clocks)
+    )
+    if match:
+        return f"{int(match.group(1)):02d}-{int(match.group(2)):02d}"
+    compact = re.sub(r"\s+", "", value)
+    for label, key in {"第一二节": "01-02", "第三四节": "03-04", "第五六节": "05-06", "第七八节": "07-08", "第九十节": "09-10", "第九十一节": "09-11"}.items():
+        if label in compact:
+            return key
+    return None
+
+
 def _parse_time(raw_time_or_section: str) -> tuple[time | None, time | None]:
     range_match = TIME_RANGE_RE.search(raw_time_or_section)
     if range_match is not None:
         try:
-            start = time.fromisoformat(range_match.group("start"))
-            end = time.fromisoformat(range_match.group("end"))
+            start = time.fromisoformat(re.sub(r"\s", "", range_match.group("start")).replace("：", ":").zfill(5))
+            end = time.fromisoformat(re.sub(r"\s", "", range_match.group("end")).replace("：", ":").zfill(5))
         except ValueError:
             return None, None
         return (start, end) if start < end else (None, None)
 
-    section_match = SECTION_RE.search(raw_time_or_section)
-    if section_match is None:
-        return None, None
-    section_key = f"{int(section_match.group('start')):02d}-{int(section_match.group('end')):02d}"
-    return SECTION_TIMES.get(section_key, (None, None))
+    return None, None
 
 
 def _normalized_location(value: str) -> str:
@@ -776,6 +863,25 @@ def _resolve_import_candidates(
     return resolved
 
 
+def _apply_time_resolutions(
+    candidates: list[ImportCandidate], resolutions: Sequence[ImportTimeResolution]
+) -> list[ImportCandidate]:
+    known = {candidate.source.row_ref for candidate in candidates}
+    refs = [resolution.row_ref for resolution in resolutions]
+    if len(set(refs)) != len(refs) or set(refs) - known:
+        raise BusinessError(409, "import_time_resolution_mismatch", "时间确认项与课表行不一致，请重新预览", fields=["time_resolutions"])
+    by_ref = {resolution.row_ref: resolution for resolution in resolutions}
+    result = []
+    for candidate in candidates:
+        resolution = by_ref.get(candidate.source.row_ref)
+        if resolution:
+            start, end = _parse_time(f"{resolution.start_time}-{resolution.end_time}")
+            candidate = replace(candidate, start_time=start, end_time=end,
+                errors=tuple(issue for issue in candidate.errors if issue.code != "time_unrecognized"))
+        result.append(candidate)
+    return result
+
+
 def commit_course_import(
     session: Session,
     *,
@@ -802,11 +908,16 @@ def commit_course_import(
         )
 
     candidates = _select_import_candidates(
-        _parse_import_candidates(session, filename, content),
+        _apply_time_resolutions(_parse_import_candidates(session, filename, content), manifest.time_resolutions),
         manifest.excluded_row_refs,
     )
     resolution_map = _match_optional_resolutions(candidates, manifest.resolutions)
     guard = acquire_user_mutation_guard(session, user_id)
+    # Dated snapshots survive re-import. Do not silently drop source-date exclusions
+    # when replacing their recurring source IDs with a completely new timetable.
+    if any(course.makeup and course.makeup.get("cancel_source") for course in
+           session.scalars(select(Course).where(Course.user_id == user_id)).all()):
+        raise BusinessError(409, "makeup_transfer_before_import", "存在原日期停课的调课安排，请先撤销对应调课，再重新导入课表")
     resolved = _resolve_import_candidates(session, candidates, resolution_map)
     validated_entries = validate_course_batch(
         session,
@@ -824,7 +935,8 @@ def commit_course_import(
         session.scalars(select(Course).where(Course.user_id == user_id)).all()
     )
     for existing_course in existing_courses:
-        session.delete(existing_course)
+        if not existing_course.makeup:
+            session.delete(existing_course)
     session.flush()
 
     created: list[Course] = []

@@ -1,4 +1,5 @@
 from collections.abc import Generator
+import json
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -62,16 +63,15 @@ def auth_headers(client: TestClient, username: str, *, configure: bool = True) -
     register = client.post(
         "/api/auth/register",
         json={
-            "username": username,
+            "student_id": username,
             "password": "secret123",
             "nickname": username.title(),
-            "student_id": f"{username}-2026",
         },
     )
     assert register.status_code == 201
     login = client.post(
         "/api/auth/login",
-        json={"username": username, "password": "secret123"},
+        json={"student_id": username, "password": "secret123"},
     )
     assert login.status_code == 200
     headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
@@ -102,7 +102,7 @@ def create_service_user(
         username=username,
         password_hash="test-hash",
         nickname=username.title(),
-        student_id=f"{username}-2026",
+        student_id=username,
     )
     session.add(user)
     session.flush()
@@ -154,6 +154,7 @@ def add_api_course(
     building_id: int,
     weekday: int,
     start_time: str,
+    course_name: str = "数据库原理",
     end_time: str = "11:40",
     weeks: str = "1-20",
     room_name: str = "A101",
@@ -168,6 +169,7 @@ def add_api_course(
             user,
             building,
             weekday=weekday,
+            course_name=course_name,
             start_time=start_time,
             end_time=end_time,
             weeks=weeks,
@@ -266,6 +268,80 @@ def test_find_next_course_can_find_later_day_in_current_teaching_week(
     assert result.teaching_week == 2
 
 
+def test_find_next_course_keeps_course_starting_in_current_minute(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    _, SessionLocal = client_and_session
+    with SessionLocal() as session:
+        user = create_service_user(session, "current_start_minute")
+        _, building = first_two_buildings(session)
+        current_course = add_course(
+            session,
+            user,
+            building,
+            course_name="周一下午课",
+            weekday=1,
+            start_time="14:00",
+            end_time="15:40",
+            weeks="1",
+        )
+        add_course(
+            session,
+            user,
+            building,
+            course_name="周二第一节",
+            weekday=2,
+            start_time="08:00",
+            weeks="1",
+        )
+
+        result = find_next_course(
+            session,
+            user.id,
+            now=datetime(2026, 8, 31, 14, 0, 45, tzinfo=SHANGHAI_TZ),
+        )
+
+    assert result is not None
+    assert result.course.id == current_course.id
+
+
+def test_find_next_course_keeps_ongoing_course_after_start_minute(
+    client_and_session: tuple[TestClient, sessionmaker],
+) -> None:
+    _, SessionLocal = client_and_session
+    with SessionLocal() as session:
+        user = create_service_user(session, "after_start_minute")
+        _, building = first_two_buildings(session)
+        current_course = add_course(
+            session,
+            user,
+            building,
+            course_name="周一下午课",
+            weekday=1,
+            start_time="14:00",
+            end_time="15:40",
+            weeks="1",
+        )
+        next_course = add_course(
+            session,
+            user,
+            building,
+            course_name="周二第一节",
+            weekday=2,
+            start_time="08:00",
+            weeks="1",
+        )
+
+        result = find_next_course(
+            session,
+            user.id,
+            now=datetime(2026, 8, 31, 14, 1, tzinfo=SHANGHAI_TZ),
+        )
+
+    assert result is not None
+    assert result.course.id == current_course.id
+
+
 def test_find_next_course_filters_out_courses_not_active_this_week(
     client_and_session: tuple[TestClient, sessionmaker],
 ) -> None:
@@ -282,6 +358,56 @@ def test_find_next_course_filters_out_courses_not_active_this_week(
         )
 
     assert result is None
+
+
+SELECTION_FIXTURE = json.loads(
+    (Path(__file__).resolve().parents[2] / "tests/fixtures/course-selection.json").read_text(encoding="utf-8")
+)
+
+
+@pytest.mark.parametrize("case", SELECTION_FIXTURE["cases"], ids=lambda case: case["now"])
+def test_schedule_selection_matches_shared_frontend_contract(client_and_session, case):
+    _, SessionLocal = client_and_session
+    now = datetime.fromisoformat(case["now"])
+    with SessionLocal() as session:
+        user = create_service_user(session, "selection_contract")
+        origin, target = first_two_buildings(session)
+        courses = {}
+        for entry in SELECTION_FIXTURE["courses"]:
+            fields = {key: value for key, value in entry.items() if key != "id"}
+            courses[entry["id"]] = add_course(session, user, target, **fields)
+        selected = find_next_course(session, user.id, now)
+        expected_id = case["expected_id"]
+        if expected_id is None:
+            assert selected is None
+            return
+        assert selected.course.id == courses[expected_id].id
+        suggestion = build_schedule_suggestion(
+            session, user.id, ScheduleSuggestionRequest(current_building_id=origin.id), now
+        )
+        assert suggestion.next_course.id == selected.course.id
+        if selected.starts_at <= now:
+            assert "正在上课" in suggestion.text
+            assert "距离上课还有" not in suggestion.text
+            assert suggestion.suggest_departure_time == "现在"
+
+
+def test_1409_api_returns_current_course_not_later_java(client_and_session):
+    client, SessionLocal = client_and_session
+    headers = auth_headers(client, "ongoing_api")
+    with SessionLocal() as session:
+        origin, target = first_two_buildings(session)
+    course_ids = []
+    for entry in SELECTION_FIXTURE["courses"]:
+        fields = {key: value for key, value in entry.items() if key != "id"}
+        course_ids.append(add_api_course(
+            SessionLocal, username="ongoing_api", building_id=target.id, **fields
+        ))
+    app.dependency_overrides[get_current_time] = lambda: datetime(2026, 9, 7, 14, 9, tzinfo=SHANGHAI_TZ)
+    response = client.post("/api/schedule/suggestion", json={"current_building_id": origin.id}, headers=headers)
+    assert response.status_code == 200
+    assert response.json()["next_course"]["id"] == course_ids[0]
+    assert "正在上课" in response.json()["text"]
 
 
 def test_find_next_course_skips_imported_course_waiting_for_a_time(
@@ -450,7 +576,7 @@ def test_next_course_rejects_invalid_legacy_start_time(
 
 
 @pytest.mark.parametrize("end_time", ["not-a-time", "06:00"])
-def test_past_course_with_invalid_end_does_not_block_next_valid_course(
+def test_started_course_with_invalid_end_requires_repair_instead_of_silently_skipping(
     client_and_session: tuple[TestClient, sessionmaker],
     end_time: str,
 ) -> None:
@@ -479,14 +605,14 @@ def test_past_course_with_invalid_end_does_not_block_next_valid_course(
             weeks="2",
         )
 
-        result = find_next_course(
-            session,
-            user.id,
-            now=datetime(2026, 9, 7, 8, 0, tzinfo=SHANGHAI_TZ),
-        )
+        with pytest.raises(BusinessError) as raised:
+            find_next_course(
+                session,
+                user.id,
+                now=datetime(2026, 9, 7, 8, 0, tzinfo=SHANGHAI_TZ),
+            )
 
-    assert result is not None
-    assert result.course.id == upcoming.id
+    assert_business_error(raised, "course_data_invalid")
 
 
 def test_later_invalid_future_course_does_not_preempt_earliest_valid_course(
@@ -875,7 +1001,7 @@ def test_schedule_api_rejects_invalid_legacy_course_time(
     }
 
 
-def test_schedule_api_skips_past_course_with_invalid_end_time(
+def test_schedule_api_reports_unknown_end_time_instead_of_guessing_course_is_over(
     client_and_session: tuple[TestClient, sessionmaker],
 ) -> None:
     client, SessionLocal = client_and_session
@@ -911,8 +1037,8 @@ def test_schedule_api_skips_past_course_with_invalid_end_time(
         headers=headers,
     )
 
-    assert response.status_code == 200
-    assert response.json()["next_course"]["id"] == upcoming_id
+    assert response.status_code == 409
+    assert response.json()["code"] == "course_data_invalid"
 
 
 def test_schedule_api_rejects_browser_selected_week(

@@ -2,6 +2,7 @@ import json
 import os
 from collections import Counter
 from pathlib import Path
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
@@ -9,12 +10,13 @@ from sqlalchemy.orm import Session, sessionmaker
 from app.core.config import settings
 from app.core.security import hash_password
 from app.db.database import create_sqlite_engine, upgrade_database
-from app.models import Building, Course, LocationPreset, Message, User
+from app.models import Building, BuildingMapPoi, Course, CourseImportSource, LocationPreset, Message, User
+from app.schemas.building import BuildingMapPoiBind
 
 
-DEMO_USERNAME = "demo"
-DEMO_PASSWORD = "demo123"
 DEMO_STUDENT_ID = "20240001"
+DEMO_USERNAME = DEMO_STUDENT_ID
+DEMO_PASSWORD = "demo123"
 DEMO_NICKNAME = "演示同学"
 LEGACY_DEMO_PASSWORD_PLACEHOLDER = "demo-password-hash-placeholder"
 
@@ -34,7 +36,7 @@ MAP_POINT_REQUIRED_FIELDS = {
 
 def load_map_points_seed(
     path: Path = MAP_POINTS_SEED_FILE,
-) -> list[dict[str, str | float | None]]:
+) -> list[dict[str, Any]]:
     raw_points = json.loads(path.read_text(encoding="utf-8-sig"))
     if not isinstance(raw_points, list):
         raise ValueError("Map points seed file must contain a JSON array")
@@ -45,7 +47,7 @@ def load_map_points_seed(
         if isinstance(item, dict)
     )
     name_seen: Counter[str] = Counter()
-    points: list[dict[str, str | float | None]] = []
+    points: list[dict[str, Any]] = []
 
     for index, item in enumerate(raw_points, start=1):
         if not isinstance(item, dict):
@@ -63,6 +65,13 @@ def load_map_points_seed(
         if name_totals[name] > 1:
             name = f"{name}（{name_seen[name]}）"
 
+        raw_walk_hint = item["walk_hint"]
+        walk_hint = (
+            str(raw_walk_hint).strip() or None
+            if raw_walk_hint is not None
+            else None
+        )
+
         points.append(
             {
                 "name": name,
@@ -72,9 +81,15 @@ def load_map_points_seed(
                 "longitude": float(item["longitude"]),
                 "map_x": float(item["map_x"]),
                 "map_y": float(item["map_y"]),
-                "walk_hint": str(item["walk_hint"]).strip() or None,
+                "walk_hint": walk_hint,
             }
         )
+
+        if item.get("map_pois"):
+            points[-1]["map_pois"] = [
+                BuildingMapPoiBind.model_validate(poi).model_dump()
+                for poi in item["map_pois"]
+            ]
 
     return points
 
@@ -145,11 +160,27 @@ DEMO_MESSAGES = [
 ]
 
 def _get_or_create_demo_user(session: Session) -> tuple[User, bool]:
-    user = session.scalar(select(User).where(User.username == DEMO_USERNAME))
+    user = session.scalar(select(User).where(User.student_id == DEMO_STUDENT_ID))
+    username_owner = session.scalar(
+        select(User).where(User.username == DEMO_USERNAME)
+    )
+    if user is None and username_owner is not None:
+        # A pre-existing owner of the reserved demo login is real data.  Never
+        # collide with it or rewrite its student ID merely to install samples.
+        if username_owner.password_hash == LEGACY_DEMO_PASSWORD_PLACEHOLDER:
+            username_owner.password_hash = hash_password(DEMO_PASSWORD)
+            session.add(username_owner)
+            session.flush()
+            return username_owner, True
+        return username_owner, False
     if user is not None:
         # Repair the one known pre-hashing placeholder only. Any other value may
         # be a real user-selected password and must never be reset by seeding.
         if user.password_hash == LEGACY_DEMO_PASSWORD_PLACEHOLDER:
+            if user.username != DEMO_USERNAME and (
+                username_owner is None or username_owner.id == user.id
+            ):
+                user.username = DEMO_USERNAME
             user.password_hash = hash_password(DEMO_PASSWORD)
             session.add(user)
             session.flush()
@@ -175,18 +206,32 @@ def _seed_buildings(session: Session) -> dict[str, Building]:
         for building in session.scalars(select(Building)).all()
     }
     for item in DEMO_BUILDINGS:
+        fields = {key: value for key, value in item.items() if key != "map_pois"}
         building = existing.get(item["name"])
         if building is None:
-            building = Building(**item)
+            building = Building(**fields)
             session.add(building)
             session.flush()
         else:
-            for field, value in item.items():
+            for field, value in fields.items():
                 if field == "name":
                     continue
                 setattr(building, field, value)
             session.flush()
         existing[building.name] = building
+        # Missing POI metadata must not delete admin-maintained mappings. Never
+        # move a POI to another building or renumber historical channel IDs.
+        for raw_poi in item.get("map_pois", []):
+            poi = BuildingMapPoiBind.model_validate(raw_poi)
+            mapping = session.scalar(select(BuildingMapPoi).where(
+                BuildingMapPoi.provider == poi.provider,
+                BuildingMapPoi.poi_id == poi.poi_id,
+            ))
+            if mapping and mapping.building_id != building.id:
+                raise ValueError(f"POI {poi.poi_id} already belongs to another building")
+            if mapping is None:
+                session.add(BuildingMapPoi(building_id=building.id, **poi.model_dump()))
+                session.flush()
     return existing
 
 
@@ -206,25 +251,51 @@ def _seed_user_demo_courses(
             )
         )
         if exists is None:
-            session.add(
-                Course(
-                    user_id=user.id,
-                    building_id=building.id,
-                    course_name=item["course_name"],
-                    weekday=item["weekday"],
-                    start_time=item["start_time"],
-                    end_time=item["end_time"],
-                    room_name=item["room_name"],
-                    teacher=item["teacher"],
-                    weeks=item["weeks"],
-                )
+            course = Course(
+                user_id=user.id,
+                building_id=building.id,
+                course_name=item["course_name"],
+                weekday=item["weekday"],
+                start_time=item["start_time"],
+                end_time=item["end_time"],
+                room_name=item["room_name"],
+                teacher=item["teacher"],
+                weeks=item["weeks"],
+                source_kind="import",
             )
+            session.add(course)
         else:
-            exists.building_id = building.id
-            exists.end_time = item["end_time"]
-            exists.room_name = item["room_name"]
-            exists.teacher = item["teacher"]
-            exists.weeks = item["weeks"]
+            course = exists
+            course.building_id = building.id
+            course.end_time = item["end_time"]
+            course.room_name = item["room_name"]
+            course.teacher = item["teacher"]
+            course.weeks = item["weeks"]
+            course.source_kind = "import"
+        session.flush()
+        raw_location = f"{building.name}{item['room_name']}"
+        source = course.import_source
+        if source is None:
+            source = CourseImportSource(
+                course_id=course.id,
+                filename="demo-seed.html",
+                file_sha256="0" * 64,
+                source_row=f"demo-{course.id}",
+                raw_course_name=item["course_name"],
+                raw_weekday=str(item["weekday"]),
+                raw_time_or_section=f"{item['start_time']}-{item['end_time']}",
+                raw_teacher=item["teacher"],
+                raw_weeks=item["weeks"],
+                raw_location=raw_location,
+            )
+            session.add(source)
+        else:
+            source.raw_course_name = item["course_name"]
+            source.raw_weekday = str(item["weekday"])
+            source.raw_time_or_section = f"{item['start_time']}-{item['end_time']}"
+            source.raw_teacher = item["teacher"]
+            source.raw_weeks = item["weeks"]
+            source.raw_location = raw_location
 
 
 def _seed_user_demo_messages(

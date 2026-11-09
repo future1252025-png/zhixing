@@ -1,4 +1,7 @@
 import type { Course, CourseForm, CoursePayload } from '@/types/course'
+import type { SemesterState } from '@/types/semester'
+import { campusTime } from '@/utils/campusTime'
+import { courseAtDate } from '@/utils/courseTimeRules'
 
 export const WEEKDAYS = [
   { value: 1, label: '星期一' },
@@ -25,6 +28,7 @@ export type CourseTimeSlot = {
   section: string
   start_time: string
   end_time: string
+  isReference?: boolean
 }
 
 export type WeeksRangePickerValue = {
@@ -42,8 +46,40 @@ const COURSE_TIME_SLOTS: CourseTimeSlot[] = [
   { label: '第九十一节', section: '9-11', start_time: '19:00', end_time: '21:35' }
 ]
 
-export function getCourseTimeSlots(): CourseTimeSlot[] {
-  return [...COURSE_TIME_SLOTS]
+export function getCourseTimeSlots(courses: Course[] = []): CourseTimeSlot[] {
+  return COURSE_TIME_SLOTS.map((reference) => {
+    const counts = new Map<string, { count: number; start_time: string; end_time: string }>()
+    for (const course of courses) {
+      if (getCourseDisplaySlot(course)?.section !== reference.section || !course.start_time || !course.end_time) continue
+      const start = parseTimeValue(course.start_time)
+      const end = parseTimeValue(course.end_time)
+      if (start === null || end === null || start >= end) continue
+      const key = `${course.start_time}-${course.end_time}`
+      counts.set(key, { count: (counts.get(key)?.count ?? 0) + 1, start_time: course.start_time, end_time: course.end_time })
+    }
+    const preferred = [...counts.values()].sort((a, b) => b.count - a.count || a.start_time.localeCompare(b.start_time))[0]
+    return preferred ? { ...reference, start_time: preferred.start_time, end_time: preferred.end_time } : { ...reference }
+  })
+}
+
+/** Timetable axes describe saved clocks, not a hard-coded school's bell schedule. */
+export function getTimetableTimeSlots(courses: Course[]): CourseTimeSlot[] {
+  return COURSE_TIME_SLOTS.flatMap((reference) => {
+    const times = new Map<string, CourseTimeSlot>()
+    for (const course of courses) {
+      if (getCourseDisplaySlot(course)?.section !== reference.section || !course.start_time || !course.end_time) continue
+      const start = parseTimeValue(course.start_time)
+      const end = parseTimeValue(course.end_time)
+      if (start === null || end === null || start >= end) continue
+      const exact = courseUsesStandardSlotTime(course, reference)
+      times.set(`${course.start_time}-${course.end_time}`, {
+        label: exact ? reference.label : '自定义时段',
+        section: exact ? reference.section : '自定',
+        start_time: course.start_time, end_time: course.end_time
+      })
+    }
+    return times.size ? [...times.values()] : [{ ...reference, isReference: true }]
+  }).sort((left, right) => left.start_time.localeCompare(right.start_time) || left.end_time.localeCompare(right.end_time))
 }
 
 export function formatCourseLocation(
@@ -475,23 +511,51 @@ export function isCourseActiveInWeek(
   return true
 }
 
-export function filterCoursesByWeek(courses: Course[], selectedWeek: number): Course[] {
-  return courses.filter((course) => isCourseActiveInWeek(course.weeks, selectedWeek))
+/** One occurrence rule for timetable, home and today's notifications. */
+export function coursesOnDate(courses: Course[], date: string, semester: SemesterState | null): Course[] {
+  const stamp = Date.parse(`${date}T00:00:00Z`)
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(stamp) || new Date(stamp).toISOString().slice(0, 10) !== date) return []
+  const weekday = new Date(stamp).getUTCDay() || 7
+  const week = semester?.start_date ? Math.floor((stamp - Date.parse(semester.start_date)) / 604_800_000) + 1 : 0
+  const cancelled = new Set(courses.filter(course => course.makeup?.cancel_source && course.makeup.source_date === date)
+    .map(course => course.makeup!.source_course_id))
+  return courses.filter(course => course.makeup ? course.makeup.date === date
+    : Boolean(semester?.total_weeks && week >= 1 && week <= semester.total_weeks && course.weekday === weekday
+      && !cancelled.has(course.id) && isCourseActiveInWeek(course.weeks, week)))
+    .map(course => courseAtDate(course, date, semester))
+    .sort((a, b) => (a.start_time ?? '').localeCompare(b.start_time ?? '') || a.id - b.id)
 }
 
+export function filterCoursesByWeek(courses: Course[], selectedWeek: number, semester?: SemesterState | null): Course[] {
+  if (!semester?.start_date) return courses.filter(course => !course.makeup && isCourseActiveInWeek(course.weeks, selectedWeek))
+  const monday = Date.parse(semester.start_date) + (selectedWeek - 1) * 604_800_000
+  return WEEKDAYS.flatMap(({ value }) => coursesOnDate(courses,
+    new Date(monday + (value - 1) * 86_400_000).toISOString().slice(0, 10), semester))
+}
+
+export function isCourseOngoing(course: Course, now = new Date()): boolean {
+  const current = campusTime(now)
+  const start = parseTimeValue(course.start_time)
+  const end = parseTimeValue(course.end_time)
+  return (!course.makeup || course.makeup.date === current.date) && course.weekday === current.weekday && start !== null && end !== null
+    && start <= current.minutes && current.minutes < end
+}
+
+/** Upcoming means strictly before its start. At the bell, move on; never wrap weeks. */
 export function findNextCourse(courses: Course[], now = new Date()): Course | null {
-  const currentWeekday = now.getDay() === 0 ? 7 : now.getDay()
-  const currentMinutes = now.getHours() * 60 + now.getMinutes()
+  const { weekday: currentWeekday, minutes: currentMinutes } = campusTime(now)
 
   return (
     courses
+      .filter(course => !course.makeup || course.makeup.date >= campusTime(now).date)
       .map((course) => {
-        const dayOffset = (course.weekday - currentWeekday + 7) % 7
+        const dayOffset = course.weekday - currentWeekday
         const startMinutes = parseTimeValue(course.start_time)
-        return { course, dayOffset, startMinutes }
+        const endMinutes = parseTimeValue(course.end_time)
+        return { course, dayOffset, startMinutes, endMinutes }
       })
-      .filter(({ dayOffset, startMinutes }) => {
-        if (startMinutes === null) {
+      .filter(({ dayOffset, startMinutes, endMinutes }) => {
+        if (dayOffset < 0 || startMinutes === null || endMinutes === null || endMinutes <= startMinutes) {
           return false
         }
         return dayOffset > 0 || startMinutes > currentMinutes

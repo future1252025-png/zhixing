@@ -6,6 +6,19 @@ let unauthorizedHandler: UnauthorizedHandler | null = null
 let unauthorizedPromise: Promise<void> | null = null
 let unauthorizedHandled = false
 
+const BUSINESS_ERROR_FALLBACKS: Readonly<Record<string, string>> = {
+  semester_unconfigured: '尚未设置学期，请先完成学期设置',
+  course_not_found: '课程不存在',
+  building_not_found: '建筑不存在',
+  invalid_room_name: '上课地点尚未确认，请选择或填写有效地点',
+  user_not_found: '用户不存在'
+}
+
+function localizedBusinessMessage(code: string, message: string): string {
+  // 新后端直接返回中文；此映射同时兼容仍缓存旧英文响应的网页或 APK。
+  return /[\u3400-\u9fff]/u.test(message) ? message : (BUSINESS_ERROR_FALLBACKS[code] ?? message)
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
 }
@@ -13,6 +26,18 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function responseStatus(error: unknown): number {
   if (!isRecord(error) || !isRecord(error.response)) return 0
   return typeof error.response.status === 'number' ? error.response.status : 0
+}
+
+function requestPath(error: unknown): string {
+  if (!isRecord(error)) return ''
+  const response = isRecord(error.response) ? error.response : null
+  const config = isRecord(error.config) ? error.config : response && isRecord(response.config) ? response.config : null
+  if (!config || typeof config.url !== 'string') return ''
+  try {
+    return new URL(config.url, 'http://localhost').pathname
+  } catch {
+    return ''
+  }
 }
 
 export function extractBusinessError(error: unknown): BusinessError {
@@ -32,9 +57,20 @@ export function extractBusinessError(error: unknown): BusinessError {
     return {
       status,
       code: data.code,
-      message: data.message,
+      message: localizedBusinessMessage(data.code, data.message),
       fields: [...data.fields],
       details: data.details
+    }
+  }
+  if ((status === 404 || status === 405) && /^\/api\/courses\/makeups(?:\/|$)/u.test(requestPath(error))) {
+    // An older backend has no makeup POST route. It may match /courses/{id}
+    // instead and respond 405. Keep real structured course-not-found errors above.
+    return {
+      status,
+      code: 'makeup_api_unavailable',
+      message: '补课服务暂不可用，请确认平板后端已更新后重试。已填写的内容会保留。',
+      fields: [],
+      details: {}
     }
   }
   if (data && typeof data.detail === 'string' && data.detail.trim().length > 0) {

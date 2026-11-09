@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from datetime import timedelta
 from typing import Literal
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
+from app.core import errors
 from app.core.errors import BusinessError
 from app.models import Building, Course
 from app.schemas.course import (
@@ -28,6 +30,7 @@ from app.services.user_mutation_guard import (
     require_user_mutation_guard,
 )
 from app.services.week_rule import WeekExpressionError, normalize_weeks
+from app.services.course_calendar import effective_weeks
 
 
 CourseSourceKind = Literal["manual", "import"]
@@ -73,7 +76,7 @@ def add_course(
         require_user_mutation_guard(session, user_id, guard)
     setting = get_setting(session, user_id)
     if setting is None and source_kind == "manual":
-        raise BusinessError(409, "semester_unconfigured", "Semester is not configured")
+        raise BusinessError(409, "semester_unconfigured", errors.SEMESTER_UNCONFIGURED)
     max_week = (
         setting.total_weeks
         if setting is not None
@@ -117,12 +120,13 @@ def validate_course_batch(
         else UNCONFIGURED_IMPORT_MAX_WEEKS
     )
 
-    existing_values = [] if replace_existing else _existing_course_values(
+    existing_values = _existing_course_values(
         session,
         user_id,
         max_week,
         excluded_course_id=None,
         allow_other_invalid=False,
+        makeups_only=replace_existing,
     )
     comparison_values = list(existing_values)
     batch_row_refs: dict[int, str] = {}
@@ -145,7 +149,7 @@ def validate_course_batch(
                 comparison_values,
                 max_week=max_week,
             )
-            if candidate is not None
+            if candidate is not None and not getattr(setting, "time_rules", None)
             else []
         )
         if conflicts:
@@ -178,6 +182,11 @@ def validate_course_batch(
             batch_row_refs[synthetic_id] = row_ref
             comparison_values.append(candidate)
 
+    if getattr(setting, "time_rules", None):
+        rows = [row for row in list_courses(session, user_id) if not replace_existing or row.makeup]
+        rows.extend(Course(id=-index, user_id=user_id, **payload.model_dump())
+                    for index, (_, payload) in enumerate(validated, 1))
+        _validate_dated_times(rows, setting)
     return validated
 
 
@@ -195,10 +204,12 @@ def update_course(
         require_user_mutation_guard(session, user_id, guard)
     setting = get_setting(session, user_id)
     if setting is None:
-        raise BusinessError(409, "semester_unconfigured", "Semester is not configured")
+        raise BusinessError(409, "semester_unconfigured", errors.SEMESTER_UNCONFIGURED)
     course = get_course_for_user(session, course_id, user_id)
     if course is None:
-        raise BusinessError(404, "course_not_found", "Course not found")
+        raise BusinessError(404, "course_not_found", errors.COURSE_NOT_FOUND)
+    if course.makeup:
+        raise BusinessError(422, "makeup_editor_required", "请使用补课编辑入口，仅修改这次安排")
     repairing_legacy_course = _course_has_integrity_issues(course, setting.total_weeks)
     changes = payload.model_dump(exclude_unset=True)
     values = {
@@ -240,7 +251,10 @@ def delete_course(
         require_user_mutation_guard(session, user_id, guard)
     course = get_course_for_user(session, course_id, user_id)
     if course is None:
-        raise BusinessError(404, "course_not_found", "Course not found")
+        raise BusinessError(404, "course_not_found", errors.COURSE_NOT_FOUND)
+    if course.makeup:
+        from app.services.course_makeup_service import validate_makeup_removal
+        validate_makeup_removal(session, user_id, [course])
     session.delete(course)
     session.flush()
 
@@ -264,6 +278,17 @@ def _validate_course_values(
         require_location=require_location,
         allow_incomplete_schedule=allow_incomplete_schedule,
     )
+    setting = get_setting(session, user_id)
+    if getattr(setting, "time_rules", None):
+        rows = [row for row in list_courses(session, user_id) if row.id != excluded_course_id]
+        rows.append(Course(id=excluded_course_id or -1, user_id=user_id, **{**values, "weeks": normalized_weeks}))
+        _validate_dated_times(rows, setting)
+        return normalized_weeks
+    if candidate is not None and excluded_course_id is not None:
+        from dataclasses import replace
+        source = Course(id=excluded_course_id, weekday=candidate.weekday, weeks=normalized_weeks)
+        weeks = effective_weeks(source, get_setting(session, user_id), list_courses(session, user_id), max_week)
+        candidate = replace(candidate, weeks=",".join(map(str, sorted(weeks)))) if weeks else None
     conflicts = (
         detect_conflicts(
             candidate,
@@ -284,6 +309,12 @@ def _validate_course_values(
     return normalized_weeks
 
 
+def _validate_dated_times(courses, setting):
+    from app.services.course_makeup_service import validate_dates
+    dates = {setting.start_date + timedelta(days=day) for day in range(setting.total_weeks * 7)}
+    validate_dates(courses, setting, dates)
+
+
 def _validated_course_value(
     session: Session,
     values: dict[str, object],
@@ -295,10 +326,20 @@ def _validated_course_value(
 ) -> tuple[str, CourseValue | None]:
     if require_location:
         if not building_exists(session, _required_int(values, "building_id")):
-            raise BusinessError(404, "building_not_found", "Building not found", fields=["building_id"])
+            raise BusinessError(
+                404,
+                "building_not_found",
+                errors.BUILDING_NOT_FOUND,
+                fields=["building_id"],
+            )
         room_name = _required_str(values, "room_name")
         if location_requires_review(room_name):
-            raise BusinessError(422, "invalid_room_name", "Room name must be a confirmed location", fields=["room_name"])
+            raise BusinessError(
+                422,
+                "invalid_room_name",
+                errors.ROOM_NAME_REQUIRES_CONFIRMATION,
+                fields=["room_name"],
+            )
     try:
         normalized_weeks = normalize_weeks(_required_str(values, "weeks"), max_week=max_week)
     except WeekExpressionError as exc:
@@ -331,6 +372,7 @@ def _existing_course_values(
     max_week: int,
     excluded_course_id: int | None,
     allow_other_invalid: bool,
+    makeups_only: bool = False,
 ) -> list[CourseValue]:
     values: list[CourseValue] = []
     courses = session.scalars(
@@ -338,7 +380,10 @@ def _existing_course_values(
         .where(Course.user_id == user_id)
         .order_by(Course.weekday.asc(), Course.start_time.asc(), Course.id.asc())
     ).all()
+    setting = get_setting(session, user_id)
     for course in courses:
+        if makeups_only and not course.makeup:
+            continue
         if course.id == excluded_course_id:
             continue
         if course.start_time is None and course.end_time is None:
@@ -365,9 +410,13 @@ def _existing_course_values(
             raise BusinessError(
                 409,
                 "course_data_invalid",
-                "Existing course data must be repaired before changing the schedule",
+                errors.COURSE_DATA_REQUIRES_REPAIR,
                 details={"course_id": course.id, "course_name": course.course_name, "issues": issues},
             )
+        active_weeks = effective_weeks(course, setting, list(courses), max_week)
+        if not active_weeks:
+            continue
+        weeks = ",".join(map(str, sorted(active_weeks)))
         values.append(
             CourseValue(
                 id=course.id,

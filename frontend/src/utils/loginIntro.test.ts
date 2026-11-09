@@ -166,7 +166,7 @@ describe('login intro flag', () => {
       async () => activeSemester(13),
       {
         introStorage,
-        now: new Date('2026-06-01T12:00:00')
+        now: new Date('2026-06-01T12:00:00+08:00')
       }
     )
 

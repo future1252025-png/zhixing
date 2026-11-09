@@ -8,8 +8,13 @@ import { getBuildings } from '@/api/buildings'
 import { getCourses } from '@/api/courses'
 import { fetchSemester } from '@/api/semester'
 import { useAuthStore } from '@/stores/auth'
+import { useSemesterStore, SEMESTER_FRESH_MS } from '@/stores/semester'
+import { useCoursesStore } from '@/stores/courses'
+import { rememberRecentChatEntry } from '@/utils/chat'
+import { createScopedStorage } from '@/utils/scopedStorage'
 import type { Course } from '@/types/course'
 import HomePage from './HomePage.vue'
+import selectionFixture from '../../../tests/fixtures/course-selection.json'
 
 vi.mock('@/api/buildings', () => ({ getBuildings: vi.fn() }))
 vi.mock('@/api/courses', () => ({ getCourses: vi.fn() }))
@@ -44,12 +49,10 @@ function course(overrides: Partial<Course>): Course {
   }
 }
 
-async function mountHome() {
-  const pinia = createPinia()
+async function mountHome(pinia = createPinia()) {
   useAuthStore(pinia).currentUser = {
     id: 7,
-    student_id: null,
-    username: 'student',
+    student_id: '20240001',
     nickname: '同学',
     avatar_text: null,
     avatar_color: null,
@@ -61,6 +64,7 @@ async function mountHome() {
     history: createMemoryHistory(),
     routes: [
       { path: '/', component: EmptyRoute },
+      { path: '/map', component: EmptyRoute },
       { path: '/courses', component: EmptyRoute },
       { path: '/courses/import', component: EmptyRoute },
       { path: '/schedule', component: EmptyRoute },
@@ -114,6 +118,97 @@ describe('HomePage', () => {
     vi.clearAllMocks()
   })
 
+  it('shows courses before a slow building request finishes', async () => {
+    let finishBuildings!: (value: Awaited<ReturnType<typeof getBuildings>>) => void
+    vi.mocked(getBuildings).mockReturnValueOnce(new Promise(resolve => { finishBuildings = resolve }))
+    vi.mocked(getCourses).mockResolvedValue([course({ course_name: '无需等地图的课程' })])
+    const wrapper = await mountHome()
+    expect(wrapper.get('.today-card').text()).toContain('无需等地图的课程')
+    expect(wrapper.find('.home-semester-loading').exists()).toBe(false)
+    finishBuildings([])
+    await flushPromises()
+    wrapper.unmount()
+  })
+
+  it('isolates building failures from courses and locally saved recent chats', async () => {
+    vi.mocked(getBuildings).mockRejectedValueOnce(new Error('map offline'))
+    vi.mocked(getCourses).mockResolvedValue([course({ course_name: '正常课程' })])
+    rememberRecentChatEntry(createScopedStorage(7), { buildingId: 2, buildingName: '综合教学楼', roomName: '410' })
+    const wrapper = await mountHome()
+    expect(wrapper.get('.today-card').text()).toContain('正常课程')
+    expect(wrapper.get('.recent-section').text()).toContain('410')
+    expect(wrapper.get('.search-sheet').text()).toContain('地点暂未加载')
+    wrapper.unmount()
+  })
+
+  it('does not show a loading card or refetch on a warm revisit, even with a slow stale refresh', async () => {
+    const pinia = createPinia()
+    vi.mocked(getCourses).mockResolvedValue([course({ course_name: '缓存课程' })])
+    const first = await mountHome(pinia)
+    first.unmount()
+    const second = await mountHome(pinia)
+    expect(second.get('.today-card').text()).toContain('缓存课程')
+    expect(fetchSemester).toHaveBeenCalledTimes(1)
+    expect(getCourses).toHaveBeenCalledTimes(1)
+    second.unmount()
+    vi.advanceTimersByTime(SEMESTER_FRESH_MS)
+    let rejectRefresh!: (reason: unknown) => void
+    vi.mocked(fetchSemester).mockReturnValueOnce(new Promise((_, reject) => { rejectRefresh = reject }))
+    const third = await mountHome(pinia)
+    expect(useSemesterStore(pinia).loading).toBe(true)
+    expect(third.find('.home-semester-loading').exists()).toBe(false)
+    expect(third.get('.today-card').text()).toContain('缓存课程')
+    rejectRefresh(new Error('offline'))
+    await flushPromises()
+    expect(third.get('.today-card').text()).toContain('缓存课程')
+    expect(third.text()).toContain('当前按已保存设置显示')
+    // Store updates remain visible without remounting after import/edit or background sync.
+    useCoursesStore(pinia).courses = [course({ course_name: '更新后的课程' })]
+    await flushPromises()
+    expect(third.get('.today-card').text()).toContain('更新后的课程')
+    third.unmount()
+  })
+
+  it('removes popular places and opens the map from the channel shortcut when there is no history', async () => {
+    vi.mocked(getCourses).mockResolvedValue([])
+    const wrapper = await mountHome()
+    expect(wrapper.find('.places-section').exists()).toBe(false)
+    expect(wrapper.find('.place-grid').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('校园里的常去处')
+    expect(wrapper.find('[data-testid="campus-map"]').exists()).toBe(true)
+    await wrapper.get('.note-lilac').trigger('click')
+    await flushPromises()
+    expect(wrapper.vm.$router.currentRoute.value.path).toBe('/map')
+    wrapper.unmount()
+  })
+
+  it('opens the current-week shortcut at the week selector rather than the page header', async () => {
+    vi.mocked(getCourses).mockResolvedValue([])
+    const wrapper = await mountHome()
+    await wrapper.get('.note-yellow').trigger('click')
+    await flushPromises()
+    expect(wrapper.vm.$router.currentRoute.value.fullPath).toBe('/courses#current-week')
+    wrapper.unmount()
+  })
+
+  it('preserves recent places and the shortcut to the last chat', async () => {
+    vi.mocked(getCourses).mockResolvedValue([])
+    rememberRecentChatEntry(createScopedStorage(7), {
+      buildingId: 2, buildingName: '综合教学楼', roomName: '410'
+    })
+    const wrapper = await mountHome()
+    expect(wrapper.get('.recent-section').text()).toContain('最近去过')
+    expect(wrapper.get('.recent-row button').text()).toContain('410')
+    await wrapper.get('.recent-row button').trigger('click')
+    await flushPromises()
+    expect(wrapper.vm.$router.currentRoute.value.fullPath).toBe('/buildings/2/messages?room_name=410')
+    await wrapper.vm.$router.push('/')
+    await wrapper.get('.note-lilac').trigger('click')
+    await flushPromises()
+    expect(wrapper.vm.$router.currentRoute.value.fullPath).toBe('/buildings/2/messages?room_name=410')
+    wrapper.unmount()
+  })
+
   it('uses the semester current week and ignores the timetable browsing week', async () => {
     vi.mocked(getCourses).mockResolvedValue([
       course({ id: 4, course_name: '真实周课程', weeks: '4' }),
@@ -126,6 +221,33 @@ describe('HomePage', () => {
     expect(wrapper.text()).toContain('真实周课程')
     expect(wrapper.text()).toContain('综合教学楼 · 东区三层 A101')
     expect(wrapper.text()).not.toContain('浏览周课程')
+    wrapper.unmount()
+  })
+
+  it('shows Tuesday once the final Monday course has started', async () => {
+    vi.setSystemTime(new Date('2026-08-31T14:00:45+08:00'))
+    vi.mocked(fetchSemester).mockResolvedValue({
+      status: 'active',
+      start_date: '2026-08-31',
+      total_weeks: 20,
+      current_week: 1
+    })
+    vi.mocked(getCourses).mockResolvedValue([
+      course({
+        id: 1,
+        course_name: '周一下午课',
+        weekday: 1,
+        start_time: '14:00',
+        end_time: '15:40',
+        weeks: '1'
+      }),
+      course({ id: 2, course_name: '周二第一节', weekday: 2, start_time: '08:00', weeks: '1' })
+    ])
+
+    const wrapper = await mountHome()
+
+    expect(wrapper.text()).not.toContain('周一下午课')
+    expect(wrapper.text()).toContain('周二第一节')
     wrapper.unmount()
   })
 
@@ -147,6 +269,43 @@ describe('HomePage', () => {
     await flushPromises()
 
     expect(router.currentRoute.value.path).toBe('/courses/5/edit')
+    wrapper.unmount()
+  })
+
+  it.each(['2026-09-07T14:09:00+08:00', '2026-09-07T14:30:00+08:00'])('shows Java after the preceding course has started at %s', async (time) => {
+    vi.setSystemTime(new Date(time))
+    vi.mocked(getCourses).mockResolvedValue(selectionFixture.courses.map(course))
+    const wrapper = await mountHome()
+    expect(wrapper.get('.today-copy').text()).not.toContain('习近平新时代中国特色社会主义思想概论')
+    expect(wrapper.get('.today-copy').text()).toContain('接下来的课程')
+    expect(wrapper.get('.today-copy').text()).toContain('JAVA应用开发')
+    expect(wrapper.text()).toContain('真实第 2 周')
+    wrapper.unmount()
+  })
+
+  it('switches at the start boundary while staying on the page, without reloading', async () => {
+    vi.setSystemTime(new Date('2026-09-07T13:59:59+08:00'))
+    vi.mocked(getCourses).mockResolvedValue(selectionFixture.courses.map(course))
+    const wrapper = await mountHome()
+    expect(wrapper.get('.today-copy').text()).toContain('习近平新时代中国特色社会主义思想概论')
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(wrapper.get('.today-copy').text()).toContain('JAVA应用开发')
+    expect(wrapper.get('.today-copy').text()).not.toContain('正在上课')
+    expect(getCourses).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
+  })
+
+  it('recomputes date and teaching week on resume without using the cached week', async () => {
+    vi.setSystemTime(new Date('2026-09-13T23:59:59+08:00'))
+    vi.mocked(getCourses).mockResolvedValue(selectionFixture.courses.map(course))
+    const wrapper = await mountHome()
+    expect(wrapper.find('.home-next-course').exists()).toBe(false)
+    vi.setSystemTime(new Date('2026-09-14T14:09:00+08:00'))
+    window.dispatchEvent(new Event('focus'))
+    await flushPromises()
+    expect(wrapper.text()).toContain('真实第 3 周')
+    expect(wrapper.get('.today-copy').text()).toContain('JAVA应用开发')
+    expect(wrapper.get('.home-top time').text()).toContain('9月14日')
     wrapper.unmount()
   })
 

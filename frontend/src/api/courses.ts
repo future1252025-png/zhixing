@@ -4,9 +4,11 @@ import type {
   CoursePayload,
   CourseUpdatePayload
 } from '@/types/course'
+import type { MakeupPayload, MakeupTiming } from '@/types/course'
 import type {
   ImportCommitResponse,
-  ImportPreviewResponse
+  ImportPreviewResponse,
+  ImportTimeResolution
 } from '@/types/courseImport'
 
 export async function getCourses(): Promise<Course[]> {
@@ -31,6 +33,16 @@ export async function deleteCourse(courseId: number): Promise<void> {
   await request.delete(`/api/courses/${courseId}`)
 }
 
+export async function createMakeups(payload: MakeupPayload): Promise<Course[]> {
+  return (await request.post<Course[]>('/api/courses/makeups', payload)).data
+}
+export async function updateMakeup(id: number, payload: MakeupTiming): Promise<Course> {
+  return (await request.put<Course>(`/api/courses/makeups/${id}`, payload)).data
+}
+export async function deleteMakeupBatch(batchId: string): Promise<void> {
+  await request.delete(`/api/courses/makeups/batches/${encodeURIComponent(batchId)}`)
+}
+
 export async function previewCourseImport(
   file: File
 ): Promise<ImportPreviewResponse> {
@@ -49,13 +61,15 @@ export async function previewCourseImport(
 export async function commitCourseImport(
   file: File,
   sha256: string,
-  excludedRowRefs: string[] = []
+  excludedRowRefs: string[] = [],
+  timeResolutions: ImportTimeResolution[] = []
 ): Promise<ImportCommitResponse> {
   const formData = new FormData()
   formData.append('file', file)
   formData.append('manifest', JSON.stringify({
     sha256,
-    ...(excludedRowRefs.length ? { excluded_row_refs: excludedRowRefs } : {})
+    ...(excludedRowRefs.length ? { excluded_row_refs: excludedRowRefs } : {}),
+    ...(timeResolutions.length ? { time_resolutions: timeResolutions } : {})
   }))
   const response = await request.post<ImportCommitResponse>(
     '/api/courses/import',

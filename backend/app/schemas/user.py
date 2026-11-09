@@ -1,14 +1,13 @@
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class UserRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
-    student_id: str | None = None
-    username: str
+    student_id: str
     nickname: str
     avatar_text: str | None = None
     avatar_color: str | None = None
@@ -23,3 +22,11 @@ class UserProfileUpdate(BaseModel):
         default=None,
         pattern=r"^#[0-9a-fA-F]{6}$",
     )
+
+    @field_validator("nickname")
+    @classmethod
+    def normalize_nickname(cls, value: str) -> str:
+        nickname = value.strip()
+        if not nickname:
+            raise ValueError("Nickname cannot be empty")
+        return nickname

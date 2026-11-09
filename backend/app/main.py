@@ -15,10 +15,70 @@ from app.api.health import router as health_router
 from app.api.messages import router as messages_router
 from app.api.schedule import router as schedule_router
 from app.api.semester import router as semester_router
+from app.api.reminders import router as reminders_router
 from app.core.config import settings, validate_settings
 from app.core.errors import BusinessError
 from app.db.database import init_db
 from app.schemas.error import BusinessErrorResponse
+
+
+MAX_REQUEST_BODY_BYTES = 11 * 1024 * 1024
+
+
+class RequestBodyTooLarge(Exception):
+    pass
+
+
+class RequestBodyLimitMiddleware:
+    """Reject oversized bodies before multipart parsing or endpoint execution."""
+
+    def __init__(self, app, max_bytes: int = MAX_REQUEST_BODY_BYTES) -> None:
+        self.app = app
+        self.max_bytes = max_bytes
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        headers = {key.lower(): value for key, value in scope.get("headers", [])}
+        content_length = headers.get(b"content-length")
+        if content_length is not None:
+            try:
+                declared_size = int(content_length)
+            except ValueError:
+                declared_size = 0
+            if declared_size > self.max_bytes:
+                await self._send_rejection(scope, receive, send)
+                return
+
+        received = 0
+
+        async def limited_receive():
+            nonlocal received
+            message = await receive()
+            if message["type"] == "http.request":
+                received += len(message.get("body", b""))
+                if received > self.max_bytes:
+                    raise RequestBodyTooLarge()
+            return message
+
+        try:
+            await self.app(scope, limited_receive, send)
+        except RequestBodyTooLarge:
+            await self._send_rejection(scope, receive, send)
+
+    async def _send_rejection(self, scope, receive, send) -> None:
+        response = JSONResponse(
+            status_code=413,
+            content={
+                "code": "request_too_large",
+                "message": "请求内容过大",
+                "fields": ["body"],
+                "details": {"max_bytes": self.max_bytes},
+            },
+        )
+        await response(scope, receive, send)
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
@@ -79,10 +139,13 @@ async def request_validation_error_handler(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=list(settings.cors_allow_origins),
-    allow_credentials=False,  # Pure Bearer-token auth; no cookies are ever used.
+    # The web client keeps its rotating refresh token in an HttpOnly cookie.
+    # Origins are explicit and never wildcarded, so credentialed CORS is safe.
+    allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type"],
 )
+app.add_middleware(RequestBodyLimitMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
 
 app.include_router(health_router)
@@ -91,6 +154,7 @@ app.include_router(buildings_router)
 app.include_router(messages_router)
 app.include_router(courses_router)
 app.include_router(schedule_router)
+app.include_router(reminders_router)
 app.include_router(semester_router)
 
 

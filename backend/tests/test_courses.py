@@ -74,15 +74,14 @@ def auth_headers(
     client.post(
         "/api/auth/register",
         json={
-            "username": username,
+            "student_id": username,
             "password": "secret123",
             "nickname": username.title(),
-            "student_id": f"{username}-2024",
         },
     )
     login = client.post(
         "/api/auth/login",
-        json={"username": username, "password": "secret123"},
+        json={"student_id": username, "password": "secret123"},
     )
     assert login.status_code == 200
     headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
@@ -394,7 +393,7 @@ def test_update_course_with_invalid_time_range_returns_422(
     assert response.status_code == 422
     assert response.json()["code"] == "invalid_course_time"
     assert response.json()["fields"] == ["start_time", "end_time"]
-    assert "end_time" in response.json()["message"].lower()
+    assert response.json()["message"] == "下课时间必须晚于上课时间"
 
 
 def test_user_cannot_access_another_users_course(
@@ -466,7 +465,7 @@ def test_course_writes_require_a_configured_semester(
     assert response.status_code == 409
     assert response.json() == {
         "code": "semester_unconfigured",
-        "message": "Semester is not configured",
+        "message": "尚未设置学期，请先完成学期设置",
         "fields": [],
         "details": {},
     }
@@ -494,7 +493,7 @@ def test_course_writes_return_structured_business_errors(
     assert placeholder.status_code == 422
     assert placeholder.json() == {
         "code": "invalid_room_name",
-        "message": "Room name must be a confirmed location",
+        "message": "上课地点尚未确认，请选择或填写有效地点",
         "fields": ["room_name"],
         "details": {},
     }
@@ -525,7 +524,7 @@ def test_week_31_is_a_standard_schema_validation_error(
     assert response.json()["details"]["errors"] == [
         {
             "loc": ["body", "weeks"],
-            "msg": "Value error, Week must be between 1 and 30",
+            "msg": "Value error, 周次必须在第 1 至 30 周之间",
             "type": "value_error",
         }
     ]
@@ -711,7 +710,7 @@ def test_course_service_flushes_but_never_commits(
     with SessionLocal() as session:
         building = session.query(Building).first()
         assert building is not None
-        user = User(username="service", student_id="service-2026", nickname="Service", password_hash="unused", role="student")
+        user = User(username="service", student_id="service", nickname="Service", password_hash="unused", role="student")
         session.add(user)
         session.flush()
         session.add(SemesterSetting(user_id=user.id, start_date=date(2026, 8, 31), total_weeks=20))
@@ -788,7 +787,7 @@ def test_course_routes_own_each_real_session_transaction_boundary(
         assert building is not None
         user = User(
             username="route-service",
-            student_id="route-service-2026",
+            student_id="route-service",
             nickname="Route Service",
             password_hash="unused",
             role="student",
@@ -849,7 +848,7 @@ def test_failed_route_update_rolls_back_and_keeps_the_same_session_usable(
         assert building is not None
         user = User(
             username="rollback-service",
-            student_id="rollback-service-2026",
+            student_id="rollback-service",
             nickname="Rollback Service",
             password_hash="unused",
             role="student",
@@ -1228,7 +1227,7 @@ def test_unconfigured_legacy_courses_can_be_repaired_through_the_api(
     with SessionLocal() as session:
         user = User(
             username="legacy-repair",
-            student_id="legacy-repair-2024",
+            student_id="legacy-repair",
             nickname="Legacy Repair",
             password_hash=hash_password("secret123"),
             role="student",
@@ -1247,7 +1246,10 @@ def test_unconfigured_legacy_courses_can_be_repaired_through_the_api(
         session.commit()
         first_id, second_id = first.id, second.id
 
-    login = client.post("/api/auth/login", json={"username": "legacy-repair", "password": "secret123"})
+    login = client.post(
+        "/api/auth/login",
+        json={"student_id": "legacy-repair", "password": "secret123"},
+    )
     headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
     configured = client.put("/api/semester", json={"start_date": "2026-08-31", "total_weeks": 16}, headers=headers)
     blocked = client.post("/api/courses", json=course_payload(building_id, weekday=3), headers=headers)
